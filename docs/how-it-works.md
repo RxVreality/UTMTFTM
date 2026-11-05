@@ -76,6 +76,28 @@ The result is a binding file in `bindings/` in the data folder, with its `contro
 
 None of it runs unless the page is open, except a string compare once a second, and on a game's start it applies a saved layout if there's one to apply. `test_bindings` prints what it costs. On my PC that's about 15 ms to read the controller files, 40 ms to find a game's bindings and 65 ms to draw the four controllers the first time, then about 30 ms to redraw the page when the laser moves.
 
+## Combos
+
+A combo is a chord in the game's binding file, the same thing SteamVR's own binding screen writes:
+
+```json
+{"output": "/actions/main/in/Jump", "inputs": [["/user/hand/right/input/a", "touch"], ["/user/hand/right/input/b", "touch"]]}
+```
+
+SteamVR does all the work, so nothing of ours runs while you play. VRChat players build these by hand, because touching a control doesn't press it, and that leaves room on a full controller. One control on its own goes in as an ordinary binding of its touch or press.
+
+The chord goes in the set its action belongs to, on top of whatever that game's on: the developer's binding exactly as it was, a layout from the Bindings tab, or the translation SteamVR would have made. Each control in it gets a source in that set if it hasn't got one, with nothing on it. Every chord I could find on disk sits on a control that has one, and SteamVR's own files have empty ones. Removing the last combo puts the game back on what it had.
+
+What it can set off is whatever's on-or-off: the game's action file if it has one, which also lists actions with no button at all, and otherwise what's in its binding. Sticks and half-pulls can't be set off by a combo, so they aren't on the list.
+
+It goes live the same way a layout does, so it takes effect the next time the game launches. SteamVR doesn't say whether a chord stops its parts doing what they normally do, so the page warns about pressing a control that's already in use.
+
+## Fine adjust
+
+Each arrow changes one of the six numbers and saves it, like anything else on that page: `nudged()` in `src/placement.h`. Distance keeps to the limit unless the hand's already past it and the tap brings it closer. Rotation has no limit and wraps at 180.
+
+Normally both hands stand aside while the dashboard's open, so its pointers point true. While you're fine adjusting, the hand that isn't holding the laser stays moved, which is what lets you watch it. `GetPrimaryDashboardDevice` says which that is, and if it says neither, both stand aside as usual. Whether you can see the hand behind the dashboard is up to the game.
+
 ## Tests
 
 None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh` on ARM64 Linux.
@@ -97,6 +119,7 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.
 - Any layout from the bindings page in a real game. What's written matches SteamVR's own translation and uses the settings route that's worked for offsets, but only a game can show it's right.
+- A combo in a real game, and whether SteamVR's chords work the same for OpenXR games as for SteamVR Input ones.
 - Index's squeeze threshold. Its grip reads as fully closed just from holding the controller, so the binding goes by squeeze force. 0.6 is a judgement call.
 
 ## Known limits

@@ -2,6 +2,12 @@
 
 ## Next
 
+A Combos tab: pick controls on a picture of your controllers, tap once for touch or twice for press, then pick what they set off in the game you're in. It's the same chords SteamVR's own binding screen makes, without the binding screen. Touching doesn't press, so a combo of touches won't set off what's already on those buttons. New combos start working the next time the game launches.
+
+Fine adjust on the Hands tab: arrows either side of each number, for when a hand's nearly right and you'd like it 1 degree to the left. They go 1 mm and 1 degree a tap, or 1 cm and 5 degrees. The hand you aren't pointing with moves in the game as you tap, with the dashboard still open.
+
+Yaw and roll now read positive to the right, so all six numbers go the way their names say. Saved offsets don't change, only how they read.
+
 On the Bindings tab, pointing at a button now lights up the one that does the same thing on the other controller, in games that name their buttons. In No Man's Sky, Jump on your Frame's A used to light up the Quest's A, and now it lights up the Quest's B.
 
 ## 0.3.0

@@ -103,6 +103,28 @@ expect "what's chosen is saved" "[ -f '$DATA/bindings.json' ]"
 cp "$DATA/bindings.json" "$OUT/bindings.json"
 rm -f "$DATA/bindings.json"
 
+echo "--- fine adjust"
+: > "$FAKE_STEAMVR_LOG"
+rm -f "$DATA/profiles.json"
+FAKE_STEAMVR_SCENARIO=fine timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-fine.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/fine.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+expect "the adjustment was saved for the game" "grep -q 'steam.app.12345' '$DATA/profiles.json' && grep -q '\"override_global\" : true' '$DATA/profiles.json'"
+
+echo "--- the combos page"
+: > "$FAKE_STEAMVR_LOG"
+mkdir -p "$OUT/combos"
+FAKE_STEAMVR_SHOTS="$OUT/combos" FAKE_STEAMVR_SCENARIO=combos timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-combos.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/combos.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+rm -f "$DATA/bindings.json"
+
 echo "--- updating over the top"
 : > "$FAKE_STEAMVR_LOG"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null

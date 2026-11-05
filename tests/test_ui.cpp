@@ -77,6 +77,63 @@ int main(int argc, char** argv) {
     DashModel m2 = m; m2.cards[0].applied.pos[2] -= 0.001f;
     CHECK(dashKey(m) != dashKey(m2));
   }
+  // fine adjust: arrows either side of every number, on both hands, all on the panel, and each says what it does
+  {
+    Canvas cv(1200, 760);
+    DashModel m;
+    m.game = "The Light Brigade: Definitive Edition";
+    m.live = LiveState::Live;
+    m.cards[0].applied = off(3.2f, -1.0f, 0.5f, 12, 3, -8); m.cards[0].badge = Badge::GameCustom;
+    m.cards[1].applied = Offset{}; m.cards[1].badge = Badge::GameCustom;
+    m.fine = true;
+    std::vector<Button> b;
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_fine.png");
+    int arrows = 0;
+    for (auto& x : b) {
+      int hand = 0, axis = 0, dir = 0;
+      if (parseNudge(x.id, hand, axis, dir)) {
+        ++arrows;
+        CHECK(!nudgeHint(x.id, false).empty());
+      }
+      CHECK(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h);
+    }
+    CHECK(arrows == 24);
+    // no two tappable things overlap: a miss on these small ones would nudge the wrong number
+    for (size_t i = 0; i < b.size(); ++i)
+      for (size_t j = i + 1; j < b.size(); ++j)
+        if (b[i].id.rfind("nudge_", 0) == 0 || b[j].id.rfind("nudge_", 0) == 0)
+          CHECK(b[i].x + b[i].w <= b[j].x || b[j].x + b[j].w <= b[i].x || b[i].y + b[i].h <= b[j].y || b[j].y + b[j].h <= b[i].y);
+    CHECK(nudgeHint("nudge_0_4_m", false) == "Turns your left hand 1\xC2\xB0 to the left.");
+    CHECK(nudgeHint("nudge_1_0_p", true) == "Moves your right hand 1 cm forward.");
+    CHECK(nudgeHint("place_left", false).empty());
+    int h = 0, a = 0, d = 0;
+    CHECK(!parseNudge("nudge_2_0_p", h, a, d) && !parseNudge("nudge_0_6_p", h, a, d) && !parseNudge("nudge_0_0_x", h, a, d) && !parseNudge("page_hands", h, a, d));
+    // and the redraw key notices
+    DashModel m2 = m; m2.fineBig = true;
+    CHECK(dashKey(m) != dashKey(m2));
+    m2 = m; m2.hint = "x";
+    CHECK(dashKey(m) != dashKey(m2));
+    // a hint on the bottom line, the big step, and the arrows going away again
+    m.fineBig = true;
+    m.hover = "nudge_0_4_p";
+    m.hint = nudgeHint(m.hover, true);
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_fine_hint.png");
+    m.fine = false;
+    m.hint.clear();
+    drawDashboard(cv, m, b);
+    for (auto& x : b) CHECK(x.id.rfind("nudge_", 0) != 0);
+    // with no game the words change, and it still has a way out
+    DashModel nog;
+    nog.saveForGame = false;
+    nog.fine = true;
+    drawDashboard(cv, nog, b);
+    cv.savePNG(out + "/dash_fine_nogame.png");
+    bool done = false;
+    for (auto& x : b) done |= x.id == "fine_toggle";
+    CHECK(done);
+  }
   // dashboard: no game, needs match, confirm close
   {
     Canvas cv(1200, 760);

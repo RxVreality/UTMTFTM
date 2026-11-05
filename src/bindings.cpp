@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -147,6 +148,7 @@ static Profile readProfile(const Json::Value& v, const fs::path& dir) {
     const std::string vis = s.get("visibility", "").asString();
     const bool physical = kind == "joystick" || kind == "trackpad" || i.click || i.value;
     i.shown = physical && vis.empty() && kind != "pinch";
+    i.touchOnly = !physical && i.touch && vis.empty();
     p.inputs.push_back(i);
   }
   // SteamVR keeps the system button for itself. On Touch and its relatives the one on the left is the game's menu button,
@@ -330,6 +332,10 @@ Found findBinding(const Dirs& d, const Library& lib, const Settings& s, const st
   Json::Value m;
   const bool haveManifest = !manifest.empty() && readJson(manifest, m) && m.isObject();
   if (haveManifest) readNames(m, names);
+  std::vector<std::string> onOff;
+  if (haveManifest && m["actions"].isArray())
+    for (const auto& a : m["actions"])
+      if (a.isObject() && a["name"].isString() && a["type"].isString() && a["type"].asString() == "boolean") onOff.push_back(a["name"].asString());
 
   // What SteamVR is set to use for this game, unless that's our own file.
   const std::string ours = pathText(fs::u8path(d.data) / "bindings");
@@ -347,7 +353,7 @@ Found findBinding(const Dirs& d, const Library& lib, const Settings& s, const st
           if (f.is_regular_file() && (path.empty() || f.last_write_time() > best)) { path = pathText(f.path()); best = f.last_write_time(); }
       }
       if (path.empty() || path.rfind(ours, 0) == 0) continue;
-      if (foundFile(path, out)) { out.names = names; return out; }
+      if (foundFile(path, out)) { out.names = names; out.onOff = onOff; return out; }
     }
   }
 
@@ -367,13 +373,14 @@ Found findBinding(const Dirs& d, const Library& lib, const Settings& s, const st
       }
     }
   }
-  if (!newest.empty() && foundFile(newest, out)) { out.names = names; return out; }
+  if (!newest.empty() && foundFile(newest, out)) { out.names = names; out.onOff = onOff; return out; }
 
   // SteamVR ships bindings of its own for some games.
   if (const Profile* p = lib.profile(type))
     for (const auto& db : p->defaultBindings)
       if (std::find(keys.begin(), keys.end(), db["app_key"].asString()) != keys.end() && foundFile(pathText(fs::u8path(p->dir) / fs::u8path(db["binding_url"].asString())), out)) {
         out.names = names;
+        out.onOff = onOff;
         return out;
       }
 
@@ -382,6 +389,7 @@ Found findBinding(const Dirs& d, const Library& lib, const Settings& s, const st
     for (const auto& db : m["default_bindings"])
       if (db.isObject() && db["controller_type"].isString() && db["binding_url"].isString() && db["controller_type"].asString() == type && foundFile(pathText(fs::u8path(manifest).parent_path() / fs::u8path(db["binding_url"].asString())), out)) {
         out.names = names;
+        out.onOff = onOff;
         return out;
       }
   return out;
@@ -715,7 +723,8 @@ std::string actionLabel(const std::string& output, const std::map<std::string, s
         {"gripforce", ""}, {"trigger", "Trigger"}, {"triggerpressed", "Trigger"}, {"thumbstick", "Stick"},
         {"thumbstickclicked", "Stick click"}, {"menu", "Menu"}, {"squeeze", "Grip"}, {"primary2daxis", "Stick"},
         {"secondary2daxis", "Trackpad"}, {"select", "Select"}, {"ax", "A / X"}, {"by", "B / Y"}, {"stick", "Stick"}, {"thumbstick_click", "Stick click"},
-        {"stick_clicks", "Stick click"}, {"a", "A"}, {"b", "B"}, {"x", "X"}, {"y", "Y"}};
+        {"stick_clicks", "Stick click"}, {"a", "A"}, {"b", "B"}, {"x", "X"}, {"y", "Y"},
+        {"dpadup", "D-pad up"}, {"dpaddown", "D-pad down"}, {"dpadleft", "D-pad left"}, {"dpadright", "D-pad right"}};
     auto u = unity.find(word);
     if (endsWith(n, "touched") || endsWith(n, "touch") || n == "gripforce" || endsWith(n, "ready")) hidden = true;
     if (u != unity.end()) { label = u->second; if (word != "primarybutton" && word != "secondarybutton") pass = true; }
@@ -866,9 +875,129 @@ std::vector<std::string> partsFor(const std::string& key) {
       {"/input/application_menu", {"button"}},
       {"/input/system", {"buttonC", "button_enter", "enter_button", "button_menu", "button_system", "sys_button", "home_button", "button"}},
       {"/input/dpad_up", {"dpad"}}, {"/input/dpad_down", {"dpad"}}, {"/input/dpad_left", {"dpad"}}, {"/input/dpad_right", {"dpad"}},
+      {"/input/thumbrest", {"thumbrest"}},
   };
   auto it = table.find(key);
   return it == table.end() ? std::vector<std::string>{} : it->second;
+}
+
+// ---------------------------------------------------------------- combos
+static const Input* inputAt(const Profile& p, const std::string& path) {
+  const size_t slash = path.find('/');
+  return slash == std::string::npos ? nullptr : p.find(path.substr(0, slash), path.substr(slash));
+}
+
+// Which set an action belongs to, as this binding spells it: "/actions/main/in/jump" goes in "/actions/Main".
+static std::string setFor(const Json::Value& bindings, const std::string& output) {
+  const size_t in = lowered(output).find("/in/");
+  const std::string set = in == std::string::npos ? output : output.substr(0, in);
+  for (const auto& name : bindings.getMemberNames())
+    if (lowered(name) == lowered(set)) return name;
+  return set;
+}
+
+static std::string sourceMode(const Input* i) {
+  if (!i) return "button";
+  if (i->kind == "joystick" || i->kind == "trackpad" || i->kind == "trigger") return i->kind;
+  return "button";
+}
+
+void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Profile& yours) {
+  if (!binding["bindings"].isObject()) binding["bindings"] = Json::objectValue;
+  for (const Combo& combo : combos) {
+    if (combo.inputs.empty() || combo.output.empty()) continue;
+    Json::Value& set = binding["bindings"][setFor(binding["bindings"], combo.output)];
+    if (!set["sources"].isArray()) set["sources"] = Json::arrayValue;
+    if (combo.inputs.size() == 1) {
+      const ComboInput& only = combo.inputs[0];
+      Json::Value src;
+      src["path"] = "/user/hand/" + only.path;
+      src["mode"] = sourceMode(inputAt(yours, only.path));
+      src["inputs"][only.state]["output"] = combo.output;
+      set["sources"].append(src);
+      continue;
+    }
+    Json::Value chord;
+    chord["output"] = combo.output;
+    chord["inputs"] = Json::arrayValue;
+    for (const ComboInput& in : combo.inputs) {
+      const std::string path = "/user/hand/" + in.path;
+      Json::Value pair(Json::arrayValue);
+      pair.append(path);
+      pair.append(in.state);
+      chord["inputs"].append(pair);
+      // Every chord in the files SteamVR and the Workshop keep is on controls that have a source in that set, even one with
+      // nothing on it. SteamVR's own files have those too.
+      bool has = false;
+      for (const auto& src : set["sources"]) has = has || src["path"].asString() == path;
+      if (!has) {
+        Json::Value src;
+        src["path"] = path;
+        src["mode"] = sourceMode(inputAt(yours, in.path));
+        src["inputs"] = Json::objectValue;
+        set["sources"].append(src);
+      }
+    }
+    if (!set["chords"].isArray()) set["chords"] = Json::arrayValue;
+    set["chords"].append(chord);
+  }
+}
+
+std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours) {
+  std::string out;
+  for (const ComboInput& in : inputs) {
+    const Input* i = inputAt(yours, in.path);
+    if (!out.empty()) out += " + ";
+    out += in.state == "touch" ? "Touch " : "Press ";
+    if (i && i->side.empty()) out += in.path.rfind("left/", 0) == 0 ? "left " : "right ";
+    out += i ? i->name : titleCase(in.path.substr(in.path.rfind('/') + 1));
+  }
+  return out;
+}
+
+std::vector<GameAction> comboActions(const Found& binding, const Profile& yours) {
+  std::vector<GameAction> out;
+  std::map<std::string, size_t> seen;
+  std::set<std::string> onOff;
+  for (const std::string& a : binding.onOff) onOff.insert(lowered(a));
+  auto add = [&](const std::string& output, const std::string& onPath) {
+    const std::string key = lowered(output);
+    auto it = seen.find(key);
+    if (it != seen.end()) return;
+    bool pass = false, hide = false;
+    const std::string label = actionLabel(output, binding.names, &pass, &hide);
+    if (hide || label.empty()) return;
+    const size_t in = key.find("/in/");
+    if (in == std::string::npos) return;
+    GameAction a;
+    a.output = output;
+    a.label = label;
+    a.group = groupOf(output.substr(0, in));
+    a.nameless = pass;
+    if (!onPath.empty()) {
+      const std::string row = yours.rowOf(onPath);
+      const Input* i = inputAt(yours, row.empty() ? onPath : row);
+      if (i && i->key == "/input/system" && !i->shown) return;
+      if (i) a.where = std::string("On ") + (i->side.empty() ? (onPath.rfind("left/", 0) == 0 ? "left " : "right ") : "") + i->name;
+    }
+    seen[key] = out.size();
+    out.push_back(a);
+  };
+  if (binding.ok) {
+    static const std::set<std::string> notOnOff = {"position", "pull", "force", "value", "scroll", "x", "y", "position_x", "position_y", "ready_ext", "axis"};
+    for (const auto& setName : binding.json["bindings"].getMemberNames())
+      for (const auto& src : binding.json["bindings"][setName]["sources"]) {
+        const std::string path = after(src["path"].asString(), "/user/hand/");
+        for (const auto& name : src["inputs"].getMemberNames()) {
+          if (notOnOff.count(name)) continue;
+          const std::string output = src["inputs"][name]["output"].asString();
+          if (output.empty() || (!onOff.empty() && !onOff.count(lowered(output)))) continue;
+          add(output, path);
+        }
+      }
+  }
+  for (const std::string& a : binding.onOff) add(a, "");
+  return out;
 }
 
 // ---------------------------------------------------------------- the page
@@ -915,6 +1044,16 @@ void Page::loadPrefs() {
     for (const auto& input : v["wiring"][k].getMemberNames()) w[input] = v["wiring"][k][input].asString();
     wiringChanges[k] = w;
   }
+  combos.clear();
+  for (const auto& k : v["combos"].getMemberNames())
+    for (const auto& e : v["combos"][k]) {
+      Combo c;
+      c.output = e.get("output", "").asString();
+      c.label = e.get("label", "").asString();
+      for (const auto& pair : e["inputs"])
+        if (pair.isArray() && pair.size() == 2 && pair[0].isString() && pair[1].isString()) c.inputs.push_back({pair[0].asString(), pair[1].asString()});
+      if (!c.output.empty() && !c.inputs.empty()) combos[k].push_back(c);
+    }
 }
 
 void Page::savePrefs() const {
@@ -937,6 +1076,24 @@ void Page::savePrefs() const {
   for (const auto& [k, w] : wiringChanges) {
     v["wiring"][k] = Json::objectValue;
     for (const auto& [input, their] : w) v["wiring"][k][input] = their;
+  }
+  v["combos"] = Json::objectValue;
+  for (const auto& [k, list] : combos) {
+    if (list.empty()) continue;
+    v["combos"][k] = Json::arrayValue;
+    for (const Combo& c : list) {
+      Json::Value e;
+      e["output"] = c.output;
+      e["label"] = c.label;
+      e["inputs"] = Json::arrayValue;
+      for (const ComboInput& in : c.inputs) {
+        Json::Value pair(Json::arrayValue);
+        pair.append(in.path);
+        pair.append(in.state);
+        e["inputs"].append(pair);
+      }
+      v["combos"][k].append(e);
+    }
   }
   writeJson(pathText(fs::u8path(d_.data) / "bindings.json"), v);
 }
@@ -992,6 +1149,10 @@ void Page::setGame(const std::string& key, const std::string& alt, const std::st
   found_.clear();
   armed_.clear();
   group_.clear();
+  comboStep_ = 0;
+  picked_.clear();
+  comboGroup_.clear();
+  comboPage_ = 0;
 }
 
 const Found& Page::binding(const std::string& type) {
@@ -1034,11 +1195,16 @@ bool Page::applyNow(const std::string& from) {
   if (gameKey_.empty() || !theirs || !mine) return false;
   const Found& f = binding(from);
   if (!f.ok) return false;
-  Json::Value out = translate(f.json, wiring(from, yours_.type), *theirs, *mine);
+  // Your own controller, with nothing rewired: this is only here for its combos, so everything else stays exactly as it was.
+  auto changed = wiringChanges.find(from + ">" + yours_.type);
+  const bool asItWas = from == yours_.type && (changed == wiringChanges.end() || changed->second.empty());
+  Json::Value out = asItWas ? f.json : translate(f.json, wiring(from, yours_.type), *theirs, *mine);
   std::string layoutName = titleCase(from);
   for (const Headset& h : lib_.headsets) if (h.type == from) { layoutName = shortName(h); break; }
-  out["name"] = from == yours_.type ? "Rewired by UTMTFTM" : layoutName + " layout, translated by UTMTFTM";
+  if (asItWas) out["name"] = f.json.get("name", "Binding").asString() + ", with combos from UTMTFTM";
+  else out["name"] = from == yours_.type ? "Rewired by UTMTFTM" : layoutName + " layout, translated by UTMTFTM";
   out["description"] = "Made by UTMTFTM from this game's " + from + " binding. Switch it back on the UTMTFTM page.";
+  addCombos(out, combosHere(), *mine);
   out["app_key"] = gameKey_;
   // A game written for SteamVR Input can be told it's holding the other controller too. An OpenXR game's binding already
   // says, in its interaction_profile, which is what SteamVR's own translation relies on.
@@ -1088,12 +1254,13 @@ void Page::revertNow() {
   fs::remove(fs::u8path(fileFor(gameKey_, yours_.type)), ec);
 }
 
-void Page::reapply() {
-  if (gameKey_.empty()) return;
+bool Page::reapply() {
+  if (gameKey_.empty()) return true;
   found_.clear();
-  const std::string from = effectiveFrom();
-  if (from.empty()) revertNow();
-  else if (binding(from).ok) applyNow(from);
+  std::string from = effectiveFrom();
+  if (!combosHere().empty() && (from.empty() || !binding(from).ok)) from = comboBase();
+  if (from.empty()) { revertNow(); return true; }
+  return !binding(from).ok || applyNow(from);
 }
 
 void Page::restoreAll() {
@@ -1276,22 +1443,15 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
     const Found* native = m.hasGame ? &binding(yours_.type) : nullptr;
     Found translated;
     // Nothing of its own for your controller: SteamVR translates from the best one it has, so show that.
-    std::string autoFrom;
+    std::string translatedFrom;
     if (m.hasGame && !native->ok && !m.layoutOn) {
-      auto table = lib_.remaps.find(yours_.type);
-      int best = -1;
-      if (table != lib_.remaps.end())
-        for (const auto& layout : table->second["layouts"]) {
-          const std::string type = layout["from_controller_type"].asString();
-          const int pr = layout.get("priority", 0).asInt();
-          if (pr > best && lib_.profile(type) && binding(type).ok) { best = pr; autoFrom = type; }
-        }
-      if (!autoFrom.empty()) {
-        translated = binding(autoFrom);
-        translated.json = translate(translated.json, defaultWiring(lib_, autoFrom, yours_.type), *lib_.profile(autoFrom), *yourP);
+      translatedFrom = autoFrom();
+      if (!translatedFrom.empty()) {
+        translated = binding(translatedFrom);
+        translated.json = translate(translated.json, defaultWiring(lib_, translatedFrom, yours_.type), *lib_.profile(translatedFrom), *yourP);
       }
     }
-    const Found* shown = !autoFrom.empty() ? &translated : native;
+    const Found* shown = !translatedFrom.empty() ? &translated : native;
     for (int hand = 0; hand < 2; ++hand) {
       yourRows[hand] = rowsOn(*yourP, hand ? "right" : "left", showWiring ? nullptr : shown, group_);
       for (RowText& r : yourRows[hand]) {
@@ -1310,11 +1470,12 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
       m.yours.note = "On the " + otherName + " layout";
     }
     else if (native->ok) m.yours.note = "As the developer set it";
-    else if (!autoFrom.empty()) {
-      std::string otherName = titleCase(autoFrom);
-      for (const Headset& h : lib_.headsets) if (h.type == autoFrom) { otherName = h.name; break; }
+    else if (!translatedFrom.empty()) {
+      std::string otherName = titleCase(translatedFrom);
+      for (const Headset& h : lib_.headsets) if (h.type == translatedFrom) { otherName = h.name; break; }
       m.yours.note = "SteamVR is translating the game's " + otherName + " bindings";
     } else m.yours.note = "No bindings found yet. Play it once";
+    if (m.hasGame && !combosHere().empty()) m.yours.note += ", plus " + std::to_string(combosHere().size()) + (combosHere().size() == 1 ? " combo" : " combos");
   } else {
     m.yours.note = yours_.type.empty() ? "Turn your controllers on" : "SteamVR has no description of this controller";
   }
@@ -1421,11 +1582,11 @@ void Page::click(const std::string& id) {
       GameChoice& c = games[choiceKey()];
       c.from = "";
       c.explicitly = true;
-      revertNow();
+      reapply();
       saved(gameName_ + " is back to the developer's bindings.");
     } else {
       defaults.erase(yours_.type);
-      if (!gameKey_.empty()) { games[choiceKey()].explicitly = false; revertNow(); }
+      if (!gameKey_.empty()) { games[choiceKey()].explicitly = false; reapply(); }
       saved("All games are back to the developer's bindings.");
     }
     return;
@@ -1467,6 +1628,264 @@ void Page::click(const std::string& id) {
       reapply();
       saved("Rewired.");
     }
+    return;
+  }
+}
+
+// ---------------------------------------------------------------- the combos page
+const std::vector<Combo>& Page::combosHere() const {
+  static const std::vector<Combo> none;
+  auto it = combos.find(choiceKey());
+  return it == combos.end() ? none : it->second;
+}
+
+std::string Page::autoFrom() {
+  std::string from;
+  auto table = lib_.remaps.find(yours_.type);
+  int best = -1;
+  if (table != lib_.remaps.end())
+    for (const auto& layout : table->second["layouts"]) {
+      const std::string type = layout["from_controller_type"].asString();
+      const int pr = layout.get("priority", 0).asInt();
+      if (pr > best && lib_.profile(type) && binding(type).ok) { best = pr; from = type; }
+    }
+  return from;
+}
+
+std::string Page::comboBase() {
+  if (gameKey_.empty() || !lib_.profile(yours_.type)) return "";
+  return binding(yours_.type).ok ? yours_.type : autoFrom();
+}
+
+Found Page::activeBinding() {
+  std::string from = effectiveFrom();
+  if (from.empty() || !binding(from).ok) from = comboBase();
+  const Profile* mine = lib_.profile(yours_.type);
+  if (from.empty() || !mine || !lib_.profile(from)) return Found{};
+  Found f = binding(from);
+  auto changed = wiringChanges.find(from + ">" + yours_.type);
+  if (from != yours_.type || (changed != wiringChanges.end() && !changed->second.empty())) f.json = translate(f.json, wiring(from, yours_.type), *lib_.profile(from), *mine);
+  return f;
+}
+
+// Combos people use, for whichever controller this is. Only what it really has makes the list.
+std::vector<Page::ComboIdeaOf> Page::comboIdeas(const Profile& p) const {
+  auto stick = [&](const char* hand) { return std::string(hand) + (p.find(hand, "/input/thumbstick") ? "/input/thumbstick" : p.find(hand, "/input/joystick") ? "/input/joystick" : "/input/trackpad"); };
+  const std::vector<ComboIdeaOf> all = {
+      {"Thumb on A + B", {{"right/input/a", "touch"}, {"right/input/b", "touch"}}},
+      {"Both triggers", {{"left/input/trigger", "touch"}, {"right/input/trigger", "touch"}}},
+      {"Stick + grip", {{stick("right"), "touch"}, {"right/input/grip", "click"}}},
+      {"Both grips", {{"left/input/grip", "click"}, {"right/input/grip", "click"}}},
+  };
+  std::vector<ComboIdeaOf> out;
+  for (const auto& idea : all) {
+    bool ok = true;
+    for (const ComboInput& in : idea.inputs) {
+      const Input* i = inputAt(p, in.path);
+      ok = ok && i && (in.state == "touch" ? i->touch : (i->click || i->value || i->force));
+    }
+    if (ok) out.push_back(idea);
+  }
+  return out;
+}
+
+ComboModel Page::comboModel(const std::string& hover, const std::string& down) {
+  ComboModel m;
+  m.hover = hover;
+  m.down = down;
+  m.game = gameName_;
+  m.step = comboStep_;
+  m.status = status;
+  m.statusWarn = statusKind == 2;
+  m.statusGood = statusKind == 1;
+  const Profile* mine = lib_.profile(yours_.type);
+  m.yours.title = yours_.name;
+  if (gameKey_.empty()) m.why = "A combo sets off something in one particular game, so it needs that game's list of actions.";
+  else if (!mine) m.why = yours_.type.empty() ? "Turn your controllers on." : "SteamVR has no description of this controller.";
+  else if (comboBase().empty()) m.why = "UTMTFTM hasn't seen this game's controls yet. Play it once, then come back.";
+  m.canMake = m.why.empty();
+  if (!m.canMake) { comboStep_ = 0; m.step = 0; }
+  if (!mine) return m;
+
+  const Found active = m.canMake ? activeBinding() : Found{};
+  const std::vector<ControlGroup> controlSets = active.ok ? controlGroups(active) : std::vector<ControlGroup>{};
+  const std::string mainControls = controlSets.size() > 1 ? startingGroup(controlSets) : "";
+  std::vector<RowText> rows[2];
+  for (int hand = 0; hand < 2; ++hand) {
+    const char* name = hand ? "right" : "left";
+    rows[hand] = rowsOn(*mine, name, active.ok ? &active : nullptr, mainControls);
+    for (const Input& i : mine->inputs)
+      if (i.touchOnly && (i.side.empty() || i.side == name)) {
+        RowText r;
+        r.id = std::string(name) + i.key;
+        r.name = i.name;
+        rows[hand].push_back(r);
+      }
+  }
+  fillRows(m.yours, "c:", yours_, rows);
+
+  // What's picked, or the saved combo the laser's on, lit up on the controllers.
+  std::map<std::string, std::string> showing = picked_;
+  const std::vector<Combo>& saved = combosHere();
+  if (comboStep_ == 0) {
+    showing.clear();
+    for (const char* prefix : {"combo_row_", "combo_del_"})
+      if (hover.rfind(prefix, 0) == 0) {
+        const size_t at = size_t(std::atoi(hover.c_str() + std::string(prefix).size()));
+        if (at < saved.size()) for (const ComboInput& in : saved[at].inputs) showing[in.path] = in.state;
+      }
+  }
+  for (int hand = 0; hand < 2; ++hand)
+    for (BindRow& r : m.yours.rows[hand]) {
+      auto it = showing.find(r.id.substr(2));
+      if (it != showing.end()) r.mark = it->second == "touch" ? 1 : 2;
+    }
+
+  for (const Combo& c : saved) m.saved.push_back({comboText(c.inputs, *mine), c.label});
+
+  std::vector<ComboInput> picked;
+  for (const auto& [path, state] : picked_) picked.push_back({path, state});
+  m.picked = comboText(picked, *mine);
+
+  if (comboStep_ == 1) {
+    const auto ideas = comboIdeas(*mine);
+    for (size_t i = 0; i < ideas.size(); ++i) m.ideas.push_back({"combo_idea_" + std::to_string(i), ideas[i].name});
+    // Anything worth knowing about what's picked.
+    for (const auto& [path, state] : picked_) {
+      if (state == "click")
+        for (int hand = 0; hand < 2; ++hand)
+          for (const RowText& r : rows[hand])
+            if (r.id == path && !r.action.empty() && m.note.empty()) m.note = "Pressing " + r.name + " also does " + r.action + " on its own, so this may set off both. Touch wouldn't.";
+    }
+    for (const auto& [path, state] : picked_)
+      if (m.note.empty() && state == "touch" && path.find("/input/grip") != std::string::npos) m.note = "Just holding the controller usually counts as touching the grip, so Press is probably what you want there.";
+    if (m.note.empty() && picked_.size() == 1 && picked_.begin()->second == "touch") m.note = "With only one touch, this goes off whenever your thumb or finger brushes it.";
+  }
+  if (comboStep_ == 2) {
+    const std::vector<GameAction> actions = comboActions(active, *mine);
+    std::vector<std::string> groups;
+    for (const GameAction& a : actions)
+      if (std::find(groups.begin(), groups.end(), a.group) == groups.end()) groups.push_back(a.group);
+    if (std::find(groups.begin(), groups.end(), comboGroup_) == groups.end()) {
+      std::vector<ControlGroup> known;
+      for (const std::string& g : groups) {
+        int count = 0;
+        for (const GameAction& a : actions) if (a.group == g) ++count;
+        known.push_back({g, g, count});
+      }
+      comboGroup_ = startingGroup(known);
+      comboPage_ = 0;
+    }
+    if (groups.size() > 1) {
+      auto named = active.names.find(comboGroup_);
+      m.controls = named != active.names.end() ? named->second : spacedWords(comboGroup_.substr(comboGroup_.rfind('/') + 1));
+    }
+    std::vector<size_t> here;
+    bool allNameless = !actions.empty();
+    for (size_t i = 0; i < actions.size(); ++i) {
+      if (actions[i].group == comboGroup_) here.push_back(i);
+      allNameless = allNameless && actions[i].nameless;
+    }
+    if (allNameless) m.note = gameName_ + " only names its buttons, so pick the one you'd like this to act as.";
+    const size_t perPage = 18;
+    m.pages = std::max(1, int((here.size() + perPage - 1) / perPage));
+    comboPage_ = std::min(comboPage_, m.pages - 1);
+    m.pageNo = comboPage_;
+    for (size_t i = comboPage_ * perPage; i < here.size() && i < (comboPage_ + 1) * perPage; ++i)
+      m.choices.push_back({"combo_pick_" + std::to_string(here[i]), actions[here[i]].label, actions[here[i]].where});
+  }
+  return m;
+}
+
+void Page::comboClickGreyed(const std::string& id) {
+  if (id == "combo_new") {
+    if (gameKey_.empty()) say("Start a game first. A combo sets off something in one particular game.");
+    else if (!lib_.profile(yours_.type)) say("Turn your controllers on first.");
+    else say("UTMTFTM hasn't seen " + gameName_ + "'s controls yet. Play it once, then come back.");
+  } else say("That isn't available right now.");
+}
+
+void Page::comboClick(const std::string& id) {
+  const Profile* mine = lib_.profile(yours_.type);
+  if (!mine) return;
+  if (id == "combo_new") {
+    if (combosHere().size() >= 6) { say("Six combos per game for now, because that's what fits. Remove one first."); return; }
+    picked_.clear();
+    comboStep_ = 1;
+    return;
+  }
+  if (id == "combo_cancel") { picked_.clear(); comboStep_ = 0; return; }
+  if (id == "combo_next") { if (!picked_.empty()) { comboStep_ = 2; comboPage_ = 0; } return; }
+  if (id == "combo_back") { comboStep_ = 1; return; }
+  if (id.rfind("c:", 0) == 0) {
+    if (comboStep_ != 1) { say("Tap New combo first, then tap the controls."); return; }
+    // Touch first, because that's the point of this page. Then press, then off. A control can only do what it has.
+    const std::string path = id.substr(2);
+    const Input* i = inputAt(*mine, path);
+    if (!i) return;
+    const bool canPress = i->click || i->value || i->force;
+    auto it = picked_.find(path);
+    if (it == picked_.end()) picked_[path] = i->touch ? "touch" : "click";
+    else if (it->second == "touch" && canPress) it->second = "click";
+    else picked_.erase(it);
+    return;
+  }
+  if (id.rfind("combo_idea_", 0) == 0) {
+    const auto ideas = comboIdeas(*mine);
+    const size_t at = size_t(std::atoi(id.c_str() + 11));
+    if (at >= ideas.size()) return;
+    picked_.clear();
+    for (const ComboInput& in : ideas[at].inputs) picked_[in.path] = in.state;
+    return;
+  }
+  if (id == "combo_page_next") { ++comboPage_; return; }
+  if (id == "combo_page_prev") { comboPage_ = std::max(0, comboPage_ - 1); return; }
+  if (id == "combo_group_next" || id == "combo_group_prev") {
+    const std::vector<GameAction> actions = comboActions(activeBinding(), *mine);
+    std::vector<std::string> groups;
+    for (const GameAction& a : actions)
+      if (std::find(groups.begin(), groups.end(), a.group) == groups.end()) groups.push_back(a.group);
+    if (groups.empty()) return;
+    size_t at = 0;
+    for (size_t i = 0; i < groups.size(); ++i) if (groups[i] == comboGroup_) at = i;
+    comboGroup_ = groups[(at + (id == "combo_group_next" ? 1 : groups.size() - 1)) % groups.size()];
+    comboPage_ = 0;
+    return;
+  }
+  auto saved = [&](const std::string& what, bool ok) {
+    if (ok) say(what + " It takes effect the next time " + gameName_ + " launches.", 1);
+    else say("Couldn't write " + gameName_ + "'s binding file. It's in the log.", 2);
+    savePrefs();
+  };
+  if (id.rfind("combo_pick_", 0) == 0) {
+    const std::vector<GameAction> actions = comboActions(activeBinding(), *mine);
+    const size_t at = size_t(std::atoi(id.c_str() + 11));
+    if (at >= actions.size() || picked_.empty()) return;
+    Combo c;
+    for (const auto& [path, state] : picked_) c.inputs.push_back({path, state});
+    c.output = actions[at].output;
+    c.label = actions[at].label;
+    // The same controls can only mean one thing, so doing it again replaces the old one.
+    std::vector<Combo>& list = combos[choiceKey()];
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const Combo& o) {
+      if (o.inputs.size() != c.inputs.size()) return false;
+      for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
+      return true;
+    }), list.end());
+    const std::string what = comboText(c.inputs, *mine) + " does " + c.label + ".";
+    list.push_back(c);
+    picked_.clear();
+    comboStep_ = 0;
+    saved(what, reapply());
+    return;
+  }
+  if (id.rfind("combo_del_", 0) == 0) {
+    std::vector<Combo>& list = combos[choiceKey()];
+    const size_t at = size_t(std::atoi(id.c_str() + 10));
+    if (at >= list.size()) return;
+    list.erase(list.begin() + std::ptrdiff_t(at));
+    if (list.empty()) combos.erase(choiceKey());
+    saved("Removed.", reapply());
     return;
   }
 }

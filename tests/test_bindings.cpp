@@ -67,6 +67,29 @@ static void shot(const BindModel& m, const std::string& path) {
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
 }
 
+static void shotCombo(const ComboModel& m, const std::string& path) {
+  Canvas cv(1200, 760);
+  std::vector<Button> b;
+  drawCombos(cv, m, b);
+  cv.savePNG(path);
+  for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+}
+
+static Json::Value readFile(const std::string& path) {
+  Json::Value v;
+  std::ifstream in(fs::u8path(path));
+  Json::CharReaderBuilder b;
+  std::string errs;
+  Json::parseFromStream(b, in, &v, &errs);
+  return v;
+}
+
+static std::string chordText(const Json::Value& chord) {
+  std::string s = chord["output"].asString() + " <-";
+  for (const auto& in : chord["inputs"]) s += " " + in[0].asString() + ":" + in[1].asString();
+  return s;
+}
+
 static std::set<std::string> sourcesOf(const Json::Value& binding) {
   std::set<std::string> out;
   for (const auto& set : binding["bindings"].getMemberNames())
@@ -135,6 +158,7 @@ static void testFixture(const std::string& work, const std::string& out) {
   actionLabel("/actions/ue/in/framecontroller_right_a_touch", {}, &pass, &hide);
   check(hide, "touching isn't something to list");
   check(actionLabel("/actions/x/in/primarybutton", {}, &pass, &hide) == "Primary" && !pass && !hide, "Unity's role names read as they are");
+  check(actionLabel("/actions/ue/in/framecontroller_left_dpadup_click", {}, &pass, &hide) == "D-pad up", "a D-pad direction reads as words");
   check(actionLabel("/actions/x/in/ToggleCrouch", {}, &pass, &hide) == "Toggle Crouch" && !pass && !hide, "a real action's name is split into words");
   check(actionLabel("/actions/x/in/facebuttontop", {}, &pass, &hide) == "Face Button Top", "and so is one that's all lower case around \"button\"");
   check(actionLabel("/actions/x/in/Fire", {{"/actions/x/in/fire", "Fire the gun"}}, &pass, &hide) == "Fire the gun", "the game's own wording wins");
@@ -382,8 +406,238 @@ static void testFixture(const std::string& work, const std::string& out) {
   page.click("bind_reset_wiring");
   page.click("bind_dev");
 
+  // ---- Combos. First a game with its own Frame binding, so everything else in the file has to stay exactly as it was.
+  page.setReference("Quest 3");
+  page.setGame("steam.app.777", "", "Named Game");
+  page.status.clear();
+  giveModels(page, steamvr);
+  const std::string namedKey = "steam.app.777/frame_controller_250820_CurrentURL_steamvrinput";
+  const std::string namedFile = page.fileFor("steam.app.777", "frame_controller");
+  ComboModel cm = page.comboModel("", "");
+  check(cm.canMake && cm.step == 0 && cm.saved.empty(), "a game with bindings can have combos, and starts with none");
+  shotCombo(cm, out + "/fixture_combos_empty.png");
+  check(!fake.values.count(namedKey), "and just looking changes nothing");
+  auto markOf = [](const ComboModel& m, const std::string& id) {
+    for (int h = 0; h < 2; ++h)
+      for (const BindRow& r : m.yours.rows[h])
+        if (r.id == id) return r.mark;
+    return -1;
+  };
+  page.comboClick("c:right/input/a");
+  check(page.comboModel("", "").picked.empty(), "tapping a control does nothing until you've asked for a new combo");
+  page.status.clear();
+  page.comboClick("combo_new");
+  cm = page.comboModel("", "");
+  check(cm.step == 1 && cm.picked.empty(), "New combo starts empty");
+  check(!cm.ideas.empty(), "and has some ideas on offer");
+  page.comboClick("c:right/input/a");
+  cm = page.comboModel("", "");
+  check(markOf(cm, "c:right/input/a") == 1 && cm.picked == "Touch A", "one tap is touch");
+  check(cm.note.find("brushes") != std::string::npos, "and it warns that one touch alone goes off easily");
+  page.comboClick("c:right/input/a");
+  cm = page.comboModel("", "");
+  check(markOf(cm, "c:right/input/a") == 2 && cm.picked == "Press A", "two taps is press");
+  page.comboClick("c:right/input/a");
+  check(page.comboModel("", "").picked.empty(), "three taps is off again");
+  page.comboClick("c:right/input/a");
+  page.comboClick("c:right/input/b");
+  cm = page.comboModel("", "");
+  check(cm.picked == "Touch A + Touch B", "two controls read as a combo");
+  check(cm.note.empty(), "and touches have nothing to warn about");
+  shotCombo(cm, out + "/fixture_combos_step1.png");
+  page.comboClick("c:right/input/y");
+  page.comboClick("c:right/input/y");
+  check(page.comboModel("", "").note.find("Reload") != std::string::npos, "pressing something that's already in use says what else it'll do");
+  page.comboClick("c:right/input/y");
+  page.comboClick("c:right/input/grip");
+  check(page.comboModel("", "").note.find("holding the controller") != std::string::npos, "touching the grip says that's probably not what you want");
+  page.comboClick("c:right/input/grip");
+  page.comboClick("c:right/input/grip");
+  check(page.comboModel("", "").picked == "Touch A + Touch B", "and clearing them leaves the other two");
+
+  page.comboClick("combo_next");
+  cm = page.comboModel("", "");
+  check(cm.step == 2 && cm.controls == "On Foot", "the next step lists what it can do, starting on the main controls");
+  auto choiceNamed = [](const ComboModel& m, const std::string& name) -> std::string {
+    for (const ComboChoice& e : m.choices) if (e.name == name) return e.id;
+    return "";
+  };
+  check(!choiceNamed(cm, "Fire the gun").empty() && !choiceNamed(cm, "Reload").empty(), "in the game's own words");
+  check(choiceNamed(cm, "Move").empty(), "a stick can't be set off by a combo, so it's not on the list");
+  for (const ComboChoice& e : cm.choices)
+    if (e.name == "Reload") check(e.where == "On Y", "and it says where it is now");
+  shotCombo(cm, out + "/fixture_combos_step2.png");
+  page.comboClick("combo_group_next");
+  check(!choiceNamed(page.comboModel("", ""), "Horn").empty(), "the arrows go through the other sets of controls");
+  page.comboClick("combo_group_prev");
+  page.comboClick("combo_back");
+  check(page.comboModel("", "").picked == "Touch A + Touch B", "Back keeps what you'd picked");
+  page.comboClick("combo_next");
+  page.comboClick(choiceNamed(page.comboModel("", ""), "Reload"));
+  cm = page.comboModel("", "");
+  check(cm.step == 0 && cm.saved.size() == 1 && cm.saved[0].inputs == "Touch A + Touch B" && cm.saved[0].action == "Reload", "picking one saves it and goes back to the list");
+  check(page.status.find("next time") != std::string::npos, "and says when it takes effect");
+  check(cm.yours.rows[0].size() + cm.yours.rows[1].size() > 0, "the controllers are still on the page");
+  check(markOf(page.comboModel("combo_row_0", ""), "c:right/input/a") == 1, "pointing at a saved combo lights up its controls");
+  check(markOf(page.comboModel("", ""), "c:right/input/a") == 0, "and only then");
+  shotCombo(page.comboModel("combo_row_0", ""), out + "/fixture_combos_saved.png");
+
+  check(fake.values[namedKey].rfind("file:///", 0) == 0, "the game's setting points at a file now");
+  Json::Value withCombo = readFile(namedFile);
+  check(withCombo["bindings"]["/actions/main"]["chords"].size() == 1, "with one chord in it, in the action's own set");
+  check(chordText(withCombo["bindings"]["/actions/main"]["chords"][0]) == "/actions/main/in/Reload <- /user/hand/right/input/a:touch /user/hand/right/input/b:touch", "the same way SteamVR's own files write one");
+  // What's already on the controller stays. All that's new are the two empty sources a chord's controls sit on.
+  {
+    Json::Value original;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    std::stringstream text(fixture::kNamedFrame);
+    Json::parseFromStream(b, text, &original, &errs);
+    check(sourcesOf(withCombo) == sourcesOf(original), "everything the developer set is still there and nothing's been added to a button");
+    check(withCombo["bindings"]["/actions/main"]["sources"].size() == original["bindings"]["/actions/main"]["sources"].size() + 2, "it adds a place for each control to sit");
+    check(withCombo["controller_type"].asString() == "frame_controller" && withCombo["category"].asString() == "steamvr_input", "it's still the same kind of file");
+    check(!withCombo.isMember("options") || !withCombo["options"].isMember("simulated_controller_type"), "and it isn't pretending to be another controller");
+  }
+  check(!page.model("", "").layoutOn, "it isn't a layout: the Bindings tab still says the developer's");
+  check(page.model("", "").yours.note.find("plus 1 combo") != std::string::npos, "but it does say there's a combo");
+
+  // It's still there after a restart, and when the game next starts.
+  {
+    FakeSettings other = fake;
+    Page again(d, other.make());
+    again.load();
+    again.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+    again.setGame("steam.app.777", "", "Named Game");
+    check(again.comboModel("", "").saved.size() == 1, "a saved combo survives a restart");
+    again.gameStarted();
+    check(readFile(namedFile)["bindings"]["/actions/main"]["chords"].size() == 1, "and isn't doubled when the game starts again");
+  }
+
+  // Doing the same controls again replaces it.
+  page.comboClick("combo_new");
+  page.comboClick("combo_idea_0");
+  check(page.comboModel("", "").picked == "Touch A + Touch B", "an idea fills in its controls");
+  page.comboClick("combo_next");
+  page.comboClick(choiceNamed(page.comboModel("", ""), "Fire the gun"));
+  cm = page.comboModel("", "");
+  check(cm.saved.size() == 1 && cm.saved[0].action == "Fire the gun", "the same controls again replace the old one");
+
+  // A second one, and just one control.
+  page.comboClick("combo_new");
+  page.comboClick("c:left/input/thumbstick");
+  page.comboClick("combo_next");
+  page.comboClick(choiceNamed(page.comboModel("", ""), "Reload"));
+  withCombo = readFile(namedFile);
+  check(withCombo["bindings"]["/actions/main"]["chords"].size() == 1, "one control isn't a chord");
+  check(sourcesOf(withCombo).count("/user/hand/left/input/thumbstick joystick touch /actions/main/in/Reload"), "it's an ordinary binding of its touch, in the mode a stick needs");
+
+  // Switching to the Developer's on the other tab leaves your combos alone.
+  page.click("bind_dev");
+  check(fake.values[namedKey].rfind("file:///", 0) == 0 && readFile(namedFile)["bindings"]["/actions/main"]["chords"].size() == 1, "Developer's keeps your combos");
+
+  // On a layout, they go in on top of it.
+  page.click("bind_layout");
+  withCombo = readFile(namedFile);
+  check(withCombo["bindings"]["/actions/main"]["chords"].size() == 1, "a layout keeps them too");
+  check(withCombo["options"]["simulated_controller_type"].asString() == "oculus_touch", "and it is the layout");
+  page.click("bind_dev");
+
+  // Removing them all hands the game back exactly as it was.
+  page.comboClick("combo_del_0");
+  check(page.comboModel("", "").saved.size() == 1, "Remove takes one off");
+  page.comboClick("combo_del_0");
+  check(page.comboModel("", "").saved.empty(), "and the other");
+  check(!fake.values.count(namedKey), "with none left the setting comes off");
+  check(!fs::exists(fs::u8path(namedFile)), "and so does our file");
+
+  // Six is what fits on the page.
+  for (int i = 0; i < 6; ++i) {
+    page.comboClick("combo_new");
+    page.comboClick("c:right/input/a");
+    if (i & 1) page.comboClick("c:right/input/b");
+    if (i & 2) page.comboClick("c:right/input/x");
+    if (i & 4) page.comboClick("c:right/input/y");
+    page.comboClick("combo_next");
+    page.comboClick(choiceNamed(page.comboModel("", ""), "Reload"));
+  }
+  cm = page.comboModel("", "");
+  check(cm.saved.size() == 6, "six combos fit");
+  shotCombo(cm, out + "/fixture_combos_six.png");
+  page.comboClick("combo_new");
+  check(page.comboModel("", "").step == 0 && page.status.find("Six") != std::string::npos, "and a seventh says why not");
+  for (int i = 0; i < 6; ++i) page.comboClick("combo_del_0");
+  check(!fake.values.count(namedKey), "and they all come off again");
+
+  // A game SteamVR's translating for you: it goes on top of the same translation, and says it's the other controller's profile.
+  page.setGame("steam.app.12345", "", "Fixture Game");
+  cm = page.comboModel("", "");
+  check(cm.canMake, "a game with only Quest bindings can have combos too");
+  page.comboClick("combo_new");
+  page.comboClick("c:left/input/dpad_up");
+  page.comboClick("c:left/input/dpad_down");
+  page.comboClick("combo_next");
+  cm = page.comboModel("", "");
+  check(!choiceNamed(cm, "Primary").empty(), "its actions are on the list");
+  check(choiceNamed(cm, "Primarytouched").empty() && choiceNamed(cm, "Primary Touched").empty(), "touch-reporting actions aren't");
+  check(choiceNamed(cm, "Stick").empty(), "and nor is the stick");
+  check(cm.note.empty(), "it has role names, so it doesn't say it only names its buttons");
+  page.comboClick(choiceNamed(cm, "Primary"));
+  {
+    const Json::Value w = readFile(page.fileFor("steam.app.12345", "frame_controller"));
+    check(w["controller_type"].asString() == "frame_controller" && w["interaction_profile"].asString() == "/interaction_profiles/oculus/touch_controller", "the file's the translated one");
+    check(w["bindings"]["/actions/oculustouchcontroller"]["chords"].size() == 1, "and the chord is in it");
+    check(sourcesOf(w).count("/user/hand/left/input/dpad_down button click /actions/oculustouchcontroller/in/primarybutton"), "with the translation still underneath");
+    check(fake.values.count(key), "and SteamVR's setting points there");
+  }
+  // Removing the add-on takes all of this back out, and forgetting a saved combo isn't part of that.
+  {
+    FakeSettings other = fake;
+    Page(d, other.make()).restoreAll();
+    check(!other.values.count(key), "removing the add-on puts the game back");
+    check(!fs::exists(fs::u8path(page.fileFor("steam.app.12345", "frame_controller"))), "and takes our file with it");
+    page.load();
+    page.setGame("steam.app.12345", "", "Fixture Game");
+    check(page.comboModel("", "").saved.size() == 1, "the combo itself is still in the saved list");
+    page.comboClick("combo_del_0");
+  }
+  fake.values.erase(key);
+
+  // Nothing to add to, or nothing running: it says so rather than offering something that can't work.
+  page.setGame("steam.app.12346", "", "No Bindings");
+  cm = page.comboModel("", "");
+  check(!cm.canMake && cm.why.find("Play it once") != std::string::npos, "a game it's never seen says to play it once");
+  shotCombo(cm, out + "/fixture_combos_unseen.png");
+  page.comboClickGreyed("combo_new");
+  check(page.status.find("No Bindings") != std::string::npos, "and the greyed button says why");
+  page.setGame("", "", "");
+  cm = page.comboModel("", "");
+  check(!cm.canMake && cm.why.find("particular game") != std::string::npos, "no game running says to start one");
+  shotCombo(cm, out + "/fixture_combos_nogame.png");
+  page.status.clear();
+  page.setGame("steam.app.777", "", "Named Game");
+
+  // A touch-only sensor, like a Quest's thumb rest, is on this page and not the Bindings one.
+  {
+    Library l2;
+    Json::Value touch;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    std::stringstream text(R"({"controller_type": "x", "input_source": {"/input/thumbrest": {"type": "button", "click": false, "touch": true}, "/input/a": {"type": "button", "click": true, "touch": true}, "/input/hidden": {"type": "button", "click": false, "touch": true, "visibility": "InputValueVisibility_SteamVRInternal"}}})");
+    Json::parseFromStream(b, text, &touch, &errs);
+    fixture::writeFile(fs::u8path(work) / "probe/drivers/x/resources/input/x_profile.json", Json::writeString(Json::StreamWriterBuilder(), touch));
+    Dirs pd = d;
+    pd.steamvr = work + "/probe";
+    l2.load(pd);
+    const Profile* p = l2.profile("x");
+    check(p && p->find("left", "/input/thumbrest") && p->find("left", "/input/thumbrest")->touchOnly, "a thumb rest counts as a touch sensor");
+    check(p && !p->find("left", "/input/thumbrest")->shown, "but isn't a row on the Bindings tab");
+    check(p && !p->find("left", "/input/hidden")->touchOnly, "and one SteamVR keeps for itself doesn't count");
+    check(p && comboText({{"left/input/thumbrest", "touch"}, {"left/input/a", "click"}}, *p) == "Touch left Thumb rest + Press left A", "both hands have it, so the text says which");
+  }
+
   // Unknown things don't take it down.
   page.setYours("some_future_controller", "", "");
+  check(!page.comboModel("", "").canMake, "a controller SteamVR can't describe can't have combos, and doesn't crash");
   m = page.model("", "");
   check(m.yours.note.find("no description") != std::string::npos, "a controller SteamVR can't describe just says so");
   shot(m, out + "/fixture_unknown.png");
@@ -475,6 +729,43 @@ static void testReal(const std::string& work, const std::string& out) {
   page.click("y:left/input/dpad_up");
   shot(page.model("", ""), out + "/game_pavlov_armed.png");
   page.click("bind_cancel");
+
+  // The combos page on the real controllers and real games. Only ever writes in the throwaway folder and the fake settings.
+  for (const auto& g : games) {
+    page.setGame(g.key, "", g.name);
+    page.status.clear();
+    giveModels(page, d.steamvr);
+    ComboModel cm = page.comboModel("", "");
+    shotCombo(cm, out + "/game_" + g.file + "_combos.png");
+    if (!cm.canMake) continue;
+    page.comboClick("combo_new");
+    page.comboClick("c:right/input/a");
+    page.comboClick("c:right/input/b");
+    shotCombo(page.comboModel("", ""), out + "/game_" + g.file + "_combos_step1.png");
+    page.comboClick("c:right/input/grip");
+    page.comboClick("c:right/input/grip");
+    shotCombo(page.comboModel("", ""), out + "/game_" + g.file + "_combos_step1b.png");
+    page.comboClick("c:right/input/grip");
+    page.comboClick("combo_next");
+    cm = page.comboModel("", "");
+    shotCombo(cm, out + "/game_" + g.file + "_combos_step2.png");
+    printf("%s: %zu combo choices on this page, of %d page(s), controls '%s'\n", g.name, cm.choices.size(), cm.pages, cm.controls.c_str());
+    check(!cm.choices.empty(), std::string(g.name) + ": a combo has something to set off");
+    if (cm.choices.empty()) { page.comboClick("combo_back"); page.comboClick("combo_cancel"); continue; }
+    page.comboClick(cm.choices[0].id);
+    cm = page.comboModel("", "");
+    check(cm.saved.size() == 1, std::string(g.name) + ": it saves");
+    shotCombo(page.comboModel("combo_row_0", ""), out + "/game_" + g.file + "_combos_saved.png");
+    const Json::Value w = readFile(page.fileFor(g.key, "frame_controller"));
+    int chords = 0;
+    for (const auto& set : w["bindings"].getMemberNames()) chords += w["bindings"][set]["chords"].size();
+    check(chords >= 1, std::string(g.name) + ": the chord is in the file");
+    check(w["controller_type"].asString() == "frame_controller", std::string(g.name) + ": and the file's for this controller");
+    page.comboClick("combo_del_0");
+    check(!fs::exists(fs::u8path(page.fileFor(g.key, "frame_controller"))), std::string(g.name) + ": and it all comes back out");
+    page.status.clear();
+  }
+  page.setGame("steam.app.555160", "", "Pavlov VR");
 
   // What it costs. None of this runs unless the page is open.
   {

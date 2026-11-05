@@ -65,6 +65,8 @@ jobs:
 
   windows:
     needs: frame
+    # The private test copy only needs the Frame build, and Windows machines use up its free minutes twice as fast.
+    if: github.repository == 'RxVreality/UTMTFTM'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4

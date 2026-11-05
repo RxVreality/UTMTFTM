@@ -79,6 +79,7 @@ constexpr uint32_t kGamePid = 4242;
 struct World {
   std::mutex m;
   bool dashboardVisible = true;
+  uint32_t primaryDevice = kHmd;  // whichever controller the dashboard's laser is on. Nobody yet
   bool quit = false;
   uint32_t scenePid = 0;
   std::deque<vr::VREvent_t> dashEvents;
@@ -189,6 +190,10 @@ vr::EVROverlayError ovCreate(void*, const char* key, const char*, vr::VROverlayH
   return vr::VROverlayError_None;
 }
 const char* ovErrorName(void*, vr::EVROverlayError) { return "an overlay error"; }
+uint32_t ovPrimaryDevice(void*) {
+  std::lock_guard<std::mutex> lock(g.m);
+  return g.primaryDevice;
+}
 bool ovDashVisible(void*) {
   std::lock_guard<std::mutex> lock(g.m);
   return g.dashboardVisible;
@@ -497,6 +502,7 @@ void fillInterfaces() {
   FILL(g_overlay, IVROverlay, CreateOverlay, ovCreate);
   FILL(g_overlay, IVROverlay, GetOverlayErrorNameFromEnum, ovErrorName);
   FILL(g_overlay, IVROverlay, IsDashboardVisible, ovDashVisible);
+  FILL(g_overlay, IVROverlay, GetPrimaryDashboardDevice, ovPrimaryDevice);
   FILL(g_overlay, IVROverlay, IsOverlayVisible, ovVisible);
   FILL(g_overlay, IVROverlay, PollNextOverlayEvent, ovPollEvent);
   FILL(g_overlay, IVROverlay, SetOverlayTexture, ovTexture);
@@ -554,12 +560,14 @@ void pushMouse(vr::EVREventType type, double x, double y) {
 }
 
 // The laser lands on a button and clicks it. Where the button is comes from the same drawing code the page uses.
+bool g_fineArrows = false;  // the Hands page has its fine adjust arrows out
 void click(const std::string& id) {
   fh::Canvas cv(1200, 760);
   std::vector<fh::Button> buttons;
   fh::DashModel m;
   m.game = "Simulated Game";
   m.live = fh::LiveState::Live;
+  m.fine = g_fineArrows;
   fh::drawDashboard(cv, m, buttons);
   for (const fh::Button& b : buttons) {
     if (b.id != id) continue;
@@ -602,9 +610,39 @@ void clickBindings(const std::string& id) {
   check(false, ("there's no button called " + id + " on the bindings page").c_str());
 }
 
+// And on the combos page, the same way.
+void clickCombos(const std::string& id) {
+  fh::bind::Page& page = *g_pageForClicks;
+  for (const std::string& name : page.modelsWanted()) {
+    fh::Mesh mesh;
+    std::vector<fh::ModelPart> parts;
+    if (fh::modelFromFiles(fh::platform::steamvrDir(), name, mesh, parts)) page.give(name, mesh, parts);
+  }
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::drawCombos(cv, page.comboModel("", ""), buttons);
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    page.comboClick(id);
+    return;
+  }
+  check(false, ("there's no button called " + id + " on the combos page").c_str());
+}
+
 void setDashboard(bool on) {
   std::lock_guard<std::mutex> lock(g.m);
   g.dashboardVisible = on;
+}
+void setPointing(uint32_t device) {
+  std::lock_guard<std::mutex> lock(g.m);
+  g.primaryDevice = device;
 }
 void setScene(uint32_t pid) {
   std::lock_guard<std::mutex> lock(g.m);
@@ -840,6 +878,135 @@ void scenarioBindings() {
   finish();
 }
 
+// Fine adjust with the dashboard open: every tap reaches the real driver, on the hand that isn't pointing.
+void scenarioFine() {
+  startServer(true);
+  setScene(kGamePid);
+  wait(3500);
+  setPointing(kRight);
+  wait(300);
+  check(gap(fakeserver::seenPose(kLeft), kLeftStart) < 1e-4, "nothing's moved yet");
+
+  click("fine_toggle");
+  wait(400);
+  g_fineArrows = true;
+  click("fine_big");
+  wait(300);
+  click("nudge_0_0_p");  // the left hand, 1 cm forward
+  wait(500);
+  check(std::fabs(gap(fakeserver::seenPose(kLeft), kLeftStart) - 0.01) < 5e-4, "with the dashboard open, tapping moves the hand that isn't pointing (mm)", gap(fakeserver::seenPose(kLeft), kLeftStart) * 1000);
+  check(gap(fakeserver::seenPose(kRight), kRightStart) < 1e-4, "and leaves the other alone");
+  click("nudge_0_0_m");
+  wait(500);
+  check(gap(fakeserver::seenPose(kLeft), kLeftStart) < 1e-4, "tapping back puts it back (mm)", gap(fakeserver::seenPose(kLeft), kLeftStart) * 1000);
+
+  click("fine_small");
+  wait(300);
+  for (int i = 0; i < 3; ++i) {
+    click("nudge_0_4_p");  // 1 degree to the right
+    wait(200);
+  }
+  wait(400);
+  check(std::fabs(turn(fakeserver::seenPose(kLeft), kLeftStart) - 3) < 0.1, "three taps turn it three degrees", turn(fakeserver::seenPose(kLeft), kLeftStart));
+
+  setPointing(kLeft);
+  wait(500);
+  check(turn(fakeserver::seenPose(kLeft), kLeftStart) < 0.05, "point with that hand and it stands aside, so the laser's true", turn(fakeserver::seenPose(kLeft), kLeftStart));
+  setPointing(kRight);
+  wait(500);
+  check(std::fabs(turn(fakeserver::seenPose(kLeft), kLeftStart) - 3) < 0.1, "and it comes back when you point with the other", turn(fakeserver::seenPose(kLeft), kLeftStart));
+
+  click("nudge_1_1_p");  // the right hand, the one pointing, 1 mm up
+  wait(500);
+  check(gap(fakeserver::seenPose(kRight), kRightStart) < 1e-4, "the hand that's pointing doesn't move yet", gap(fakeserver::seenPose(kRight), kRightStart) * 1000);
+  setDashboard(false);
+  wait(500);
+  check(std::fabs(gap(fakeserver::seenPose(kRight), kRightStart) - 0.001) < 2e-4, "and does when the dashboard shuts (mm)", gap(fakeserver::seenPose(kRight), kRightStart) * 1000);
+  check(std::fabs(turn(fakeserver::seenPose(kLeft), kLeftStart) - 3) < 0.1, "the other's still turned");
+
+  setDashboard(true);
+  wait(300);
+  click("fine_toggle");
+  g_fineArrows = false;
+  wait(500);
+  check(turn(fakeserver::seenPose(kLeft), kLeftStart) < 0.05 && gap(fakeserver::seenPose(kRight), kRightStart) < 1e-4, "out of fine adjust, the dashboard has both hands true again");
+  check(logHas("fine adjust left") && logHas("fine adjust right"), "the log says what was done");
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  finish();
+}
+
+// Making a combo on the page, in the real program, and what lands in SteamVR's setting and the binding file.
+void scenarioCombos() {
+  const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
+  fh::fixture::writeSteamVR(steamvr, config, fh::platform::dataDir() + "/../fake-games");
+  fh::bind::Dirs dirs;
+  dirs.steamvr = steamvr;
+  dirs.steam = fh::platform::steamDir();
+  dirs.data = fh::platform::dataDir() + "/../fake-page-data";
+  dirs.config = fh::platform::configDirs();
+  fh::bind::Page page(dirs, fh::bind::Settings{[](const std::string&, const std::string&) { return std::string(); }, [](const std::string&, const std::string&, const std::string&) { return true; }, [](const std::string&, const std::string&) {}});
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  page.setGame("steam.app.12345", "steam.app.12345", "Simulated Game");
+  g_pageForClicks = &page;
+
+  startServer(true);
+  setScene(kGamePid);
+  wait(3500);
+  const std::string setting = "steam.app.12345/frame_controller_250820_CurrentURL_openxr";
+  const int before = g_dashUploads;
+  click("page_combos");
+  wait(1500);
+  check(g_dashUploads > before, "opening the page sends SteamVR a new picture", g_dashUploads - before);
+  check(settingNow(setting).empty(), "just looking changes nothing");
+  clickCombos("combo_new");
+  wait(300);
+  clickCombos("c:left/input/dpad_up");
+  wait(200);
+  clickCombos("c:left/input/dpad_down");
+  wait(200);
+  clickCombos("combo_next");
+  wait(300);
+  const fh::ComboModel choosing = page.comboModel("", "");
+  check(!choosing.choices.empty(), "there's something to pick");
+  std::string primary;
+  for (const fh::ComboChoice& e : choosing.choices) if (e.name == "Primary") primary = e.id;
+  check(!primary.empty(), "including Primary");
+  clickCombos(primary);
+  wait(600);
+  const std::string url = settingNow(setting);
+  check(url.rfind("file:///", 0) == 0, "saving it points the game's setting at a file");
+  const std::string file = "/" + url.substr(8);
+  {
+    std::ifstream in(file);
+    Json::Value v;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    check(in && Json::parseFromStream(b, in, &v, &errs), "and the file's there, at that path, and reads");
+    const Json::Value& chords = v["bindings"]["/actions/oculustouchcontroller"]["chords"];
+    check(chords.size() == 1 && chords[0]["output"].asString() == "/actions/oculustouchcontroller/in/primarybutton", "with the chord in it, set to what was picked");
+    check(chords.size() == 1 && chords[0]["inputs"].size() == 2 && chords[0]["inputs"][0][1].asString() == "touch", "on the controls that were tapped, as touches");
+  }
+  const int beforeHands = g_dashUploads;
+  click("page_hands");
+  wait(500);
+  check(g_dashUploads > beforeHands, "the Hands tab goes back", g_dashUploads - beforeHands);
+  click("page_combos");
+  wait(500);
+  setScene(0);
+  wait(1500);
+  setScene(kGamePid);
+  wait(1500);
+  check(settingNow(setting) == url, "and it's still set after the game closes and starts again");
+  clickCombos("combo_del_0");
+  wait(600);
+  check(settingNow(setting).empty(), "removing it takes the setting off");
+  check(access(file.c_str(), F_OK) != 0, "and our file's gone");
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  g_pageForClicks = nullptr;
+  finish();
+}
+
 void scenarioBypass() {
   startServer(false);
   setScene(kGamePid);
@@ -861,6 +1028,8 @@ class ClientCore {
     if (type == vr::VRApplication_Overlay && g_scenarioName == "place") g_scenario = std::thread(scenarioPlace);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "bypass") g_scenario = std::thread(scenarioBypass);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "bindings") g_scenario = std::thread(scenarioBindings);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "fine") g_scenario = std::thread(scenarioFine);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "combos") g_scenario = std::thread(scenarioCombos);
     return vr::VRInitError_None;
   }
   virtual void Cleanup() {

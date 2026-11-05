@@ -72,6 +72,58 @@ int main() {
     for (int k = 0; k < 3; ++k) CHECK(C.rot[k] == O2.rot[k], "pull-back changed rotation");
   }
 
+  // Fine adjust. Each of the six arrows has to move the hand the way the page says it does, seen from behind the hand: that's
+  // what the hint under the laser promises, and a wrong sign here would look fine in every number.
+  {
+    auto tap = [](int axis, int dir) { return nudged(Offset{}, axis, dir, 0.01f, 5.f, 0.15f); };
+    const auto forwardOf = [](const Offset& o) { M m = fromOffset(o); return V3{-m.m[0][2], -m.m[1][2], -m.m[2][2]}; };
+    const auto upOf = [](const Offset& o) { M m = fromOffset(o); return V3{m.m[0][1], m.m[1][1], m.m[2][1]}; };
+    CHECK(tap(0, 1).pos[2] < 0 && tap(0, -1).pos[2] > 0, "forward isn't toward -Z");
+    CHECK(tap(1, 1).pos[1] > 0 && tap(1, -1).pos[1] < 0, "up isn't +Y");
+    CHECK(tap(2, 1).pos[0] > 0 && tap(2, -1).pos[0] < 0, "right isn't +X");
+    CHECK(forwardOf(tap(3, 1)).y > 0.05f && forwardOf(tap(3, -1)).y < -0.05f, "pitch up doesn't point the hand up");
+    CHECK(forwardOf(tap(4, 1)).x > 0.05f && forwardOf(tap(4, -1)).x < -0.05f, "yaw right doesn't point the hand right");
+    CHECK(upOf(tap(5, 1)).x > 0.05f && upOf(tap(5, -1)).x < -0.05f, "rolling clockwise doesn't tip the top of the hand to the right");
+    for (int axis = 0; axis < 6; ++axis) {
+      Offset o = randOff(0.05f);
+      const Offset before = nudged(o, axis, 1, 0.001f, 1.f, 1.f);  // rounded to the grid, the way anything tapped already is
+      const Offset back = nudged(nudged(before, axis, 1, 0.001f, 1.f, 1.f), axis, -1, 0.001f, 1.f, 1.f);
+      for (int k = 0; k < 3; ++k) CHECK(std::fabs(back.pos[k] - before.pos[k]) < 1e-4f && std::fabs(back.rot[k] - before.rot[k]) < 1e-2f, "a tap and a tap back don't land where they started (axis %d)", axis);
+      for (int k = 0; k < 6; ++k) {
+        if (k == axis) continue;  // and nothing else moves
+        const float a = k < 3 ? before.pos[k == 0 ? 2 : k == 1 ? 1 : 0] : before.rot[k - 3];
+        const Offset n = nudged(before, axis, 1, 0.001f, 1.f, 1.f);
+        const float b = k < 3 ? n.pos[k == 0 ? 2 : k == 1 ? 1 : 0] : n.rot[k - 3];
+        CHECK(std::fabs(a - b) < 1e-3f, "tapping one number changed another (%d, %d)", axis, k);
+      }
+    }
+    Offset zeroed = nudged(nudged(Offset{}, 4, 1, 0.001f, 1.f, 0.15f), 4, -1, 0.001f, 1.f, 0.15f);
+    CHECK(zeroed.zero(), "there and back should read as no offset");
+
+    // Distance keeps to the limit, unless the hand's past it already and this brings it closer.
+    Offset atLimit;
+    atLimit.pos[2] = -0.15f;
+    bool limited = false;
+    Offset same1 = nudged(atLimit, 0, 1, 0.01f, 5.f, 0.15f, &limited);
+    CHECK(limited && same1.pos[2] == atLimit.pos[2], "forward past the limit should be refused");
+    Offset in = nudged(atLimit, 0, -1, 0.01f, 5.f, 0.15f, &limited);
+    CHECK(!limited && std::fabs(in.pos[2] + 0.14f) < 1e-4f, "back from the limit should work");
+    Offset past;
+    past.pos[2] = -0.25f;
+    in = nudged(past, 0, -1, 0.01f, 5.f, 0.15f, &limited);
+    CHECK(!limited && in.pos[2] > past.pos[2], "a hand past the limit can still come back");
+    nudged(past, 0, 1, 0.01f, 5.f, 0.15f, &limited);
+    CHECK(limited, "but can't go further");
+
+    // Rotation is never limited. It goes all the way round.
+    Offset spun;
+    for (int i = 0; i < 800; ++i) {
+      spun = nudged(spun, 4, 1, 0.001f, 1.f, 0.0f, &limited);
+      CHECK(!limited && std::fabs(spun.rot[1]) <= 180.f, "rotation got limited, or stopped wrapping");
+    }
+    CHECK(std::fabs(spun.rot[1] - 280.f + 360.f) < 1e-3f || std::fabs(spun.rot[1] + 80.f) < 1e-3f || std::fabs(spun.rot[1] - 80.f) < 1e-3f, "800 degrees should have wrapped");
+  }
+
   // B. Matching: the resting pose follows the grabbing hand exactly and never changes the offset.
   for (int i = 0; i < 2000; ++i) {
     M G = mul(randPose(), fromOffset(randOff(0.08f)));

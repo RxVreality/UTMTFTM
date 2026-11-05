@@ -144,6 +144,7 @@ struct App {
 
   // The bindings page. It reads nothing until it's opened, or until a game starts when there's a layout saved.
   DashPage page = DashPage::Hands;
+  bool fineAdjust = false, fineBig = false;  // the arrows on the Hands page, and how far they go
   bind::Page bindings{bindDirs(), bindSettings()};
   ModelLoader bindLoader;
   std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
@@ -307,7 +308,7 @@ struct App {
 
   // One model at a time, a little on each pass of the loop, and only while the page is on screen.
   void loadBindModels() {
-    if (page != DashPage::Bindings || !bindings.loaded() || !panelShowing()) return;
+    if (page == DashPage::Hands || !bindings.loaded() || !panelShowing()) return;
     if (bindLoading.empty()) {
       const auto wanted = bindings.modelsWanted();
       if (wanted.empty()) return;
@@ -562,6 +563,9 @@ struct App {
     fx.apply(m);
     m.armed = mode == Mode::Armed;
     m.confirmClose = Clock::now() < confirmUntil;
+    m.fine = fineAdjust && mode == Mode::Idle;
+    m.fineBig = fineBig;
+    m.hint = nudgeHint(fx.hover, fineBig);
     return m;
   }
 
@@ -592,6 +596,20 @@ struct App {
         drawBindings(dashCv, m, buttons);
         drawn = true;
       });
+    else if (page == DashPage::Combos)
+      guarded([&] {
+        syncBindings();
+        ComboModel m = bindings.comboModel(fx.hover, fx.down);
+        m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::NextLaunch;
+        m.confirmClose = Clock::now() < confirmUntil;
+        m.status.clear();
+        m.statusWarn = m.statusGood = false;
+        if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+        key = comboKey(m);
+        if (!dashForce && key == dashDrawn) { drawn = true; return; }
+        drawCombos(dashCv, m, buttons);
+        drawn = true;
+      });
     if (drawn && key == dashDrawn && !dashForce) return;
     if (!drawn) {
       DashModel m = dashModel();
@@ -619,9 +637,11 @@ struct App {
     if (const Button* hb = hitButton(buttons, x, y)) {
       const std::string id = hb->id;  // copy: buttons are rebuilt on the next draw
       logf("click %s%s", id.c_str(), hb->enabled ? "" : " (greyed)");
-      if (page == DashPage::Bindings && id != "close" && id.rfind("page_", 0) != 0) {
+      if (page != DashPage::Hands && id != "close" && id.rfind("page_", 0) != 0) {
+        const bool combos = page == DashPage::Combos;
         guarded([&] {
-          if (hb->enabled) bindings.click(id);
+          if (combos) { if (hb->enabled) bindings.comboClick(id); else bindings.comboClickGreyed(id); }
+          else if (hb->enabled) bindings.click(id);
           else bindings.clickGreyed(id);
         });
         if (bindings.statusSerial != bindStatusSeen) {
@@ -639,6 +659,11 @@ struct App {
       }
       else if (id == "page_hands") { page = DashPage::Hands; statusUntil = {}; }
       else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); }); }
+      else if (id == "page_combos") { page = DashPage::Combos; statusUntil = {}; guarded([&] { syncBindings(); }); }
+      else if (id == "fine_toggle") { fineAdjust = !fineAdjust; statusUntil = {}; }
+      else if (id == "fine_small") fineBig = false;
+      else if (id == "fine_big") fineBig = true;
+      else if (id.rfind("nudge_", 0) == 0) nudge(id);
       else if (id == "scope_game") { saveForGame = true; setStatus("Saving for this game only."); }
       else if (id == "scope_global") { saveForGame = false; setStatus("Saving for all games."); }
       else if (id == "cancel_armed") { mode = Mode::Idle; in.release(); setStatus("Cancelled. Nothing changed."); }
@@ -658,6 +683,25 @@ struct App {
       if (id != "close") confirmUntil = {};
       dashForce = true;
     }
+  }
+
+  // One tap on a fine adjust arrow, saved to the chosen scope like anything else on this page. The number on the page changes
+  // and the hint says what it did, so the only thing worth saying is when it didn't.
+  void nudge(const std::string& id) {
+    int h = 0, axis = 0, dir = 0;
+    if (!parseNudge(id, h, axis, dir)) return;
+    HandPair p = appliedNow();
+    Offset& o = h == 0 ? p.left : p.right;
+    bool limited = false;
+    const Offset next = nudged(o, axis, dir, fineBig ? 0.01f : 0.001f, fineBig ? 5.f : 1.f, store.max_pos, &limited);
+    if (limited) {
+      setStatus("That's the " + std::to_string((int)std::lround(store.max_pos * 100)) + " cm limit. Raise Max distance to go further.", Warn);
+      return;
+    }
+    o = next;
+    commitOffsets(saveForGame ? sceneKey : "", p, true);
+    if (!statusWarn) statusUntil = {};
+    logf("fine adjust %s: %s", h ? "right" : "left", friendlyOffset(o).c_str());
   }
 
   // Reset one hand of what's applied now, saved to the chosen scope.
@@ -702,6 +746,7 @@ struct App {
   // ---------------- placement / matching session
   void beginSession(std::vector<Step> s) {
     steps = std::move(s); si = 0;
+    fineAdjust = false;
     placingFor = (saveForGame && !sceneKey.empty()) ? sceneKey : "";
     live = sceneLive();
     start = work = appliedNow();
@@ -1069,8 +1114,16 @@ struct App {
       last = now;
       bool dashUp = panelShowing();
       bool busy = mode != Mode::Idle || dashUp || !panelDrawn.empty() || now - lastDashEvent < std::chrono::seconds(2);
-      if (dashUp != store.dashboardUp) {  // the driver moves the controller, and the dashboard's pointers with it
+      // While fine adjusting, the hand that isn't pointing can stay moved, so you can watch it go.
+      int liveHand = -1;
+      if (dashUp && fineAdjust && page == DashPage::Hands && mode == Mode::Idle) {
+        const uint32_t pointing = vr::VROverlay()->GetPrimaryDashboardDevice();
+        if (pointing == store.device[0]) liveHand = 1;
+        else if (pointing == store.device[1]) liveHand = 0;
+      }
+      if (dashUp != store.dashboardUp || liveHand != store.dashLiveHand) {  // the driver moves the controller, and the dashboard's pointers with it
         store.dashboardUp = dashUp;
+        store.dashLiveHand = liveHand;
         if (mode != Mode::Placing) store.publishLive();
       }
       bool wantTrue = mode != Mode::Idle && store.useDriver;
@@ -1092,6 +1145,7 @@ struct App {
     vr::VROverlay()->HideOverlay(hint);
     Store::askTruePoses(false);
     store.dashboardUp = false;
+    store.dashLiveHand = -1;
     store.publishLive();
     store.save();
     vr::VROverlay()->DestroyOverlay(ghost);

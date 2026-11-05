@@ -437,21 +437,21 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   markTile(c, L, 20, 80, 64);
   caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  const double tabX = 462, tabY = 34, tabH = 42, tabW = 124, tabD = tabH * kLean;
-  const struct { DashPage p; const char* id; const char* name; } tabs[2] = {{DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}};
-  for (int i = 0; i < 2; ++i) {
+  const double tabX = 456, tabY = 34, tabH = 42, tabW = 112, tabD = tabH * kLean;
+  const struct { DashPage p; const char* id; const char* name; } tabs[3] = {{DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}};
+  for (int i = 0; i < 3; ++i) {
     const double x = tabX + i * (tabW - tabD + 3);
     const bool on = tabs[i].p == page;
     if (on) slab(c, x, tabY, tabW, tabH, PAPER);
     else frame(c, x, tabY, tabW, tabH, PAPER, 0.45, 2);
     fxOver(c, x, tabY, tabW, tabH, tabs[i].id, true, on);
-    caps(c, x + tabW / 2, tabY + 28, 18, tabs[i].name, on ? INK : PAPER, 1, 1, 1.4);
+    caps(c, x + tabW / 2, tabY + 27, 16, tabs[i].name, on ? INK : PAPER, 1, 1, 1.2);
     btn.push_back({i == 0 ? x : x + tabD / 2, tabY, tabW - tabD / 2, tabH, tabs[i].id});
   }
   if (confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
   else button(c, btn, R - 110, 30, 110, 46, "close", "Close", Outline);
   const double right = R - (confirmClose ? 234 : 130);
-  text(c, right, 50, 21, game.empty() ? "No game running" : game, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 2 * tabW - tabD + 12));
+  text(c, right, 50, 21, game.empty() ? "No game running" : game, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 3 * tabW - 2 * tabD + 12));
   if (live == LiveState::Live || live == LiveState::NextLaunch) {
     const bool on = live == LiveState::Live;
     const double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
@@ -473,8 +473,77 @@ std::string dashKey(const DashModel& m) {
     }
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
-  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood);
+  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint;
   return k;
+}
+
+// The one-choice-of-several control: the chosen one solid, the others outlined.
+struct Segment { std::string id, text; bool on, enabled; };
+static void segments(cairo_t* c, std::vector<Button>& out, double x, double y, double w, double h, const std::vector<Segment>& list, double textSize = 19) {
+  const double d = h * kLean, gap = 3;
+  const double each = (w + d * (list.size() - 1) - gap * (list.size() - 1)) / list.size();
+  for (size_t i = 0; i < list.size(); ++i) {
+    const Segment& s = list[i];
+    const double bx = x + i * (each - d + gap);
+    if (s.on) slab(c, bx, y, each, h, PAPER);
+    else frame(c, bx, y, each, h, s.enabled ? PAPER : FAINT, s.enabled ? 0.45 : 0.5, 2);
+    fxOver(c, bx, y, each, h, s.id, s.enabled, s.on);
+    caps(c, bx + each / 2, y + h / 2 + textSize * 0.36, textSize, s.text, s.on ? INK : s.enabled ? PAPER : FAINT, 1, 1, 1.4, each - 24);
+    const double hitX = i == 0 ? bx : bx + d / 2;
+    out.push_back({hitX, y, each - d / 2, h, s.id, s.enabled});
+  }
+}
+
+bool parseNudge(const std::string& id, int& hand, int& axis, int& dir) {
+  if (id.size() != 11 || id.rfind("nudge_", 0) != 0 || id[7] != '_' || id[9] != '_') return false;
+  hand = id[6] - '0';
+  axis = id[8] - '0';
+  dir = id[10] == 'p' ? 1 : -1;
+  return (hand == 0 || hand == 1) && axis >= 0 && axis <= 5 && (id[10] == 'p' || id[10] == 'm');
+}
+
+std::string nudgeHint(const std::string& id, bool big) {
+  int hand = 0, axis = 0, dir = 0;
+  if (!parseNudge(id, hand, axis, dir)) return "";
+  const std::string who = hand ? "your right hand " : "your left hand ", far = big ? "1 cm " : "1 mm ", turn = big ? "5\xC2\xB0 " : "1\xC2\xB0 ";
+  switch (axis) {
+    case 0: return "Moves " + who + far + (dir > 0 ? "forward." : "back.");
+    case 1: return "Moves " + who + far + (dir > 0 ? "up." : "down.");
+    case 2: return "Moves " + who + far + (dir > 0 ? "to the right." : "to the left.");
+    case 3: return "Tips " + who + turn + (dir > 0 ? "up." : "down.");
+    case 4: return "Turns " + who + turn + (dir > 0 ? "to the right." : "to the left.");
+    default: return "Rolls " + who + turn + (dir > 0 ? "clockwise." : "anticlockwise.");
+  }
+}
+
+// What's on a fine adjust arrow. Filled in the colour it's drawn with.
+enum class Glyph { Up, Down, Left, Right, Clockwise, Anticlockwise };
+static void glyph(cairo_t* c, double cx, double cy, double s, Glyph g, RGB k) {
+  set(c, k);
+  auto tri = [&](double x0, double y0, double x1, double y1, double x2, double y2) {
+    cairo_move_to(c, x0, y0); cairo_line_to(c, x1, y1); cairo_line_to(c, x2, y2); cairo_close_path(c); cairo_fill(c);
+  };
+  switch (g) {
+    case Glyph::Up: tri(cx - s, cy + s * 0.7, cx + s, cy + s * 0.7, cx, cy - s * 0.8); break;
+    case Glyph::Down: tri(cx - s, cy - s * 0.7, cx + s, cy - s * 0.7, cx, cy + s * 0.8); break;
+    case Glyph::Left: tri(cx + s * 0.7, cy - s, cx + s * 0.7, cy + s, cx - s * 0.8, cy); break;
+    case Glyph::Right: tri(cx - s * 0.7, cy - s, cx - s * 0.7, cy + s, cx + s * 0.8, cy); break;
+    case Glyph::Clockwise:
+    case Glyph::Anticlockwise: {
+      // A ring, open at the bottom, with the arrowhead where it ends.
+      const bool cw = g == Glyph::Clockwise;
+      const double pi = 3.14159265, r = s * 0.9, end = cw ? pi * 0.15 : pi * 0.85;
+      cairo_set_line_width(c, s * 0.42);
+      cairo_set_line_cap(c, CAIRO_LINE_CAP_BUTT);
+      cairo_new_sub_path(c);
+      if (cw) cairo_arc(c, cx, cy, r, -pi * 1.15, end);
+      else cairo_arc_negative(c, cx, cy, r, pi * 0.15, end);
+      cairo_stroke(c);
+      const double ax = cx + r * std::cos(end), ay = cy + r * std::sin(end), a = s * 0.6, sign = cw ? -1 : 1;
+      tri(ax - a, ay - s * 0.05, ax + a, ay - s * 0.05, ax + sign * s * 0.25, ay + a);
+      break;
+    }
+  }
 }
 
 void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
@@ -495,6 +564,11 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     text(c, L + 28, 134, 25, "Now close the dashboard", true, INK);
     text(c, L + 22, 158, 18, "You can start grabbing as soon as it's shut.", false, INK, 1, 0, R - L - 220);
     button(c, btn, R - 158, 116, 134, 44, "cancel_armed", "Cancel", OnSignal);
+  } else if (m.fine) {
+    text(c, L, headY, 27, m.live == LiveState::NoGame ? "Fine adjust the default for every game" : "Fine adjust your hands", true, PAPER);
+    text(c, L, subY, 18, m.live == LiveState::Live ? "Tap the arrows. The hand you aren't pointing with moves in the game as you tap."
+                         : m.live == LiveState::NoGame ? "Tap the arrows. Start a game first to see your hands move as you tap."
+                                                       : "Tap the arrows. This game takes new offsets the next time it launches.", false, DIM, 1, 0, R - L);
   } else if (m.live == LiveState::Live) {
     text(c, L, headY, 27, "Grab your in-game hand and move it", true, PAPER);
     text(c, L, subY, 18, "A bubble shows how far it can go (" + std::to_string(m.maxCm) + " cm). Let go outside it and it's pulled back.", false, DIM, 1, 0, R - L);
@@ -528,21 +602,38 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
 
     // the readout, ruled like a spec sheet. Always all six, so the eye knows where each number lives.
     const Offset& o = cd.applied;
+    // Each reads positive the way its name says. Yaw and roll are stored the other way round.
     const char* lab[6] = {"Forward", "Up", "Right", "Pitch", "Yaw", "Roll"};
-    double val[6] = {-o.pos[2] * 100, o.pos[1] * 100, o.pos[0] * 100, o.rot[0], o.rot[1], o.rot[2]};
-    const double tx0 = x + 268, tx1 = x + cw, rowH = 41, top = 228;
+    double val[6] = {-o.pos[2] * 100, o.pos[1] * 100, o.pos[0] * 100, o.rot[0], -o.rot[1], -o.rot[2]};
+    const Glyph less[6] = {Glyph::Down, Glyph::Down, Glyph::Left, Glyph::Down, Glyph::Left, Glyph::Anticlockwise};
+    const Glyph more[6] = {Glyph::Up, Glyph::Up, Glyph::Right, Glyph::Up, Glyph::Right, Glyph::Clockwise};
+    const double tx0 = x + 268, tx1 = x + cw, rowH = 41, top = 228, arrowW = 44, arrowH = 34;
     for (int i = 0; i < 6; ++i) {
       double ry = top + i * rowH, base = ry + 29;
       bool cm = i < 3, none = std::fabs(val[i]) < (cm ? 0.05 : 0.5);
       label(c, tx0, base, 16, lab[i]);
+      // With the arrows out, the number sits between them, and ends where the arrow on the right starts.
+      double end = tx1;
+      if (m.fine) {
+        end = tx1 - arrowW - 8;
+        const double ay = ry + (rowH - arrowH) / 2 + 1;
+        for (int side = 0; side < 2; ++side) {
+          const std::string id = std::string("nudge_") + (h ? "1_" : "0_") + std::to_string(i) + (side ? "_p" : "_m");
+          const double ax = side ? tx1 - arrowW : tx1 - 2 * arrowW - 100;
+          frame(c, ax, ay, arrowW, arrowH, PAPER, 0.7, 2);
+          fxOver(c, ax, ay, arrowW, arrowH, id);
+          glyph(c, ax + arrowW / 2, ay + arrowH / 2, 7.5, side ? more[i] : less[i], PAPER);
+          btn.push_back({ax, ay, arrowW, arrowH, id});
+        }
+      }
       const char* unit = cm ? "cm" : "\xC2\xB0";
       double uw = cm ? capsW(c, "CM", 14, 1, Body) : 12;
-      if (cm) caps(c, tx1, base, 14, "cm", none ? FAINT : DIM, 1, 2, 1, 0, Body);
-      else text(c, tx1, base, 25, unit, true, none ? FAINT : PAPER, 1, 2);
+      if (cm) caps(c, end, base, 14, "cm", none ? FAINT : DIM, 1, 2, 1, 0, Body);
+      else text(c, end, base, 25, unit, true, none ? FAINT : PAPER, 1, 2);
       std::string v = none ? (cm ? "0.0" : "0") : fmt(cm ? "%+.1f" : "%+.0f", val[i]);
       size_t minus = v.find('-');
       if (minus != std::string::npos) v.replace(minus, 1, "\xE2\x80\x93");  // an en dash: this font has no true minus sign
-      text(c, tx1 - uw - (cm ? 6 : 1), base, 25, v, true, none ? FAINT : PAPER, 1, 2);
+      text(c, end - uw - (cm ? 6 : 1), base, 25, v, true, none ? FAINT : PAPER, 1, 2);
       if (i < 5) hline(c, tx0, tx1, ry + rowH, i == 2 ? DIM : LINE, 0.8);
     }
     double bty = 490, bth = 54, rw = 150;
@@ -553,7 +644,15 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
 
   // actions for both hands, and where they're saved
   double ay = 572, ah = 54, sx = mid + 12;
-  button(c, btn, L, ay, cw, ah, "place_both", "Move both hands", Outline);
+  if (m.fine) {
+    const double stepW = label(c, L, ay + 34, 16, "Step");
+    const double segL = L + stepW + 16;
+    segments(c, btn, segL, ay, L + cw - 150 - segL, ah, {{"fine_small", "1 mm, 1\xC2\xB0", !m.fineBig, true}, {"fine_big", "1 cm, 5\xC2\xB0", m.fineBig, true}});
+    button(c, btn, L + cw - 140, ay, 140, ah, "fine_toggle", "Done", Solid);
+  } else {
+    button(c, btn, L, ay, cw - 190, ah, "place_both", "Move both hands", Outline);
+    button(c, btn, L + cw - 180, ay, 180, ah, "fine_toggle", "Fine adjust", Outline);
+  }
   double saveW = label(c, sx, ay + 34, 16, "Save for");
   double segX = sx + saveW + 18, segD = ah * kLean, segGap = 3, segW = (R - segX + segD - segGap) / 2;
   for (int i = 0; i < 2; ++i) {
@@ -600,8 +699,10 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   if (!st.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, R - L - 28);
+  } else if (!m.hint.empty()) {
+    text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, R - L);
   } else {
-    if (m.armed || m.live == LiveState::NoGame) {}  // the line above the hands already says it
+    if (m.armed || m.live == LiveState::NoGame || m.fine) {}  // the line above the hands already says it
     else if (m.live == LiveState::Live) st = "Changes show on your in-game hands as you move them.";
     else st = "This game takes new offsets the next time it launches.";
     if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
@@ -750,25 +851,8 @@ std::string bindKey(const BindModel& m) {
   return k;
 }
 
-// The one-choice-of-several control: the chosen one solid, the others outlined.
-struct Segment { std::string id, text; bool on, enabled; };
-static void segments(cairo_t* c, std::vector<Button>& out, double x, double y, double w, double h, const std::vector<Segment>& list, double textSize = 19) {
-  const double d = h * kLean, gap = 3;
-  const double each = (w + d * (list.size() - 1) - gap * (list.size() - 1)) / list.size();
-  for (size_t i = 0; i < list.size(); ++i) {
-    const Segment& s = list[i];
-    const double bx = x + i * (each - d + gap);
-    if (s.on) slab(c, bx, y, each, h, PAPER);
-    else frame(c, bx, y, each, h, s.enabled ? PAPER : FAINT, s.enabled ? 0.45 : 0.5, 2);
-    fxOver(c, bx, y, each, h, s.id, s.enabled, s.on);
-    caps(c, bx + each / 2, y + h / 2 + textSize * 0.36, textSize, s.text, s.on ? INK : s.enabled ? PAPER : FAINT, 1, 1, 1.4, each - 24);
-    const double hitX = i == 0 ? bx : bx + d / 2;
-    out.push_back({hitX, y, each - d / 2, h, s.id, s.enabled});
-  }
-}
-
 // One hand: the controller in the middle, the buttons down either side with a line to where each one really is.
-static void bindHand(cairo_t* c, std::vector<Button>& btn, const BindModel& m, const ControllerPicture* pic, const std::vector<BindRow>& rows, double X0, double W, double y0, double H) {
+static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& armedId, const std::set<std::string>& litRows, const ControllerPicture* pic, const std::vector<BindRow>& rows, double X0, double W, double y0, double H) {
   const double S = 184, px = X0 + (W - S) / 2, py = y0 + (H - S) / 2, cellW = (W - S) / 2 - 4, rowH = 34;
   if (pic) {
     cairo_set_source_surface(c, pic->image(), px, py);
@@ -790,24 +874,29 @@ static void bindHand(cairo_t* c, std::vector<Button>& btn, const BindModel& m, c
     const double top = y0 + (H - col[a].size() * rowH) / 2;
     for (size_t i = 0; i < col[a].size(); ++i) {
       const BindRow& r = *col[a][i];
-      const bool lit = m.lit.count(r.id) > 0, armed = m.armed == r.id;
+      // Being rewired, or pressed as part of a combo, it's solid yellow. Touched as part of a combo, it's outlined in it.
+      const bool lit = litRows.count(r.id) > 0, armed = armedId == r.id || r.mark == 2, touched = r.mark == 1;
       const double cx = a == 0 ? X0 : X0 + W - cellW, cy = top + i * rowH, mid = cy + rowH / 2;
       if (armed) slab(c, cx, cy + 1, cellW, rowH - 2, SIGNAL);
+      else if (touched) frame(c, cx, cy + 1, cellW, rowH - 2, SIGNAL, 1, 2);
       else if (lit) slab(c, cx, cy + 1, cellW, rowH - 2, PAPER, 0.14);
       if (r.x >= 0) {
         const double ex = px + r.x * S, ey = py + r.y * S, sx = a == 0 ? cx + cellW : cx;
-        set(c, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.42);
-        cairo_set_line_width(c, armed || lit ? 2 : 1);
+        const bool yellow = armed || touched, strong = yellow || lit;
+        set(c, yellow ? SIGNAL : PAPER, strong ? 1 : 0.42);
+        cairo_set_line_width(c, strong ? 2 : 1);
         cairo_move_to(c, sx, mid);
         cairo_line_to(c, ex, ey);
         cairo_stroke(c);
-        const double dot = armed || lit ? 5 : 3.5;
-        if (r.behind) frame(c, ex - dot, ey - dot, dot * 2.4, dot * 2, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.8, 1.2);
-        else slab(c, ex - dot, ey - dot, dot * 2.4, dot * 2, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.85);
+        const double dot = strong ? 5 : 3.5;
+        if (r.behind) frame(c, ex - dot, ey - dot, dot * 2.4, dot * 2, yellow ? SIGNAL : PAPER, strong ? 1 : 0.8, 1.2);
+        else slab(c, ex - dot, ey - dot, dot * 2.4, dot * 2, yellow ? SIGNAL : PAPER, strong ? 1 : 0.85);
       }
       const int align = a == 0 ? 2 : 0;
       const double tx = a == 0 ? cx + cellW - 10 : cx + 12, tw = cellW - 18;
-      if (r.unused) {
+      if (r.mark) {
+        caps(c, tx, mid + 6, 17, (r.mark == 2 ? "Press " : "Touch ") + r.name, armed ? INK : SIGNAL, 1, align, 1.2, tw);
+      } else if (r.unused) {
         label(c, tx, cy + 14, 13, r.name, armed ? INK : DIM, align);
         text(c, tx, cy + 31, 17, "Not used", false, armed ? INK : FAINT, 1, align, tw);
       } else if (r.action.empty()) {
@@ -877,7 +966,7 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
       caps(c, R - 54, y + 22, 16, m.controls, PAPER, 1, 2, 1.2);
     }
     for (int h = 0; h < 2; ++h)
-      bindHand(c, btn, m, s.pic[h], s.rows[h], h ? mid + 12 : L, cw, y + stripH, bodyH);
+      bindHand(c, btn, m.armed, m.lit, s.pic[h], s.rows[h], h ? mid + 12 : L, cw, y + stripH, bodyH);
   }
 
   // What this game does about it, or the next step if you've picked a button to rewire.
@@ -906,6 +995,139 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
     const std::string st = m.hasGame ? "Point at a button to find it on the other controller. Tap one of yours to change what it does."
                                      : "No game running, so this shows how the buttons match up. Tap one of yours to change it.";
     text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- combos page
+std::string comboKey(const ComboModel& m) {
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canMake) + "|" + m.why + "|" + m.picked + "|" + m.note + "|" + m.controls + "|" +
+                  std::to_string(m.pageNo) + "/" + std::to_string(m.pages) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + m.yours.title + "," + m.yours.note;
+  for (int h = 0; h < 2; ++h) {
+    k += m.yours.pic[h] ? "p" : "-";
+    for (const BindRow& r : m.yours.rows[h]) k += r.id + "=" + r.action + "," + std::to_string(r.mark) + ";";
+  }
+  for (const ComboEntry& e : m.saved) k += e.inputs + ">" + e.action + ";";
+  for (const ComboIdea& e : m.ideas) k += e.id + ";";
+  for (const ComboChoice& e : m.choices) k += e.id + "=" + e.name + "," + e.where + ";";
+  return k;
+}
+
+void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0, cw = mid - 12 - L;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Combos);
+
+  const double headY = 138, subY = 164, picY = 174, picH = 236, belowY = picY + picH + 10;
+  auto pictures = [&] {
+    hline(c, L, R, picY, LINE);
+    for (int h = 0; h < 2; ++h) bindHand(c, btn, "", std::set<std::string>{}, m.yours.pic[h], m.yours.rows[h], h ? mid + 12 : L, cw, picY + 4, picH);
+    hline(c, L, R, belowY - 4, LINE);
+  };
+
+  if (m.step == 0) {
+    text(c, L, headY, 27, m.canMake ? "Your combos for " + m.game : "Start a game to make a combo", true, PAPER, 1, 0, R - L - 250);
+    text(c, L, subY, 18, m.canMake ? "Hold two or more controls together to do one thing. Touching counts, and it doesn't press." : m.why, false, DIM, 1, 0, R - L - 250);
+    button(c, btn, R - 230, 116, 230, 48, "combo_new", "New combo", Primary, m.canMake);
+    pictures();
+    const double rowH = 44;
+    if (m.saved.empty()) {
+      text(c, L, belowY + 42, 22, "No combos yet.", true, m.canMake ? PAPER : DIM);
+      text(c, L, belowY + 76, 19, "Your controllers can feel a thumb or finger resting on a control without pressing it, so a combo of touches", false, DIM, 1, 0, R - L);
+      text(c, L, belowY + 102, 19, "won't set off what's already on those buttons. It's how VRChat players fit mute and gestures on a full controller.", false, DIM, 1, 0, R - L);
+    }
+    for (size_t i = 0; i < m.saved.size() && i < 6; ++i) {
+      const double y = belowY + i * rowH;
+      const std::string n = std::to_string(i), rowId = "combo_row_" + n, delId = "combo_del_" + n;
+      if (m.hover == rowId) slab(c, L, y + 1, R - L - 130, rowH - 2, PAPER, 0.10);
+      caps(c, L + 12, y + 29, 17, m.saved[i].inputs, PAPER, 1, 0, 1.2, mid - L - 30);
+      text(c, mid, y + 30, 21, m.saved[i].action, true, PAPER, 1, 0, R - 150 - mid);
+      btn.push_back({L, y, R - L - 130, rowH, rowId});
+      button(c, btn, R - 120, y + 5, 120, rowH - 10, delId, "Remove", Outline);
+      hline(c, L, R, y + rowH, LINE, 0.6);
+    }
+  } else if (m.step == 1) {
+    text(c, L, headY, 27, "What do you do?", true, PAPER);
+    text(c, L, subY, 18, "Tap a control once for touch, again for press, and again to clear.", false, DIM, 1, 0, R - L - 120);
+    caps(c, R, headY, 19, "1 of 2", DIM, 1, 2);
+    pictures();
+    const double barH = 64;
+    if (!m.picked.empty()) {
+      slab(c, L, belowY, R - L, barH, SIGNAL);
+      caps(c, L + 30, belowY + 41, 23, m.picked, INK, 1, 0, 1.4, R - L - 340);
+      button(c, btn, R - 300, belowY + 10, 130, 44, "combo_cancel", "Cancel", OnSignal);
+      button(c, btn, R - 160, belowY + 10, 134, 44, "combo_next", "Next", OnSignal);
+    } else {
+      frame(c, L, belowY, R - L, barH, LINE, 1, 2);
+      text(c, L + 30, belowY + 41, 21, "Nothing picked yet", false, DIM);
+      button(c, btn, R - 160, belowY + 10, 134, 44, "combo_cancel", "Cancel", Outline);
+    }
+    if (!m.note.empty()) text(c, L, belowY + barH + 34, 19, m.note, false, PAPER, 1, 0, R - L);
+    if (!m.ideas.empty()) {
+      const double y = belowY + barH + 58, h = 50, d = h * kLean;
+      label(c, L, y + 32, 15, "Or try");
+      const double x0 = L + 76, each = (R - x0 + d * (m.ideas.size() - 1) - 8.0 * (m.ideas.size() - 1)) / m.ideas.size();
+      for (size_t i = 0; i < m.ideas.size(); ++i) {
+        const double x = x0 + i * (each - d + 8);
+        button(c, btn, x, y, each, h, m.ideas[i].id, m.ideas[i].name, Outline);
+      }
+    }
+  } else {
+    text(c, L, headY, 27, "What should it do?", true, PAPER);
+    caps(c, L, subY, 17, m.picked, SIGNAL, 1, 0, 1.2, R - L - 120);
+    caps(c, R, headY, 19, "2 of 2", DIM, 1, 2);
+    const double listY = 180;
+    hline(c, L, R, listY, LINE);
+    if (!m.controls.empty()) {
+      const double y = listY + 6, w = capsW(c, upper(m.controls), 16, 1.2), prevX = R - 54 - w - 54;
+      button(c, btn, R - 44, y, 44, 26, "combo_group_next", "", Outline);
+      button(c, btn, prevX, y, 44, 26, "combo_group_prev", "", Outline);
+      caps(c, R - 22, y + 19, 18, ">", PAPER, 1, 1, 0);
+      caps(c, prevX + 22, y + 19, 18, "<", PAPER, 1, 1, 0);
+      caps(c, R - 54, y + 20, 16, m.controls, PAPER, 1, 2, 1.2);
+    }
+    const double gridY = listY + 38, h = 62, gap = 6, d = h * kLean, each = (R - L + 2 * d - 2 * 8.0) / 3;
+    for (size_t i = 0; i < m.choices.size(); ++i) {
+      const int col = int(i % 3), row = int(i / 3);
+      const double x = L + col * (each - d + 8), y = gridY + row * (h + gap);
+      const ComboChoice& e = m.choices[i];
+      frame(c, x, y, each, h, PAPER, 0.7, 2);
+      fxOver(c, x, y, each, h, e.id);
+      const double tx = x + d + 12, tw = each - 2 * d - 22;
+      if (e.where.empty()) text(c, tx, y + 39, 21, e.name, true, PAPER, 1, 0, tw);
+      else {
+        text(c, tx, y + 29, 20, e.name, true, PAPER, 1, 0, tw);
+        label(c, tx, y + 50, 13, e.where, DIM);
+      }
+      btn.push_back({x + d / 2, y, each - d, h, e.id});
+    }
+    if (m.choices.empty()) text(c, L, gridY + 40, 21, "This game doesn't list anything a combo could set off.", false, DIM);
+    const double footY = 640, footH = 48;
+    button(c, btn, L, footY, 150, footH, "combo_back", "Back", Outline);
+    if (m.pages > 1) {
+      const std::string where = "Page " + std::to_string(m.pageNo + 1) + " of " + std::to_string(m.pages);
+      const double w = capsW(c, upper(where), 16, 1.2), prevX = R - 54 - w - 54;
+      button(c, btn, R - 44, footY + 6, 44, 36, "combo_page_next", "", Outline);
+      button(c, btn, prevX, footY + 6, 44, 36, "combo_page_prev", "", Outline);
+      caps(c, R - 22, footY + 30, 18, ">", PAPER, 1, 1, 0);
+      caps(c, prevX + 22, footY + 30, 18, "<", PAPER, 1, 1, 0);
+      caps(c, R - 54, footY + 30, 16, where, PAPER, 1, 2, 1.2);
+    }
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (m.step == 2 && !m.note.empty()) {
+    text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
+  } else if (m.canMake) {
+    text(c, L, baseY, 19, "New combos start working the next time the game launches.", false, DIM, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;
 }

@@ -64,6 +64,7 @@ struct Store {
   uint32_t device[2] = {fhlive::kNoDevice, fhlive::kNoDevice};  // tracked device index per hand
   M gripFromRaw[2] = {ident(), ident()};                        // the OpenXR grip pose in the device's frame
   bool dashboardUp = false;  // the driver's offsets stand aside while the dashboard's open, so its pointers point true
+  int dashLiveHand = -1;     // except this hand, while fine adjusting: it isn't the one pointing, so it can stay moved and you can watch it
   static uint64_t driverPoseUpdates();  // the driver's running count of poses it has seen
   static uint64_t driverHandUpdates();  // how many of those were from the two hands
   static M appliedDeviceOffset(int hand);  // what the driver has put in the poses being reported now

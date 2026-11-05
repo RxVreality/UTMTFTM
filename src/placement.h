@@ -54,6 +54,37 @@ inline Offset ghostBaseFor(const Offset base[2], const bool matched[2], int h) {
   return Offset{};
 }
 
+// Fine adjust: one tap on one of the six numbers on the page. axis: 0 forward, 1 up, 2 right, 3 pitch, 4 yaw, 5 roll.
+// dir is which way that number goes, and all six read positive the way their name says: forward, up, right, nose up,
+// turned right, rolled clockwise. Distance keeps to the limit, unless the hand's already past it and this brings it
+// closer. Rotation never has a limit, it just wraps at 180. limited: the tap was refused, and o comes back as it was.
+inline Offset nudged(Offset o, int axis, int dir, float stepMetres, float stepDegrees, float maxPos, bool* limited = nullptr) {
+  if (limited) *limited = false;
+  const Offset before = o;
+  const float metres = dir * stepMetres, degrees = dir * stepDegrees;
+  switch (axis) {
+    case 0: o.pos[2] -= metres; break;
+    case 1: o.pos[1] += metres; break;
+    case 2: o.pos[0] += metres; break;
+    case 3: o.rot[0] += degrees; break;
+    case 4: o.rot[1] -= degrees; break;  // the stored angle turns left as it grows
+    case 5: o.rot[2] -= degrees; break;  // and rolls anticlockwise
+    default: return o;
+  }
+  if (axis < 3 && posLen(o) > maxPos + 1e-4f && posLen(o) > posLen(before)) {
+    if (limited) *limited = true;
+    return before;
+  }
+  // Tenths of a millimetre and hundredths of a degree, so a tap there and a tap back land exactly where they started.
+  for (float& p : o.pos) p = std::round(p * 1e4f) / 1e4f;
+  for (float& r : o.rot) {
+    r = std::round(r * 100.f) / 100.f;
+    if (r > 180.f) r -= 360.f;
+    else if (r <= -180.f) r += 360.f;
+  }
+  return o;
+}
+
 // Size of the drawing plane for the distance-limit bubble (radius r, centred on the controller).
 // Seen from r + 0.2 m or further, the bubble's silhouette is at most r / sqrt(1 - (r/d)^2) <= 1.25 r
 // from the centre, so 2.4 r + 0.1 always contains it.

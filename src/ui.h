@@ -55,13 +55,21 @@ struct DashModel {
   bool statusGood = false;    // a confirmation (green check) rather than plain info
   bool armed = false;         // waiting for the dashboard to close
   bool confirmClose = false;  // "tap again to close"
+  bool fine = false;          // fine adjust: arrows either side of each number
+  bool fineBig = false;       // and they go 1 cm and 5 degrees a tap, rather than 1 mm and 1 degree
+  std::string hint;           // what's under the laser would do, when it isn't obvious
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;
 };
 
-// The two pages share the dashboard panel. This says which one's showing.
-enum class DashPage { Hands, Bindings };
+// The pages share the dashboard panel. This says which one's showing.
+enum class DashPage { Hands, Bindings, Combos };
+
+// A fine adjust arrow: "nudge_<hand>_<axis>_<p or m>". axis as in nudged(), in placement.h.
+bool parseNudge(const std::string& id, int& hand, int& axis, int& dir);
+// What it would do, in words, for the line along the bottom of the page. Empty for anything else.
+std::string nudgeHint(const std::string& id, bool big);
 
 // Dashboard press feedback as plain state, testable without VR. Static states only (the user
 // doesn't want motion in a settings UI): highlighted under the laser, pushed in while held.
@@ -110,6 +118,7 @@ struct BindRow {
   bool unused = false;  // a game's binding is showing, and this button isn't on it
   double x = -1, y = -1;  // where it sits on the picture, 0..1. Negative: nowhere known
   bool behind = false;    // it's round the back from this angle, so the mark is drawn hollow
+  int mark = 0;           // part of a combo: 1 touch, 2 press
 };
 struct BindSide {
   std::string title, note;
@@ -139,6 +148,32 @@ struct BindModel {
 };
 std::string bindKey(const BindModel& m);
 void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- combos page
+struct ComboEntry { std::string inputs, action; };
+struct ComboChoice { std::string id, name, where; };
+struct ComboIdea { std::string id, name; };
+struct ComboModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  int step = 0;          // 0 what's saved, 1 what you do, 2 what it does
+  bool canMake = false;  // there's a game, and bindings for it to add to
+  std::string why;       // why not, when it can't
+  BindSide yours;
+  std::vector<ComboEntry> saved;
+  std::vector<ComboIdea> ideas;
+  std::string picked;    // "Touch A + Touch B"
+  std::string note;      // anything worth knowing about what's picked
+  std::string controls;  // which of the game's sets of controls the list is from, when it has several
+  std::vector<ComboChoice> choices;  // this page of them
+  int pageNo = 0, pages = 1;
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string comboKey(const ComboModel& m);
+void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- in-headset instruction panel
 struct PanelModel {

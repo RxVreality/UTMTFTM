@@ -31,6 +31,7 @@ struct Input {
   std::string side;  // "", left, right
   bool click = false, touch = false, value = false, force = false;
   bool shown = false;  // worth a row on the page. The system button isn't, for instance: it belongs to SteamVR
+  bool touchOnly = false;  // a sensor with nothing to press, like the Quest's thumb rest. No use for bindings, but a combo can use it
   int order = 50;
 };
 
@@ -74,6 +75,7 @@ struct Found {
   std::string path;
   std::string category;  // openxr, steamvr_input, legacy
   std::map<std::string, std::string> names;  // action -> what the game calls it, when it says
+  std::vector<std::string> onOff;            // the on-or-off actions the game's action file lists, when it has one
 };
 
 struct Settings {
@@ -118,6 +120,28 @@ std::vector<ControlGroup> controlGroups(const Found& binding);
 // Which of a model's parts an input is. The picture's lines end there.
 std::vector<std::string> partsFor(const std::string& key);
 
+// A combo: controls held together that do one thing in one game. SteamVR does the work: it goes in the game's binding as a
+// chord, the same thing its own binding screen makes, so nothing runs for it at all while you play. A single control goes in
+// as an ordinary binding of its touch or press.
+struct ComboInput { std::string path, state; };  // "right/input/a", and "touch" or "click"
+struct Combo {
+  std::vector<ComboInput> inputs;
+  std::string output;  // "/actions/main/in/Jump"
+  std::string label;   // what the page called it when it was picked
+};
+void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Profile& yours);
+
+// "Touch A + Press Right Grip". A control that's only on one hand doesn't need to say which.
+std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours);
+
+// Everything in a binding a combo could set off: what's on a button now first, in the file's order, then anything else in the
+// game's action file. Sticks and half-pulls aren't on or off, so they aren't in it.
+struct GameAction {
+  std::string output, group, label, where;
+  bool nameless = false;  // its name only says which button it came from, so the game's meaning for it can't be known
+};
+std::vector<GameAction> comboActions(const Found& binding, const Profile& yours);
+
 class Page {
  public:
   Page(Dirs dirs, Settings settings) : d_(std::move(dirs)), s_(std::move(settings)) {}
@@ -138,6 +162,10 @@ class Page {
   void click(const std::string& id);
   void clickGreyed(const std::string& id);
 
+  ComboModel comboModel(const std::string& hover, const std::string& down);
+  void comboClick(const std::string& id);
+  void comboClickGreyed(const std::string& id);
+
   std::string status;
   int statusKind = 0;  // 0 info, 1 good, 2 warning
   uint32_t statusSerial = 0;  // goes up each time status is set, so the caller can time it out
@@ -155,6 +183,7 @@ class Page {
   std::map<std::string, std::string> defaults;   // your controller_type -> from
   std::map<std::string, GameChoice> games;       // "<game>|<your controller_type>"
   std::map<std::string, Wiring> wiringChanges;   // "<their type>><your type>" -> only what's been changed
+  std::map<std::string, std::vector<Combo>> combos;  // "<game>|<your controller_type>"
   std::string fileFor(const std::string& game, const std::string& yourType) const;
 
  private:
@@ -166,7 +195,13 @@ class Page {
   std::string effectiveFrom() const;  // which controller's bindings this game is on, "" = the developer's
   bool applyNow(const std::string& from);
   void revertNow();
-  void reapply();
+  bool reapply();
+  std::string autoFrom();    // what SteamVR would translate this game from, for a controller it has nothing for
+  std::string comboBase();   // the controller's binding to add combos to, when this game isn't on a layout. Empty: there's none
+  Found activeBinding();     // what this game runs on now, or would on its next launch, before any combos
+  const std::vector<Combo>& combosHere() const;
+  struct ComboIdeaOf { std::string name; std::vector<ComboInput> inputs; };
+  std::vector<ComboIdeaOf> comboIdeas(const Profile& p) const;
   void bake(const std::string& model);
   void fillRows(BindSide& side, const std::string& prefix, const Headset& h, const std::vector<RowText> rows[2]);
   const Headset* byModel(const std::string& model) const;
@@ -182,6 +217,10 @@ class Page {
   bool saveForGame_ = true;
   std::string armed_;  // your row being rewired
   std::string group_;  // which of the game's sets of controls is showing
+  int comboStep_ = 0;  // 0 what's saved, 1 what you do, 2 what it does
+  std::map<std::string, std::string> picked_;  // the combo being made: "right/input/a" -> "touch" or "click"
+  std::string comboGroup_;
+  int comboPage_ = 0;
   std::map<std::string, Found> found_;
   struct Held { Mesh mesh; std::vector<ModelPart> parts; bool have = false; std::shared_ptr<ControllerPicture> pic; };
   std::map<std::string, Held> models_;

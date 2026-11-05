@@ -296,7 +296,8 @@ void Store::publishLive(const HandPair* drag) const {
     // Only with a game running: with none there are no hands to fix, only SteamVR's own pointers to throw off. A scene
     // with no key isn't a game either. On a Frame streaming from a PC the scene is Steam Link (vrlink.client), and an offset
     // here would land on top of whatever the PC's SteamVR applies.
-    M dev = (useDriver && !dashboardUp && scenePid && !sceneKey.empty() && !o.zero()) ? mul(mul(gripFromRaw[h], fromOffset(o)), inv(gripFromRaw[h])) : ident();
+    const bool standAside = dashboardUp && h != dashLiveHand;
+    M dev = (useDriver && !standAside && scenePid && !sceneKey.empty() && !o.zero()) ? mul(mul(gripFromRaw[h], fromOffset(o)), inv(gripFromRaw[h])) : ident();
     if (!finite(dev)) dev = ident();
     d.device[h] = device[h];
     for (int i = 0; i < 3; ++i) d.want[h].pos[i] = dev.m[i][3];
