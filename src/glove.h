@@ -1,7 +1,8 @@
 // The hand UTMTFTM draws: SteamVR's own skinned glove, curled by SteamVR's own open-to-closed animation
 // and seated in the OpenXR grip frame, which is defined the same way on every controller. Everything is read
 // at run time from the user's SteamVR install, so none of Valve's data ships with this project.
-// If those files aren't there, as on a Steam Frame, the hand falls back to the procedural one in ghost3d.h.
+// The Steam Frame's SteamVR has the skeleton and animation but no glove, so there the same pose gets the skin in handskin.h.
+// If none of those files can be read, the hand falls back to the procedural one in ghost3d.h.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -19,6 +20,7 @@ extern const Curl kGripCurl;
 
 // The right glove posed with `c`, in skeleton space. vertexFinger (optional) gets, per vertex, the finger
 // it mostly belongs to, or kFingerCount for the palm. false if SteamVR's files aren't readable.
+// With a skeleton but no glove in this SteamVR, it fills in the joints and leaves the mesh empty.
 bool posedRightGlove(const std::string& steamvrDir, const Curl& c, Mesh& out, V3 joints[31],
                      std::vector<uint8_t>* vertexFinger = nullptr);
 

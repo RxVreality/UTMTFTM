@@ -162,38 +162,6 @@ inline Mesh buildHand(bool left) {
   return m;
 }
 
-// Hand from SteamVR's 31-bone hand skeleton (joint positions in the skeleton/controller frame, metres).
-// Bones: 1 wrist, 2-5 thumb (0,1,2,end), 6-10 index (meta,0,1,2,end), 11-15 middle, 16-20 ring, 21-25 pinky.
-inline Mesh buildFromJoints(const V3 j[31], bool left) {
-  Mesh m;
-  V3 w = j[1];
-  V3 kn[4] = {j[7], j[12], j[17], j[22]};   // knuckles
-  V3 mb[4] = {j[6], j[11], j[16], j[21]};   // metacarpal bases
-  V3 palmN = norm(cross(kn[0] - w, kn[3] - w));
-  if (!left) palmN = palmN * -1.f;
-  // palm: metacarpal tubes plus in-betweens so it reads as one solid plate
-  const float fr[4] = {0.0098f, 0.0102f, 0.0096f, 0.0086f};
-  for (int f = 0; f < 4; ++f) addTube(m, {mb[f], kn[f]}, {0.0125f, 0.0120f}, palmN, 12);
-  for (int f = 0; f < 3; ++f)
-    for (float t : {0.5f}) {
-      V3 a = mb[f] + (mb[f + 1] - mb[f]) * t, b = kn[f] + (kn[f + 1] - kn[f]) * t;
-      addTube(m, {a, b}, {0.0125f, 0.0118f}, palmN, 12);
-    }
-  addTube(m, {kn[0], kn[1], kn[2], kn[3]}, {0.0112f, 0.0112f, 0.0108f, 0.0098f}, palmN, 12);
-  // fingers
-  for (int f = 0; f < 4; ++f) {
-    int b = 7 + f * 5;
-    addTube(m, {j[b], j[b + 1], j[b + 2], j[b + 3]}, {fr[f], fr[f] * 0.92f, fr[f] * 0.84f, fr[f] * 0.74f}, palmN, 12);
-  }
-  // thumb: from the wrist side of the palm out to the tip
-  addTube(m, {mb[0] + (w - mb[0]) * 0.3f, j[3], j[4], j[5]}, {0.0140f, 0.0118f, 0.0102f, 0.0088f}, palmN, 12);
-  // wrist stub pointing away from the knuckles
-  V3 kc = (kn[1] + kn[2]) * 0.5f;
-  V3 back = norm(w - kc);
-  addTube(m, {w + back * 0.004f, w + back * 0.026f}, {0.0185f, 0.019f}, palmN, 14);
-  return m;
-}
-
 inline Mesh buildSphere(float r, int lat = 20, int lon = 32) {
   Mesh m;
   addEllipsoid(m, {0, 0, 0}, {r, r, r}, {0, 0, 0}, lat, lon);
