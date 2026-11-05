@@ -1,0 +1,147 @@
+{
+  "controller_type": "vive_focus3_controller",
+  "action_manifest_version": 0,
+  "category": "steamvr_input",
+  "name": "UTMTFTM default",
+  "description": "UTMTFTM default",
+  "bindings": {
+    "/actions/fh": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "button",
+          "parameters": {
+            "haptic_amplitude": "0"
+          },
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/trigger",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/done"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "button",
+          "parameters": {
+            "haptic_amplitude": "0"
+          },
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/done"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/reset"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/cancel"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/x",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/reset"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/y",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/fh/in/cancel"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/joystick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/fh/in/hold"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/joystick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/fh/in/hold"
+            }
+          }
+        }
+      ],
+      "poses": [
+        {
+          "output": "/actions/fh/in/raw",
+          "path": "/user/hand/left/pose/raw"
+        },
+        {
+          "output": "/actions/fh/in/raw",
+          "path": "/user/hand/right/pose/raw"
+        },
+        {
+          "output": "/actions/fh/in/grip",
+          "path": "/user/hand/left/pose/handgrip"
+        },
+        {
+          "output": "/actions/fh/in/grip",
+          "path": "/user/hand/right/pose/handgrip"
+        }
+      ],
+      "haptics": [
+        {
+          "output": "/actions/fh/out/haptic",
+          "path": "/user/hand/left/output/haptic"
+        },
+        {
+          "output": "/actions/fh/out/haptic",
+          "path": "/user/hand/right/output/haptic"
+        }
+      ],
+      "skeleton": [
+        {
+          "output": "/actions/fh/in/skel_left",
+          "path": "/user/hand/left/input/skeleton/left"
+        },
+        {
+          "output": "/actions/fh/in/skel_right",
+          "path": "/user/hand/right/input/skeleton/right"
+        }
+      ]
+    }
+  }
+}

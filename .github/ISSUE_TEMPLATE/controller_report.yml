@@ -1,0 +1,48 @@
+name: Tried it on my controller
+description: Tell me how it went on a controller or headset, good or bad. This is how the controller table gets filled in.
+title: "[Controller] "
+body:
+  - type: input
+    id: controller
+    attributes:
+      label: Controller and headset
+      placeholder: Index controllers on a Bigscreen Beyond
+    validations:
+      required: true
+  - type: input
+    id: connection
+    attributes:
+      label: How it connects to the PC
+      placeholder: Base stations, Steam Link, Virtual Desktop, Link cable...
+  - type: input
+    id: game
+    attributes:
+      label: Which game or games
+    validations:
+      required: true
+  - type: dropdown
+    id: picture
+    attributes:
+      label: Does the dashboard page show the right controller?
+      options: ["Yes", "No, it's the wrong one", "No, it's a plain shape"]
+    validations:
+      required: true
+  - type: dropdown
+    id: moves
+    attributes:
+      label: Could you grab your hand and move it, with it staying where you left it?
+      options: ["Yes", "Sort of", "No"]
+    validations:
+      required: true
+  - type: dropdown
+    id: buttons
+    attributes:
+      label: Did the buttons on the panel match your controller and do what they said?
+      options: ["Yes", "No"]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: If something went wrong, drag in `%LOCALAPPDATA%\UTMTFTM\utmtftm.log`. A screenshot helps too.

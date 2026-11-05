@@ -1,0 +1,8 @@
+{
+  "name": "utmtftm",
+  "version-string": "0.1.0",
+  "dependencies": [
+    { "name": "cairo", "default-features": false },
+    "jsoncpp"
+  ]
+}

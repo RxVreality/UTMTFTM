@@ -1,0 +1,6 @@
+* text=auto
+*.cmd text eol=crlf
+*.nsi text eol=crlf
+*.dll binary
+*.lib binary
+*.png binary

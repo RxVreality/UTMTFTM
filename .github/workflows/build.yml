@@ -1,0 +1,55 @@
+# Every push gets built and tested. A tag like v0.1.0 also packs a release and leaves it as a draft:
+# nothing is public until someone reads it and clicks Publish.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # cairo takes a long time to build, so keep it between runs.
+      - uses: actions/cache@v4
+        id: libs
+        with:
+          path: vcpkg_installed
+          key: vcpkg-${{ hashFiles('vcpkg.json') }}
+
+      - name: Install libraries
+        if: steps.libs.outputs.cache-hit != 'true'
+        run: '& "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install --triplet x64-windows-static'
+
+      - name: Build and run the offline tests
+        shell: cmd
+        run: build.cmd
+
+      - name: Pack
+        run: |
+          choco install nsis -y --no-progress
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.0.0-$($env:GITHUB_SHA.Substring(0,7))" }
+          .\packaging\make-release.ps1 -Version $v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: utmtftm
+          path: |
+            build/release/UTMTFTM-*.zip
+            build/release/UTMTFTM-Setup-*.exe
+            build/release/*.sha256
+
+      - name: Draft the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem build\release -File | Where-Object { $_.Extension -ne '.ico' } | ForEach-Object { $_.FullName }
+          gh release create $env:GITHUB_REF_NAME $files --draft --title "UTMTFTM $($env:GITHUB_REF_NAME)" --notes-file packaging\release-notes.md

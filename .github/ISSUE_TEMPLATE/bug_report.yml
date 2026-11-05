@@ -1,0 +1,26 @@
+name: Something's broken
+description: It crashed, it won't start, or a hand ended up somewhere it shouldn't.
+title: "[Bug] "
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Controller, headset and game
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: UTMTFTM version
+      description: It's listed under Settings > Apps in Windows.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Drag in `%LOCALAPPDATA%\UTMTFTM\utmtftm.log`, and `driver.log` from the same folder if the hands aren't moving at all.
