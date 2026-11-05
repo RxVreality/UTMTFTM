@@ -12,8 +12,8 @@ body:
   - type: input
     id: connection
     attributes:
-      label: How it connects to the PC
-      placeholder: Base stations, Steam Link, Virtual Desktop, Link cable...
+      label: How you're running it
+      placeholder: On the Frame itself, base stations, Steam Link, Virtual Desktop, Link cable...
   - type: input
     id: game
     attributes:
@@ -45,4 +45,4 @@ body:
     id: notes
     attributes:
       label: Anything else
-      description: If something went wrong, drag in `%LOCALAPPDATA%\UTMTFTM\utmtftm.log`. A screenshot helps too.
+      description: If something went wrong, drag in `utmtftm.log`, from `%LOCALAPPDATA%\UTMTFTM` on Windows or `~/.local/share/UTMTFTM` on a Frame. A screenshot helps too.

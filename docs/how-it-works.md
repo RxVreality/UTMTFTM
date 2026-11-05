@@ -2,11 +2,11 @@
 
 There are two parts.
 
-**The overlay** (`utmtftm.exe`) is the dashboard page and the grab-to-place. SteamVR starts it along with itself. It sends offsets to the driver through a small shared file, `%LOCALAPPDATA%\UTMTFTM\live.shm`.
+**The overlay** (`utmtftm.exe`, or `utmtftm` on the Frame) is the dashboard page and the grab-to-place. SteamVR starts it along with itself. It sends offsets to the driver through a small shared file, `live.shm`, in `%LOCALAPPDATA%\UTMTFTM` or `~/.local/share/UTMTFTM`.
 
-**The driver add-on** (`driver_utmtftm.dll`) runs inside SteamVR and has no devices of its own. It hooks `IVRServerDriverHost::TrackedDevicePoseUpdated`, the call every SteamVR driver reports poses through, and moves the two hand controllers before anything else sees them. Every game then gets the moved controller, whichever API it uses, and nothing is loaded inside the game. Anything a game attaches to the controller moves with it.
+**The driver add-on** (`driver_utmtftm.dll`, or `driver_utmtftm.so` on the Frame) runs inside SteamVR and has no devices of its own. It hooks `IVRServerDriverHost::TrackedDevicePoseUpdated`, the call every SteamVR driver reports poses through, and moves the two hand controllers before anything else sees them. Every game then gets the moved controller, whichever API it uses, and nothing is loaded inside the game. Anything a game attaches to the controller moves with it.
 
-Every driver that ships with SteamVR asks for `IVRServerDriverHost_006`, and so does Virtual Desktop's. The add-on also hooks versions 004 and 005 for older drivers.
+Every driver that ships with SteamVR asks for `IVRServerDriverHost_006`, and so do Virtual Desktop's and `driver_cv`, which runs the Frame's headset and controllers. The add-on also hooks versions 004 and 005 for older drivers.
 
 ## The maths
 
@@ -42,15 +42,33 @@ The overlay wakes ten times a second in the background and does almost nothing, 
 
 The overlay falls back to writing SteamVR's own `device_offsets` into a binding file for the game. That only takes effect the next time the game launches, which is what "Applies next launch" on the page means. In practice you only see it if the add-on failed to load.
 
+The driver counts the poses it sees for each hand. If it's running and a controller is on but it hasn't heard from either hand in 10 seconds, those poses are reaching SteamVR some way the hook can't see, so the overlay falls back the same way rather than claiming to be live, and says so in the log.
+
+## On the Steam Frame
+
+The Frame runs SteamVR natively on ARM64 Linux, from `/opt/steamvr`, so this is the same program built for that, and its controllers' poses come through the same hook. The differences are small:
+
+- Overlay images go up as Vulkan textures rather than D3D11 ones.
+- The text is Barlow, which ships with the program, because Linux has no Bahnschrift and a headset's fonts aren't something to count on.
+- It uses the OpenVR loader SteamVR keeps at `/opt/steamvr/bin/linuxarm64`. The prebuilt ARM64 one in Valve's SDK looks for its settings in `/data/work`, an Android path, so it can't find SteamVR on a Frame.
+- cairo, FreeType and Vulkan come from SteamOS, and everything else is built into the program. It only needs glibc 2.34, so it isn't tied to one SteamOS version.
+- The Frame's SteamVR has the hand's skeleton and animations but no glove model, and that model isn't ours to ship, so the page draws a plain hand of its own.
+- It's also listed in the dashboard's **+** menu, which shows whatever is in `~/.local/share/applications`. If it's already running, that just opens its page.
+
+ARM also doesn't keep memory writes in order the way x86 does. The offsets in the shared file are guarded by a sequence number, and without an extra fence a reader on another core could take a half-written offset for a finished one. x86 hides that mistake, so it never showed up on Windows. `test_driver` writes and reads flat out on separate threads, and that test runs on ARM64 as well.
+
+When a Frame streams from a PC, it runs Steam Link as its scene app, `vrlink.client`. Offsets only apply when the scene is a game, so UTMTFTM on the Frame stays out of the way of UTMTFTM on the PC.
+
 ## Tests
 
-None of these need a headset or SteamVR. Run them with `build.cmd`.
+None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh` on ARM64 Linux.
 
-- `test_driver` loads the real driver DLL the way SteamVR does and sends poses through its hook from a fake host: which devices move, the maths, live updates, torn reads, cost per update and clean removal. It also drags a hand end to end with the offset arriving up to 12 updates late.
+- `test_driver` loads the real driver library the way SteamVR does and sends poses through its hook from a fake host: which devices move, the maths, live updates, torn reads, cost per update and clean removal. It also drags a hand end to end with the offset arriving up to 12 updates late.
 - `test_session` covers placing a hand: the ghost and offset maths, what the driver gets handed, saving and loading.
 - `test_ghost` covers the 3D drawing and rotation freedom.
 - `test_ui` renders every screen to `build\ui\*.png`, so you can look at them without a headset.
 - `test_controllers` checks each binding file against SteamVR's own description of that controller, if SteamVR is installed: the button exists, it's on that hand, every stick and pad is blocked while placing, and the panel names the button that's really bound.
+- `tests/test_frame_run.sh` is for the Frame build. It installs the packed download into a throwaway home folder and runs it against a simulated SteamVR (`tests/fake_steamvr.cpp`), which clicks Move, drags a hand and checks what comes out of the real driver. It also saves the pictures the program really sent as Vulkan textures. GitHub runs it on an ARM64 machine for every push. It shows the program works, not that the real SteamVR does what the simulated one does.
 
 `dist\glove_sheet.exe <folder>` needs SteamVR installed, and starts its server if it isn't running. It loads every hand controller SteamVR can draw, the same way the overlay does, and writes `controllers.png` with the hand on each one. Go by the picture rather than its finger-depth numbers, because controller models are made of overlapping shells.
 
@@ -63,5 +81,5 @@ None of these need a headset or SteamVR. Run them with `build.cmd`.
 ## Known limits
 
 - With the dashboard open or no game running, nothing is moved, so SteamVR's own pointers come from the real controller.
-- Switching the add-on off in Manage Add-ons takes effect right away: the overlay closes, its tab goes and offsets stop. SteamVR still starts `utmtftm.exe` at each launch, and it exits straight away without showing anything. Switching back on needs a SteamVR restart, like any add-on.
+- Switching the add-on off in Manage Add-ons takes effect right away: the overlay closes, its tab goes and offsets stop. SteamVR still starts the program at each launch, and it exits straight away without showing anything. Switching back on needs a SteamVR restart, like any add-on.
 - If you kill the overlay by hand, the driver keeps the last offsets it was given until SteamVR restarts.

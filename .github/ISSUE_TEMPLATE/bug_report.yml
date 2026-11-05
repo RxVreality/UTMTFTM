@@ -18,9 +18,9 @@ body:
     id: version
     attributes:
       label: UTMTFTM version
-      description: It's listed under Settings > Apps in Windows.
+      description: On Windows it's listed under Settings > Apps. On a Frame, the release you installed.
   - type: textarea
     id: log
     attributes:
       label: Log
-      description: Drag in `%LOCALAPPDATA%\UTMTFTM\utmtftm.log`, and `driver.log` from the same folder if the hands aren't moving at all.
+      description: Drag in `utmtftm.log`, and `driver.log` if the hands aren't moving at all. They're in `%LOCALAPPDATA%\UTMTFTM` on Windows and `~/.local/share/UTMTFTM` on a Frame.

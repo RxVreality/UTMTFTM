@@ -6,6 +6,20 @@ SteamVR's glove model, its hand animation and the controller models are not part
 
 Cairo is used under the Mozilla Public License 1.1, one of the two licenses it offers, and is linked unmodified. Its source is at https://cairographics.org/.
 
+The Steam Frame download includes only JsonCpp, which is built into the program, and the Barlow font. There it uses the cairo, FreeType and Vulkan that come with SteamOS, and the OpenVR loader that comes with SteamVR.
+
+## Barlow
+
+Regular and SemiBold, for the dashboard's text on Linux. https://github.com/jpt/barlow
+
+```
+Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license is in third_party/fonts/Barlow/OFL.txt, and in the fonts folder of the Steam Frame download.
+It's also available with a FAQ at https://openfontlicense.org
+```
+
 ## OpenVR SDK 1.23.7
 
 https://github.com/ValveSoftware/openvr
