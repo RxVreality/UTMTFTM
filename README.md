@@ -58,25 +58,39 @@ It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-o
 
 ## Bindings
 
-The **Bindings** tab at the top of the page shows your controllers underneath any other one you pick. Each button has a line to where it really is on the controller, and says what it does in the game you're in. Point at a button and its match lights up on the other controller.
+I never got on with Steam's binding screen, so there's a simpler one here. The **Bindings** tab at the top of the page shows your controllers at the bottom and any other controller you pick at the top, both at once. Every button has a line to its spot on the controller. Point the laser at one and its line lights up, along with its match on the other controller.
 
-So if you're on a Frame playing No Man's Sky and you want to know what the Quest's B does, pick Quest 3 and read it off. It's Jump, and on your Frame it's on A.
+![Steam Frame controllers on the Quest layout in Pavlov, with the laser on X](docs/bindings.png)
+
+Pick what to compare with from the row of names. With a game running, each button says what it does in that game, as far as the game tells SteamVR. No Man's Sky names everything, so if you pick Quest 3 there, the page shows that the Quest's B is Jump, and that Jump is A on your Frame. Games with a lot of controls split them into sets like On Foot and Flight, and the arrows at the top right move between them.
+
+![Steam Frame controllers under Quest 3 in No Man's Sky, with every button named](docs/bindings-names.png)
+
+### Using another controller's layout
 
 If you don't like what the developer picked for your controller:
 
-1. Pick the controller whose layout you'd rather have. **This game uses** then offers it, like **Quest layout**.
-2. Tap it. It's saved, and the game uses it the next time it launches. **Developer's** puts it back.
+1. Pick the controller whose layout you'd rather have.
+2. Next to **This game uses**, tap its layout, like **Quest layout**. **Developer's** puts it back.
+3. Restart the game. A new layout doesn't apply until then.
 
-To change one button, tap it on your own controller, then tap what it should do on the other one. Compare your controller with itself to just swap things around.
+SteamVR already translates between controllers when a game has nothing for yours, and this starts from the same translation. Here you can see it and choose it, even for games that have their own bindings for your controller.
 
-**Save for** works like it does for offsets. With **All games**, any game that has a binding for that controller gets the layout, starting from its second launch, because a game only tells SteamVR about its bindings once it's been run.
+### Changing one button
 
-A few things to know:
+Tap the button on your own controller, and a yellow bar asks what it should do. Tap that on the controller above, or **Nothing** to switch it off. If you just want to swap your own buttons around, pick your own controller to compare with. **Undo rewiring** takes it all back.
 
-- Lots of games don't say what their buttons do. Unity and Unreal games usually just pass the button along, so the page can only show that a button is in use. The ones that name their actions, like No Man's Sky, show the names.
+**Save for** picks between this game and every game. With **All games**, any game that has bindings for the other controller picks up the layout once you've played it and started it again.
+
+### What to expect
+
+- Lots of games don't say what their buttons do. Unity and Unreal games usually give SteamVR only the button's own name, so for those, like Pavlov, the page can only show which buttons are in use and how they match up.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
-- A new layout doesn't apply until the game restarts. SteamVR's own binding page can switch mid-game, but it does that through a web API this add-on stays away from.
-- A layout is a normal SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
+- Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
+- A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
+- I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
+
+There's more on how it finds all this in [docs/how-it-works.md](docs/how-it-works.md#the-bindings-page).
 
 ## Controllers
 

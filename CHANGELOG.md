@@ -1,10 +1,17 @@
 # Changelog
 
-## Next
+## 0.3.0
 
 A Bindings tab: your controllers under any other one you pick, with where each button is and what it does in the game you're in. You can put a game on another controller's layout, rewire single buttons, and set either as the default for all games. It reads and writes SteamVR's own binding files, and changes apply the next time the game launches.
 
-Fixed in the fallback for games the add-on can't reach: it was spelling SteamVR's setting wrong for SteamVR Input games, and on a Frame it wrote and read file paths with a slash too many or too few.
+Changes on the Steam Frame:
+
+- The hand on the page looks like the one on Windows now, with a smooth skin around SteamVR's own bones. It used to come out mangled.
+
+Fixed in the fallback for games the add-on can't reach:
+
+- It was spelling SteamVR's setting wrong for SteamVR Input games.
+- On a Frame it wrote and read file paths with a slash too many or too few.
 
 ## 0.2.0
 
