@@ -130,6 +130,8 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.
 - Any layout from the bindings page in a real game. What's written matches SteamVR's own translation and uses the settings route that's worked for offsets, but only a game can show it's right.
 - A combo in a real game, and whether SteamVR's chords work the same for OpenXR games as for SteamVR Input ones.
+- Fine adjust in a headset: which hand SteamVR says is holding the laser, and whether a game keeps drawing the hand behind the dashboard.
+- Most of `input/game_labels.json`. I've checked Pavlov and Titan Isles on my Frame, and `headset_checked` says so for each game.
 - Index's squeeze threshold. Its grip reads as fully closed just from holding the controller, so the binding goes by squeeze force. 0.6 is a judgement call.
 
 ## Known limits

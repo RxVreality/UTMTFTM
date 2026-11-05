@@ -959,6 +959,16 @@ static void testGuideShots(const std::string& work, const std::string& out) {
     std::string safe = g.game;
     for (char& ch : safe) if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
     shot(m, (fs::u8path(out) / "guides" / (safe + ".png")).generic_u8string());
+    // And the Combos page, because its list of what a combo can set off uses the same words.
+    if (page.comboModel("", "").canMake) {
+      page.comboClick("combo_new");
+      page.comboClick("c:right/input/a");
+      page.comboClick("c:right/input/b");
+      page.comboClick("combo_next");
+      shotCombo(page.comboModel("", ""), (fs::u8path(out) / "guides" / (safe + "_combos.png")).generic_u8string());
+      page.comboClick("combo_back");
+      page.comboClick("combo_cancel");
+    }
     ++drawn;
   }
   printf("drew %d games from the table\n", drawn);

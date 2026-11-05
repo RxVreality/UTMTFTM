@@ -1,8 +1,10 @@
-There's a **Bindings** tab now. It shows your controllers under any other controller you pick, with a line from each button to its spot. If the game says what its buttons do, you see that too. You can put a game on another controller's layout or change single buttons. I wrote it because I find Steam's binding screen hard to use, and there are pictures and the details in the [README](https://github.com/RxVreality/UTMTFTM#bindings).
+The buttons on the **Bindings** tab now say what they do in 47 games that don't tell SteamVR, like Pavlov, Forefront and Titan Isles. I looked them up, from the game's own files where I could and otherwise from developers' guides and reviews, and the top of the page says which. I've checked Pavlov and Titan Isles in the game on my Frame. The rest haven't been confirmed in a headset, so if you spot a wrong one, please tell me. You'll see some blanks on purpose, where I couldn't prove a label applies to your controller.
 
-I've used the page on my Frame, but I haven't played a game on a translated layout yet, so if one misbehaves, tap **Developer's** on that tab to put the game back, restart it and please open an issue.
+There's a **Combos** tab too. A combo is a macro for your controller: hold two or more controls together and they do one thing in the game you're in, and just resting your thumb on a button counts. **It hasn't had much testing yet**, so expect some rough edges. A new combo starts working the next time the game launches. If one misbehaves, tap **Remove**, restart the game and please open an issue with the game's name. There's more in the [README](https://github.com/RxVreality/UTMTFTM#combos).
 
-On a Frame, the hand on the page now looks like the Windows one. It used to come out mangled.
+**Fine adjust** on the Hands tab puts arrows next to each number, for when a hand's nearly right and you'd like it 1 degree to the left. This one's new and hasn't had much use yet.
+
+Two smaller changes. Pointing at a button on the Bindings tab now lights up the one that does the same thing on the other controller, in games that name their buttons. Yaw and roll now read positive to the right, and saved offsets don't change, only how they read.
 
 **On a Frame:** turn on Developer Mode in Steam's System settings, open Konsole from the **+** on the bottom bar, and paste this:
 

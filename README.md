@@ -54,6 +54,8 @@ On a Frame you can also get to it from the **+** on the bar at the bottom.
 
 **Save for** on the page picks between this game and all games. **Reset** clears a hand. With no game running you can still set the default for all games, you just won't see it until you start one.
 
+If a hand's nearly right, **Fine adjust** on the page puts arrows next to each number, for when you'd like it 1 degree to the left. They go 1 mm and 1 degree a tap, or 1 cm and 5 degrees. The hand you aren't pointing with moves as you tap, as long as the game still draws it behind the dashboard. This one's new and hasn't had much use yet.
+
 It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-on moves the controller inside SteamVR, so nothing gets loaded into the game. Pavlov has been fine with that, but I can't speak for every anti-cheat out there.
 
 ## Bindings
@@ -84,15 +86,30 @@ Tap the button on your own controller, and a yellow bar asks what it should do. 
 
 ### What to expect
 
-- Lots of games don't tell SteamVR what their buttons do, because Unity and Unreal usually pass along only the button's own name. For 47 of them I looked up the controls, from the game's own files where I could and otherwise from developers' guides and reviews, and the top of the page says which. Plenty of games had nothing solid, so those only show how the buttons match up. The full list and sources are in [input/game_labels.json](input/game_labels.json).
+- Lots of games don't tell SteamVR what their buttons do, because Unity and Unreal usually pass along only the button's own name. For 47 of them I looked up the controls, from the game's own files where I could and otherwise from developers' guides and reviews, and the top of the page says which. Plenty of games had nothing solid, so those only show how the buttons match up. The full list and sources are in [input/game_labels.json](input/game_labels.json). I've checked Pavlov and Titan Isles in the game on my Frame. The rest come straight from those sources and I haven't confirmed them in a headset.
 - Those are the default controls, so a setting, a left-handed mode or a game update can change them. If you spot a wrong one, please tell me.
-- You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action. A wrong label is worse than none.
+- You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
 - Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
 - I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
 
 There's more on how it finds all this in [docs/how-it-works.md](docs/how-it-works.md#the-bindings-page).
+
+## Combos
+
+A combo is a macro for your controller: hold two or more controls together and they do one thing in the game. Touching counts and doesn't press anything, so your thumb on A and B can be its own action without setting off A or B. VRChat players build these by hand in Steam's binding screen, and this is the same thing without the binding screen.
+
+![Picking touch A, touch B and press grip for a combo in Pavlov](docs/combos.png)
+
+1. With a game running, open the **Combos** tab and tap **New combo**.
+2. Tap each control you want in it: once for touch, again for press, and again to clear it.
+3. Tap **Next** and pick what it should do.
+4. Restart the game. A new combo doesn't work until then.
+
+**Remove** takes one out again. Each game can have six.
+
+**This is the newest part and it hasn't had much testing.** It writes combos the same way Steam's binding screen does, but it hasn't had much time in real games, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
 
 ## Controllers
 

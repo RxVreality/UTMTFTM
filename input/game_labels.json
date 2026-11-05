@@ -657,7 +657,7 @@
     "Pavlov"
    ],
    "checked": "2026-11-05",
-   "headset_checked": false,
+   "headset_checked": true,
    "sources": [
     "Its Unreal input settings, for which button is which on each controller, read from an installed copy on 2026-11-05",
     "https://steamcommunity.com/sharedfiles/filedetails/?id=2211883306"
@@ -1099,7 +1099,7 @@
     "steam.app.1839680"
    ],
    "checked": "2026-11-05",
-   "headset_checked": false,
+   "headset_checked": true,
    "sources": [
     "Its Unity input settings, read from an installed copy of the game on 2026-11-05"
    ],
