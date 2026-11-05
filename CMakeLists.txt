@@ -33,16 +33,28 @@ else()
   pkg_check_modules(CAIRO REQUIRED cairo)
   pkg_check_modules(FREETYPE REQUIRED freetype2)
   pkg_check_modules(VULKAN REQUIRED vulkan)
-  pkg_check_modules(JSONCPP REQUIRED jsoncpp)
-  find_library(JSONCPP_STATIC libjsoncpp.a REQUIRED)
 
   # cairo, FreeType, Vulkan and the C library come from SteamOS. Everything else is inside the program, so it doesn't
   # matter which compiler version built it or what's installed on the headset. -fsigned-char: plain char is unsigned on
   # ARM and signed on x86, and this keeps it the way the Windows build has been tested.
   add_compile_options(-Wall -Wno-unused-parameter -fsigned-char -fvisibility=hidden)
   add_link_options(-static-libstdc++ -static-libgcc -Wl,--as-needed -Wl,--disable-new-dtags)
-  include_directories(src third_party/openvr/headers ${CAIRO_INCLUDE_DIRS} ${FREETYPE_INCLUDE_DIRS} ${VULKAN_INCLUDE_DIRS} ${JSONCPP_INCLUDE_DIRS})
+  include_directories(src third_party/openvr/headers ${CAIRO_INCLUDE_DIRS} ${FREETYPE_INCLUDE_DIRS} ${VULKAN_INCLUDE_DIRS})
   link_directories(third_party/openvr/bin/linuxarm64)
+
+  # The same version the Windows build gets from vcpkg, built in because distributions disagree on how they package it.
+  include(FetchContent)
+  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_STATIC_LIBS ON)
+  set(BUILD_OBJECT_LIBS OFF)
+  set(JSONCPP_WITH_TESTS OFF)
+  set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF)
+  set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF)
+  set(JSONCPP_WITH_CMAKE_PACKAGE OFF)
+  FetchContent_Declare(jsoncpp
+    URL https://github.com/open-source-parsers/jsoncpp/archive/refs/tags/1.9.6.tar.gz
+    URL_HASH SHA256=f93b6dd7ce796b13d02c108bc9f79812245a82e577581c4c9aabe57075c90ea2)
+  FetchContent_MakeAvailable(jsoncpp)
 
   # OpenVR's loader sits next to the program. If that copy goes missing, SteamVR on the Frame has its own.
   set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
@@ -52,7 +64,7 @@ else()
   set(UPLOAD_SRC src/vkupload.cpp)
   set(UPLOAD_LIBS ${VULKAN_LIBRARIES})
   set(CAIRO_LIBS ${CAIRO_LIBRARIES} ${FREETYPE_LIBRARIES})
-  set(JSON_LIBS ${JSONCPP_STATIC})
+  set(JSON_LIBS jsoncpp_static)
   set(THREAD_LIBS Threads::Threads ${CMAKE_DL_LIBS})
   set(DRIVER_DIR ${CMAKE_SOURCE_DIR}/dist/driver/bin/linuxarm64)
 endif()

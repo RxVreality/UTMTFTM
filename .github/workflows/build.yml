@@ -22,7 +22,7 @@ jobs:
       - name: Install libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ libcairo2-dev libfreetype-dev libjsoncpp-dev libvulkan-dev
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ libcairo2-dev libfreetype-dev libvulkan-dev
 
       - name: Build and run the offline tests
         run: sh build.sh
