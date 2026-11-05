@@ -424,8 +424,11 @@ static void testFixture(const std::string& work, const std::string& out) {
     return -1;
   };
   page.comboClick("c:right/input/a");
-  check(page.comboModel("", "").picked.empty(), "tapping a control does nothing until you've asked for a new combo");
-  page.status.clear();
+  cm = page.comboModel("", "");
+  check(cm.step == 1 && cm.picked == "Touch A", "tapping a control on the list starts a combo with it");
+  page.comboClick("combo_cancel");
+  check(page.comboModel("", "").step == 0 && page.comboModel("", "").picked.empty(), "and Cancel forgets it");
+  check(!fake.values.count(namedKey), "without having written anything");
   page.comboClick("combo_new");
   cm = page.comboModel("", "");
   check(cm.step == 1 && cm.picked.empty(), "New combo starts empty");
@@ -609,6 +612,9 @@ static void testFixture(const std::string& work, const std::string& out) {
   shotCombo(cm, out + "/fixture_combos_unseen.png");
   page.comboClickGreyed("combo_new");
   check(page.status.find("No Bindings") != std::string::npos, "and the greyed button says why");
+  page.status.clear();
+  page.comboClick("c:right/input/a");
+  check(page.comboModel("", "").step == 0 && page.status.find("No Bindings") != std::string::npos, "tapping a control there explains too, and doesn't start anything");
   page.setGame("", "", "");
   cm = page.comboModel("", "");
   check(!cm.canMake && cm.why.find("particular game") != std::string::npos, "no game running says to start one");
@@ -730,39 +736,60 @@ static void testReal(const std::string& work, const std::string& out) {
   shot(page.model("", ""), out + "/game_pavlov_armed.png");
   page.click("bind_cancel");
 
-  // The combos page on the real controllers and real games. Only ever writes in the throwaway folder and the fake settings.
-  for (const auto& g : games) {
+  // The combos page on the real controllers and real games: the ones with pictures above, and whatever else has run on this
+  // machine. Only ever writes in the throwaway folder and the fake settings.
+  struct RealGame { std::string key, name, file; };
+  std::vector<RealGame> realGames;
+  for (const auto& g : games) realGames.push_back({g.key, g.name, g.file});
+  {
+    std::set<std::string> seen;
+    for (const auto& g : games) seen.insert(g.key);
+    for (const std::string& dir : d.config) {
+      std::error_code ec;
+      for (const auto& f : fs::directory_iterator(fs::u8path(dir) / "openxr", ec)) {
+        const std::string name = f.path().filename().u8string();
+        const size_t at = name.find("_frame_controller_");
+        if (at == std::string::npos || !seen.insert(name.substr(0, at)).second || realGames.size() >= 40) continue;
+        realGames.push_back({name.substr(0, at), name.substr(0, at), ""});
+      }
+    }
+  }
+  for (const RealGame& g : realGames) {
+    const std::string shotName = g.file.empty() ? "" : out + "/game_" + g.file + "_combos";
     page.setGame(g.key, "", g.name);
     page.status.clear();
     giveModels(page, d.steamvr);
     ComboModel cm = page.comboModel("", "");
-    shotCombo(cm, out + "/game_" + g.file + "_combos.png");
+    if (!shotName.empty()) shotCombo(cm, shotName + ".png");
     if (!cm.canMake) continue;
+    // Every control this controller has can be picked, and reads back as text.
+    for (int h = 0; h < 2; ++h)
+      for (const BindRow& r : cm.yours.rows[h]) check(!r.name.empty() && r.id.rfind("c:", 0) == 0, g.name + ": " + r.id + " can be picked");
     page.comboClick("combo_new");
     page.comboClick("c:right/input/a");
     page.comboClick("c:right/input/b");
-    shotCombo(page.comboModel("", ""), out + "/game_" + g.file + "_combos_step1.png");
+    if (!shotName.empty()) shotCombo(page.comboModel("", ""), shotName + "_step1.png");
     page.comboClick("c:right/input/grip");
     page.comboClick("c:right/input/grip");
-    shotCombo(page.comboModel("", ""), out + "/game_" + g.file + "_combos_step1b.png");
+    if (!shotName.empty()) shotCombo(page.comboModel("", ""), shotName + "_step1b.png");
     page.comboClick("c:right/input/grip");
     page.comboClick("combo_next");
     cm = page.comboModel("", "");
-    shotCombo(cm, out + "/game_" + g.file + "_combos_step2.png");
-    printf("%s: %zu combo choices on this page, of %d page(s), controls '%s'\n", g.name, cm.choices.size(), cm.pages, cm.controls.c_str());
-    check(!cm.choices.empty(), std::string(g.name) + ": a combo has something to set off");
+    if (!shotName.empty()) shotCombo(cm, shotName + "_step2.png");
+    printf("%s: %zu combo choices on this page, of %d page(s), controls '%s'\n", g.name.c_str(), cm.choices.size(), cm.pages, cm.controls.c_str());
+    // A game can have nothing that's on or off, so an empty list is fine here. It just says so.
     if (cm.choices.empty()) { page.comboClick("combo_back"); page.comboClick("combo_cancel"); continue; }
     page.comboClick(cm.choices[0].id);
     cm = page.comboModel("", "");
-    check(cm.saved.size() == 1, std::string(g.name) + ": it saves");
-    shotCombo(page.comboModel("combo_row_0", ""), out + "/game_" + g.file + "_combos_saved.png");
+    check(cm.saved.size() == 1, g.name + ": it saves");
+    if (!shotName.empty()) shotCombo(page.comboModel("combo_row_0", ""), shotName + "_saved.png");
     const Json::Value w = readFile(page.fileFor(g.key, "frame_controller"));
     int chords = 0;
-    for (const auto& set : w["bindings"].getMemberNames()) chords += w["bindings"][set]["chords"].size();
-    check(chords >= 1, std::string(g.name) + ": the chord is in the file");
-    check(w["controller_type"].asString() == "frame_controller", std::string(g.name) + ": and the file's for this controller");
+    for (const auto& set : w["bindings"].getMemberNames()) chords += int(w["bindings"][set]["chords"].size());
+    check(chords >= 1, g.name + ": the chord is in the file");
+    check(w["controller_type"].asString() == "frame_controller", g.name + ": and the file's for this controller");
     page.comboClick("combo_del_0");
-    check(!fs::exists(fs::u8path(page.fileFor(g.key, "frame_controller"))), std::string(g.name) + ": and it all comes back out");
+    check(!fs::exists(fs::u8path(page.fileFor(g.key, "frame_controller"))), g.name + ": and it all comes back out");
     page.status.clear();
   }
   page.setGame("steam.app.555160", "", "Pavlov VR");

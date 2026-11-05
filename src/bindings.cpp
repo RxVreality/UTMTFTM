@@ -1818,7 +1818,14 @@ void Page::comboClick(const std::string& id) {
   if (id == "combo_next") { if (!picked_.empty()) { comboStep_ = 2; comboPage_ = 0; } return; }
   if (id == "combo_back") { comboStep_ = 1; return; }
   if (id.rfind("c:", 0) == 0) {
-    if (comboStep_ != 1) { say("Tap New combo first, then tap the controls."); return; }
+    // Tapping a control on the list of combos just starts a new one with it.
+    if (comboStep_ == 0) {
+      if (comboBase().empty()) { comboClickGreyed("combo_new"); return; }
+      if (combosHere().size() >= 6) { say("Six combos per game for now, because that's what fits. Remove one first."); return; }
+      picked_.clear();
+      comboStep_ = 1;
+    }
+    if (comboStep_ != 1) return;
     // Touch first, because that's the point of this page. Then press, then off. A control can only do what it has.
     const std::string path = id.substr(2);
     const Input* i = inputAt(*mine, path);
