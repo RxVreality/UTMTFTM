@@ -1,32 +1,48 @@
 // driver_utmtftm: a SteamVR add-on with no devices of its own. It sits between SteamVR's device drivers and
 // SteamVR itself and moves the two hand controllers' poses by the offsets the overlay publishes in
-// %LOCALAPPDATA%\UTMTFTM\live.shm. Every game then sees the moved controller, live, whichever API it uses,
+// live.shm (see live.h). Every game then sees the moved controller, live, whichever API it uses,
 // and nothing is loaded inside the game.
 //
 // It hooks IVRServerDriverHost::TrackedDevicePoseUpdated, the call every driver reports poses through. That
 // runs at the tracking rate for every device, so unchanged offsets come from a per-thread cache checked
 // against the shared sequence number: no allocation, no file I/O and no locks on that path.
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <share.h>
+#define FH_EXPORT __declspec(dllexport)
+#else
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <filesystem>
+#define FH_EXPORT __attribute__((visibility("default")))
+#endif
 
 #include <openvr_driver.h>
 
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <share.h>
 #include <string>
 
 #include "../live.h"
 
 namespace {
 
-fhlive::Shared* g_shm = nullptr;
-fhlive::DriverChannel* g_ch = nullptr;
-HANDLE g_map = nullptr;
+// Cleared when the driver shuts down, while another driver's thread may still be reporting a pose.
+std::atomic<fhlive::DriverChannel*> g_ch{nullptr};
+
+#ifdef _WIN32
+int lastError() { return int(GetLastError()); }
+void spinPause() { YieldProcessor(); }
 
 std::wstring dataDir() {
   wchar_t b[MAX_PATH];
@@ -34,14 +50,95 @@ std::wstring dataDir() {
   return (n && n < MAX_PATH ? std::wstring(b) : std::wstring(L".")) + L"\\UTMTFTM";
 }
 
+FILE* openLog() {
+  std::wstring d = dataDir();
+  CreateDirectoryW(d.c_str(), nullptr);
+  return _wfsopen((d + L"\\driver.log").c_str(), L"a", _SH_DENYNO);
+}
+
+fhlive::Shared* mapShared() {
+  std::wstring d = dataDir();
+  CreateDirectoryW(d.c_str(), nullptr);
+  HANDLE f = CreateFileW((d + L"\\live.shm").c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return nullptr;
+  HANDLE map = CreateFileMappingW(f, nullptr, PAGE_READWRITE, 0, sizeof(fhlive::Shared), nullptr);
+  CloseHandle(f);
+  if (!map) return nullptr;
+  void* v = MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(fhlive::Shared));
+  CloseHandle(map);
+  return static_cast<fhlive::Shared*>(v);
+}
+
+bool writeSlot(void** slot, void* value) {
+  DWORD old;
+  if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return false;
+  *slot = value;
+  VirtualProtect(slot, sizeof(void*), old, &old);
+  return true;
+}
+#else
+int lastError() { return errno; }
+void spinPause() {
+#if defined(__aarch64__)
+  __asm__ __volatile__("yield");
+#endif
+}
+
+FILE* openLog() {
+  std::error_code ec;
+  std::filesystem::create_directories(fhlive::linuxDataDir(), ec);
+  return fopen((fhlive::linuxDataDir() + "/driver.log").c_str(), "a");
+}
+
+fhlive::Shared* mapShared() {
+  std::error_code ec;
+  std::filesystem::create_directories(fhlive::linuxDataDir(), ec);
+  int f = open((fhlive::linuxDataDir() + "/live.shm").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (f < 0) return nullptr;
+  struct stat st {};
+  if (fstat(f, &st) != 0 || (st.st_size < off_t(sizeof(fhlive::Shared)) && ftruncate(f, sizeof(fhlive::Shared)) != 0)) {
+    close(f);
+    return nullptr;
+  }
+  void* v = mmap(nullptr, sizeof(fhlive::Shared), PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
+  close(f);
+  return v == MAP_FAILED ? nullptr : static_cast<fhlive::Shared*>(v);
+}
+
+// What the memory holding addr is allowed to do right now. Unlike VirtualProtect, mprotect doesn't say what it was.
+int protectionOf(const void* addr) {
+  int prot = PROT_READ;  // what a vtable normally is, if the kernel's list can't be read
+  FILE* f = fopen("/proc/self/maps", "r");
+  if (!f) return prot;
+  char line[512];
+  while (fgets(line, sizeof line, f)) {
+    unsigned long long lo, hi;
+    char r, w, x;
+    if (sscanf(line, "%llx-%llx %c%c%c", &lo, &hi, &r, &w, &x) != 5) continue;
+    if (reinterpret_cast<uintptr_t>(addr) < lo || reinterpret_cast<uintptr_t>(addr) >= hi) continue;
+    prot = (r == 'r' ? PROT_READ : 0) | (w == 'w' ? PROT_WRITE : 0) | (x == 'x' ? PROT_EXEC : 0);
+    break;
+  }
+  fclose(f);
+  return prot;
+}
+
+bool writeSlot(void** slot, void* value) {
+  const int prot = protectionOf(slot);
+  const uintptr_t page = reinterpret_cast<uintptr_t>(slot) & ~(uintptr_t(sysconf(_SC_PAGESIZE)) - 1);
+  void* start = reinterpret_cast<void*>(page);
+  if (!(prot & PROT_WRITE) && mprotect(start, size_t(sysconf(_SC_PAGESIZE)), prot | PROT_WRITE) != 0) return false;
+  __atomic_store_n(slot, value, __ATOMIC_RELEASE);  // another CPU may be calling through it, and must see the whole pointer
+  if (!(prot & PROT_WRITE)) mprotect(start, size_t(sysconf(_SC_PAGESIZE)), prot);
+  return true;
+}
+#endif
+
 void logf(const char* fmt, ...) {
   static FILE* f = nullptr;
-  if (!f) {
-    std::wstring d = dataDir();
-    CreateDirectoryW(d.c_str(), nullptr);
-    f = _wfsopen((d + L"\\driver.log").c_str(), L"a", _SH_DENYNO);
-    if (!f) return;
-  }
+  if (!f) f = openLog();
+  if (!f) return;
   va_list a;
   va_start(a, fmt);
   vfprintf(f, fmt, a);
@@ -50,28 +147,15 @@ void logf(const char* fmt, ...) {
   fflush(f);
 }
 
+// The mapping stays until SteamVR exits: another driver's thread could be part way through a pose when this one shuts down.
 bool openShared() {
-  std::wstring d = dataDir();
-  CreateDirectoryW(d.c_str(), nullptr);
-  HANDLE f = CreateFileW((d + L"\\live.shm").c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                         nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (f == INVALID_HANDLE_VALUE) return false;
-  g_map = CreateFileMappingW(f, nullptr, PAGE_READWRITE, 0, sizeof(fhlive::Shared), nullptr);
-  CloseHandle(f);
-  if (!g_map) return false;
-  g_shm = static_cast<fhlive::Shared*>(MapViewOfFile(g_map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(fhlive::Shared)));
-  if (!g_shm) { CloseHandle(g_map); g_map = nullptr; return false; }
-  g_ch = &g_shm->driver;
+  fhlive::Shared* shm = mapShared();
+  if (!shm) return false;
+  g_ch.store(&shm->driver, std::memory_order_release);
   return true;
 }
 
-void closeShared() {
-  g_ch = nullptr;
-  if (g_shm) UnmapViewOfFile(g_shm);
-  if (g_map) CloseHandle(g_map);
-  g_shm = nullptr;
-  g_map = nullptr;
-}
+void closeShared() { g_ch.store(nullptr, std::memory_order_release); }
 
 const fhlive::DeviceOffset kIdentity = {{0, 0, 0}, {0, 0, 0, 1}};
 
@@ -93,12 +177,12 @@ bool usable(fhlive::DeviceOffset& o) {
 }
 
 // Tell the overlay what's in the poses from here on, so it can work out where the controller really is.
-void publishApplied(const fhlive::DeviceOffset o[2]) {
+void publishApplied(fhlive::DriverChannel* ch, const fhlive::DeviceOffset o[2]) {
   static std::atomic_flag busy = ATOMIC_FLAG_INIT;
   if (busy.test_and_set(std::memory_order_acquire)) return;
-  g_ch->appliedSeq.fetch_add(1, std::memory_order_acq_rel);
-  memcpy(g_ch->applied, o, sizeof(fhlive::DeviceOffset) * 2);
-  g_ch->appliedSeq.fetch_add(1, std::memory_order_release);
+  fhlive::seqWriteBegin(ch->appliedSeq);
+  memcpy(ch->applied, o, sizeof(fhlive::DeviceOffset) * 2);
+  fhlive::seqWriteEnd(ch->appliedSeq);
   busy.clear(std::memory_order_release);
 }
 
@@ -110,15 +194,15 @@ struct OffsetCache {
 };
 thread_local OffsetCache t_cache;
 
-void refreshCache(OffsetCache& c) {
+void refreshCache(fhlive::DriverChannel* ch, OffsetCache& c) {
   for (int tries = 0; tries < 8; ++tries) {
-    uint32_t s0 = g_ch->seq.load(std::memory_order_acquire);
-    if (s0 & 1) { YieldProcessor(); continue; }
-    uint32_t magic = g_ch->magic, dev[2] = {g_ch->device[0], g_ch->device[1]};
+    uint32_t s0 = ch->seq.load(std::memory_order_acquire);
+    if (s0 & 1) { spinPause(); continue; }
+    uint32_t magic = ch->magic, dev[2] = {ch->device[0], ch->device[1]};
     fhlive::DeviceOffset o[2];
-    memcpy(o, g_ch->want, sizeof o);
+    memcpy(o, ch->want, sizeof o);
     std::atomic_thread_fence(std::memory_order_acquire);
-    if (g_ch->seq.load(std::memory_order_acquire) != s0) continue;  // the overlay got in: read again
+    if (ch->seq.load(std::memory_order_acquire) != s0) continue;  // the overlay got in: read again
     bool valid = magic == fhlive::kDriverMagic;
     for (int h = 0; h < 2; ++h) {
       c.device[h] = valid ? dev[h] : fhlive::kNoDevice;
@@ -127,7 +211,7 @@ void refreshCache(OffsetCache& c) {
       c.o[h] = c.on[h] ? o[h] : kIdentity;
     }
     c.seq = s0;
-    publishApplied(c.o);
+    publishApplied(ch, c.o);
     return;
   }
   // Still contended: keep the offsets from last time rather than letting the hand jump.
@@ -172,9 +256,9 @@ void publishTrue(fhlive::DriverChannel* ch, int hand, const vr::DriverPose_t& p)
   fhlive::DeviceOffset o;
   for (int i = 0; i < 3; ++i) o.pos[i] = float(inWorld[i] + p.vecWorldFromDriverTranslation[i]);
   o.rot[0] = float(q.x); o.rot[1] = float(q.y); o.rot[2] = float(q.z); o.rot[3] = float(q.w);
-  ch->trueSeq[hand].fetch_add(1, std::memory_order_acq_rel);
+  fhlive::seqWriteBegin(ch->trueSeq[hand]);
   ch->truePose[hand] = o;
-  ch->trueSeq[hand].fetch_add(1, std::memory_order_release);
+  fhlive::seqWriteEnd(ch->trueSeq[hand]);
 }
 
 using PoseFn = void (*)(void* self, uint32_t which, const vr::DriverPose_t& pose, uint32_t size);
@@ -182,13 +266,14 @@ using PoseFn = void (*)(void* self, uint32_t which, const vr::DriverPose_t& pose
 thread_local bool t_inPose = false;
 
 void onPose(PoseFn next, void* self, uint32_t which, const vr::DriverPose_t& pose, uint32_t size) {
-  fhlive::DriverChannel* ch = g_ch;
+  fhlive::DriverChannel* ch = g_ch.load(std::memory_order_relaxed);
   // An older host interface can pass a pose on to a newer one, which is hooked too. That pose has been moved already.
   if (!ch || t_inPose) { next(self, which, pose, size); return; }
   ch->poseUpdates.store(ch->poseUpdates.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
   OffsetCache& c = t_cache;
-  if (ch->seq.load(std::memory_order_acquire) != c.seq) refreshCache(c);
+  if (ch->seq.load(std::memory_order_acquire) != c.seq) refreshCache(ch, c);
   int hand = which == c.device[0] ? 0 : which == c.device[1] ? 1 : -1;
+  if (hand >= 0) ch->handUpdates[hand].store(ch->handUpdates[hand].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
   const bool known = size >= sizeof(vr::DriverPose_t);
   if (hand >= 0 && known && pose.poseIsValid && ch->wantTrue.load(std::memory_order_relaxed)) publishTrue(ch, hand, pose);
   // A driver built against a newer SDK may pass a longer struct: keep whatever comes after the part we know.
@@ -220,14 +305,6 @@ void hookPose(void* self, uint32_t which, const vr::DriverPose_t& pose, uint32_t
 }
 const PoseFn kHooks[kVersions] = {hookPose<0>, hookPose<1>, hookPose<2>};
 
-bool writeSlot(void** slot, void* value) {
-  DWORD old;
-  if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return false;
-  *slot = value;
-  VirtualProtect(slot, sizeof(void*), old, &old);
-  return true;
-}
-
 void installHooks(vr::IVRDriverContext* ctx) {
   for (int i = 0; i < kVersions; ++i) {
     vr::EVRInitError e = vr::VRInitError_None;
@@ -238,7 +315,7 @@ void installHooks(vr::IVRDriverContext* ctx) {
     for (int k = 0; k < kVersions; ++k) mine = mine || vtable[kPoseSlot] == reinterpret_cast<void*>(kHooks[k]);
     if (mine) { logf("%s: shares a hooked vtable", kHostVersions[i]); continue; }
     g_next[i] = reinterpret_cast<PoseFn>(vtable[kPoseSlot]);
-    if (!writeSlot(&vtable[kPoseSlot], reinterpret_cast<void*>(kHooks[i]))) { g_next[i] = nullptr; logf("%s: hook failed (%lu)", kHostVersions[i], GetLastError()); continue; }
+    if (!writeSlot(&vtable[kPoseSlot], reinterpret_cast<void*>(kHooks[i]))) { g_next[i] = nullptr; logf("%s: hook failed (%d)", kHostVersions[i], lastError()); continue; }
     g_vtable[i] = vtable;
     logf("%s: hooked", kHostVersions[i]);
   }
@@ -256,13 +333,14 @@ class Provider : public vr::IServerTrackedDeviceProvider {
  public:
   vr::EVRInitError Init(vr::IVRDriverContext* ctx) override {
     VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
-    if (!openShared()) { logf("couldn't open live.shm (%lu): offsets are off", GetLastError()); return vr::VRInitError_None; }
+    if (!openShared()) { logf("couldn't open live.shm (%d): offsets are off", lastError()); return vr::VRInitError_None; }
     // Nothing is applied until the overlay says which devices are the hands this time.
-    g_ch->seq.fetch_add(1, std::memory_order_acq_rel);
-    g_ch->magic = 0;
-    g_ch->seq.fetch_add(1, std::memory_order_release);
+    fhlive::DriverChannel* ch = g_ch.load(std::memory_order_relaxed);
+    fhlive::seqWriteBegin(ch->seq);
+    ch->magic = 0;
+    fhlive::seqWriteEnd(ch->seq);
     fhlive::DeviceOffset none[2] = {kIdentity, kIdentity};
-    publishApplied(none);
+    publishApplied(ch, none);
     installHooks(ctx);
     logf("loaded");
     return vr::VRInitError_None;
@@ -283,7 +361,7 @@ Provider g_provider;
 
 }  // namespace
 
-extern "C" __declspec(dllexport) void* HmdDriverFactory(const char* name, int* code) {
+extern "C" FH_EXPORT void* HmdDriverFactory(const char* name, int* code) {
   if (!strcmp(name, vr::IServerTrackedDeviceProvider_Version)) return &g_provider;
   if (code) *code = vr::VRInitError_Init_InterfaceNotFound;
   return nullptr;

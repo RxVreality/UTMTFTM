@@ -1,6 +1,6 @@
-// Everything Windows-specific the overlay needs, kept out of main.cpp and ui.cpp so those stay
-// free of <windows.h> (its `near` and `far` macros collide with ordinary names there).
-// All paths are UTF-8 with forward slashes.
+// Everything specific to one operating system that the overlay needs, kept out of main.cpp and ui.cpp so those
+// stay the same on both (and free of <windows.h>, whose `near` and `far` macros collide with ordinary names there).
+// platform_windows.cpp and platform_linux.cpp each implement this. All paths are UTF-8 with forward slashes.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -10,17 +10,23 @@
 namespace fh {
 namespace platform {
 
-std::string dataDir();       // %LOCALAPPDATA%/UTMTFTM
+std::string dataDir();       // %LOCALAPPDATA%/UTMTFTM, ~/.local/share/UTMTFTM
 std::string exeDir();        // folder holding this program
 std::string steamDir();      // Steam's install folder
 std::string steamvrDir();    // SteamVR's install folder
-std::string documentsDir();
+std::string documentsDir();  // where SteamVR keeps its "steamvr" folder of per-user bindings
 
 void sleepMs(int ms);        // accurate to about a millisecond below 50 ms, without changing the system timer
 uint32_t currentPid();
 
 // "exe.<name>" for that process ("" if it can't be read): the key for games with no Steam app id.
+// On Linux a process Steam started says its app id even when SteamVR doesn't know it, giving "steam.app.<id>".
 std::string processExeKey(uint32_t pid);
+
+#ifndef _WIN32
+// The working part of processExeKey, on the raw contents of /proc/<pid>/environ and /proc/<pid>/cmdline.
+std::string exeKeyFrom(const std::string& environ, const std::string& cmdline);
+#endif
 
 // live.shm mapped read/write, created if missing. nullptr on failure.
 fhlive::Shared* mapLive();

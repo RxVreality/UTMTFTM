@@ -1,4 +1,5 @@
-// GPU path for overlay images: SetOverlayTexture with a D3D11 texture instead of SetOverlayRaw.
+// GPU path for overlay images: SetOverlayTexture with a real texture instead of SetOverlayRaw.
+// d3dupload.cpp does it with D3D11 on Windows, and vkupload.cpp with Vulkan on Linux.
 //
 // Why: SetOverlayRaw hands every frame to the compositor in a shared-memory block that the
 // compositor frees on its own schedule. Each client may have 201 outstanding; at 60 Hz (the

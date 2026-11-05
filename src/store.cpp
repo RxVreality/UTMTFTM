@@ -284,7 +284,7 @@ void Store::publishLive(const HandPair* drag) const {
   if (!m) return;
   HandPair now = drag ? *drag : effective(sceneKey);
   fhlive::DriverChannel& d = m->driver;
-  d.seq.fetch_add(1, std::memory_order_acq_rel);
+  fhlive::seqWriteBegin(d.seq);
   d.magic = fhlive::kDriverMagic;
   for (int h = 0; h < 2; ++h) {
     const Offset& o = h ? now.right : now.left;
@@ -296,12 +296,17 @@ void Store::publishLive(const HandPair* drag) const {
     for (int i = 0; i < 3; ++i) d.want[h].pos[i] = dev.m[i][3];
     toQuat(dev, d.want[h].rot);
   }
-  d.seq.fetch_add(1, std::memory_order_release);
+  fhlive::seqWriteEnd(d.seq);
 }
 
 uint64_t Store::driverPoseUpdates() {
   fhlive::Shared* m = platform::mapLive();
   return m ? m->driver.poseUpdates.load(std::memory_order_relaxed) : 0;
+}
+
+uint64_t Store::driverHandUpdates() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->driver.handUpdates[0].load(std::memory_order_relaxed) + m->driver.handUpdates[1].load(std::memory_order_relaxed) : 0;
 }
 
 M Store::appliedDeviceOffset(int hand) {

@@ -1,9 +1,17 @@
-// Proves the SteamVR driver with no headset: the real DLL is loaded the way vrserver loads it and handed a
+// Proves the SteamVR driver with no headset: the real library is loaded the way vrserver loads it and handed a
 // fake host, so poses go through the real hook exactly as a device driver's would.
 // This file can't share a translation unit with openvr.h, so it works on the channel in live.h directly.
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include <openvr_driver.h>
 
@@ -157,12 +165,60 @@ static Q axisTurn(double x, double y, double z, double deg) {
 static const fhlive::DeviceOffset kNone = {{0, 0, 0}, {0, 0, 0, 1}};
 
 static void publish(fhlive::DriverChannel& ch, uint32_t left, uint32_t right, const fhlive::DeviceOffset& l, const fhlive::DeviceOffset& r) {
-  ch.seq.fetch_add(1, std::memory_order_acq_rel);
+  fhlive::seqWriteBegin(ch.seq);
   ch.magic = fhlive::kDriverMagic;
   ch.device[0] = left; ch.device[1] = right;
   ch.want[0] = l; ch.want[1] = r;
-  ch.seq.fetch_add(1, std::memory_order_release);
+  fhlive::seqWriteEnd(ch.seq);
 }
+
+using Factory = void* (*)(const char*, int*);
+
+#ifdef _WIN32
+static Factory loadDriver() {
+  wchar_t self[MAX_PATH];
+  GetModuleFileNameW(nullptr, self, MAX_PATH);
+  std::filesystem::path dll = std::filesystem::path(self).parent_path() / "driver" / "bin" / "win64" / "driver_utmtftm.dll";
+  HMODULE mod = LoadLibraryW(dll.c_str());
+  if (!mod) { printf("FAILED: couldn't load %s (%lu)\n", dll.string().c_str(), GetLastError()); return nullptr; }
+  return reinterpret_cast<Factory>(GetProcAddress(mod, "HmdDriverFactory"));
+}
+static fhlive::Shared* openShared(const std::string& home) {
+  HANDLE f = CreateFileW((std::filesystem::path(home) / "UTMTFTM" / "live.shm").c_str(), GENERIC_READ | GENERIC_WRITE,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return nullptr;
+  HANDLE map = CreateFileMappingW(f, nullptr, PAGE_READWRITE, 0, sizeof(fhlive::Shared), nullptr);
+  return static_cast<fhlive::Shared*>(MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(fhlive::Shared)));
+}
+#else
+static Factory loadDriver() {
+  char self[4096];
+  ssize_t n = readlink("/proc/self/exe", self, sizeof self);
+  std::filesystem::path so = std::filesystem::path(std::string(self, n > 0 ? size_t(n) : 0)).parent_path() / "driver" / "bin" / "linuxarm64" / "driver_utmtftm.so";
+  void* mod = dlopen(so.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!mod) { printf("FAILED: couldn't load %s (%s)\n", so.c_str(), dlerror()); return nullptr; }
+  return reinterpret_cast<Factory>(dlsym(mod, "HmdDriverFactory"));
+}
+static fhlive::Shared* openShared(const std::string& home) {
+  int f = open((home + "/.local/share/UTMTFTM/live.shm").c_str(), O_RDWR | O_CLOEXEC);
+  if (f < 0) return nullptr;
+  void* v = mmap(nullptr, sizeof(fhlive::Shared), PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
+  close(f);
+  return v == MAP_FAILED ? nullptr : static_cast<fhlive::Shared*>(v);
+}
+// A compiled class's vtable is read-only once it's loaded, as vrserver's are. "r--p" and the like, from the kernel.
+static std::string protectionOf(const void* addr) {
+  FILE* f = fopen("/proc/self/maps", "r");
+  char line[512], perms[8] = "";
+  while (f && fgets(line, sizeof line, f)) {
+    unsigned long long lo, hi;
+    char p[8];
+    if (sscanf(line, "%llx-%llx %7s", &lo, &hi, p) == 3 && reinterpret_cast<uintptr_t>(addr) >= lo && reinterpret_cast<uintptr_t>(addr) < hi) { strcpy(perms, p); break; }
+  }
+  if (f) fclose(f);
+  return perms;
+}
+#endif
 
 int main() {
   namespace fs = std::filesystem;
@@ -170,15 +226,13 @@ int main() {
   std::error_code ec;
   fs::remove_all(home, ec);
   fs::create_directories(home);
+#ifdef _WIN32
   _putenv_s("LOCALAPPDATA", home.c_str());
+#else
+  setenv("HOME", home.c_str(), 1);
+#endif
 
-  wchar_t self[MAX_PATH];
-  GetModuleFileNameW(nullptr, self, MAX_PATH);
-  fs::path dll = fs::path(self).parent_path() / "driver" / "bin" / "win64" / "driver_utmtftm.dll";
-  HMODULE mod = LoadLibraryW(dll.c_str());
-  if (!mod) { printf("FAILED: couldn't load %s (%lu)\n", dll.string().c_str(), GetLastError()); return 1; }
-  using Factory = void* (*)(const char*, int*);
-  auto factory = reinterpret_cast<Factory>(GetProcAddress(mod, "HmdDriverFactory"));
+  Factory factory = loadDriver();
   CHECK(factory, "vrserver looks for HmdDriverFactory");
   if (!factory) return 1;
   int code = 0;
@@ -191,17 +245,21 @@ int main() {
   vr::IVRServerDriverHost* api = &host;
   void** vtable = *reinterpret_cast<void***>(&host);
   void* originalSlot = vtable[1];
+#ifndef _WIN32
+  const std::string protectionBefore = protectionOf(&vtable[1]);
+  CHECK(protectionBefore.size() > 1 && protectionBefore[1] == '-', "the test needs a read-only vtable to mean anything (got '%s')", protectionBefore.c_str());
+#endif
   FakeContext ctx;
   ctx.host = &host;
   CHECK(provider->Init(&ctx) == vr::VRInitError_None, "Init");
   CHECK(vtable[1] != originalSlot, "the pose call must be hooked");
+#ifndef _WIN32
+  CHECK(protectionOf(&vtable[1]) == protectionBefore, "the vtable's memory must go back to how it was (now '%s')", protectionOf(&vtable[1]).c_str());
+#endif
 
-  HANDLE f = CreateFileW((fs::path(home) / "UTMTFTM" / "live.shm").c_str(), GENERIC_READ | GENERIC_WRITE,
-                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  CHECK(f != INVALID_HANDLE_VALUE, "the driver should have created live.shm");
-  if (f == INVALID_HANDLE_VALUE) return 1;
-  HANDLE map = CreateFileMappingW(f, nullptr, PAGE_READWRITE, 0, sizeof(fhlive::Shared), nullptr);
-  auto* shm = static_cast<fhlive::Shared*>(MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(fhlive::Shared)));
+  fhlive::Shared* shm = openShared(home);
+  CHECK(shm, "the driver should have created live.shm");
+  if (!shm) return 1;
   fhlive::DriverChannel& ch = shm->driver;
 
   // A. Before the overlay has said anything, every pose passes through untouched.
@@ -225,6 +283,19 @@ int main() {
     CHECK(!memcmp(host.last, &p, sizeof p), "the headset must never move (sample %d)", i);
     api->TrackedDevicePoseUpdated(5, p, sizeof p);
     CHECK(!memcmp(host.last, &p, sizeof p), "other devices must not move (sample %d)", i);
+  }
+  {
+    // Each hand's poses are counted on their own, so the overlay can tell the hook really sees the controllers.
+    publish(ch, 3, 4, kNone, kNone);
+    p = randPose();
+    uint64_t l0 = ch.handUpdates[0].load(), r0 = ch.handUpdates[1].load();
+    api->TrackedDevicePoseUpdated(3, p, sizeof p);
+    CHECK(ch.handUpdates[0].load() == l0 + 1 && ch.handUpdates[1].load() == r0, "left hand counted");
+    api->TrackedDevicePoseUpdated(4, p, sizeof p);
+    CHECK(ch.handUpdates[0].load() == l0 + 1 && ch.handUpdates[1].load() == r0 + 1, "right hand counted");
+    api->TrackedDevicePoseUpdated(0, p, sizeof p);
+    api->TrackedDevicePoseUpdated(5, p, sizeof p);
+    CHECK(ch.handUpdates[0].load() == l0 + 1 && ch.handUpdates[1].load() == r0 + 1, "the headset and other devices aren't hands");
   }
   {
     // What SteamVR predicts from has to stay as the device reported it.

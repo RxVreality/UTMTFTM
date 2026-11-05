@@ -1,0 +1,23 @@
+{
+  "source": "builtin",
+  "applications": [
+    {
+      "app_key": "utmtftm.overlay",
+      "launch_type": "binary",
+      "binary_path": "@APP@/utmtftm",
+      "binary_path_linux": "@APP@/utmtftm",
+      "binary_path_linux_arm": "@APP@/utmtftm",
+      "arguments": "",
+      "is_dashboard_overlay": true,
+      "action_manifest_path": "@APP@/input/actions.json",
+      "image_path": "@APP@/utmtftm.png",
+      "show_overlay_in_quicklaunch": true,
+      "strings": {
+        "en_us": {
+          "name": "UTMTFTM",
+          "description": "Use the medium to fix the medium: grab-to-place hand offsets for any game, per game or global"
+        }
+      }
+    }
+  ]
+}

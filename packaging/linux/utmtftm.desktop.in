@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=UTMTFTM
+Comment=Use the medium to fix the medium: place your hands in any VR game
+Exec=@APP@/open-utmtftm.sh
+Icon=@APP@/utmtftm.png
+Terminal=false
+Type=Application
+Categories=Utility;

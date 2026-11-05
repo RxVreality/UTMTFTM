@@ -4,7 +4,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, frame-port]
     tags: ['v*']
   pull_request:
 
@@ -12,7 +12,43 @@ permissions:
   contents: write
 
 jobs:
+  # The Steam Frame build, built and tested on a real ARM64 machine. 22.04 for its older C library,
+  # so the result runs on anything newer.
+  frame:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ libcairo2-dev libfreetype-dev libjsoncpp-dev libvulkan-dev
+
+      - name: Build and run the offline tests
+        run: sh build.sh
+
+      - name: Pack
+        run: |
+          v=${GITHUB_SHA:0:7}
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v=${GITHUB_REF_NAME#v}; else v=0.0.0-$v; fi
+          sh packaging/linux/make-release.sh "$v"
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: utmtftm-frame
+          path: |
+            build/release-frame/*.tar.gz
+            build/release-frame/*.sha256
+            build/release-frame/install-frame.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-screens
+          path: build/ui/*.png
+
   windows:
+    needs: frame
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +81,13 @@ jobs:
             build/release/UTMTFTM-*.zip
             build/release/UTMTFTM-Setup-*.exe
             build/release/*.sha256
+
+      # The Frame build joins the same draft, so a release always has both or neither.
+      - uses: actions/download-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: utmtftm-frame
+          path: build/release
 
       - name: Draft the release
         if: github.ref_type == 'tag'

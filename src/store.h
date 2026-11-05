@@ -36,8 +36,8 @@ struct Store {
   // Matched pose; an unmatched hand mirrors the other one; neither -> the OpenXR spec anchor.
   Offset ghostBase(int hand) const { return ghostBaseFor(ghost, ghostMatched, hand); }
 
-  static std::string dir();          // %LOCALAPPDATA%/UTMTFTM
-  static std::string bindingsDir();  // %LOCALAPPDATA%/UTMTFTM/bindings
+  static std::string dir();          // platform::dataDir()
+  static std::string bindingsDir();  // dir()/bindings
   bool load();
   bool save() const;
 
@@ -65,6 +65,7 @@ struct Store {
   M gripFromRaw[2] = {ident(), ident()};                        // the OpenXR grip pose in the device's frame
   bool dashboardUp = false;  // the driver's offsets stand aside while the dashboard's open, so its pointers point true
   static uint64_t driverPoseUpdates();  // the driver's running count of poses it has seen
+  static uint64_t driverHandUpdates();  // how many of those were from the two hands
   static M appliedDeviceOffset(int hand);  // what the driver has put in the poses being reported now
   static void askTruePoses(bool on);  // while placing, have the driver report where the controllers really are
   static bool driverTruePose(int hand, M* out);  // that report, in SteamVR's raw tracking space. False until there is one

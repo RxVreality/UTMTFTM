@@ -1,4 +1,4 @@
-// See d3dupload.h for why overlays don't use SetOverlayRaw.
+// The Windows side of overlay_upload.h: overlay images go to SteamVR as D3D11 textures.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -7,7 +7,7 @@
 
 #include <map>
 
-#include "d3dupload.h"
+#include "overlay_upload.h"
 
 namespace fh {
 

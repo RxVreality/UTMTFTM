@@ -1,4 +1,4 @@
-// UTMTFTM ("use the medium to fix the medium"): grab-to-place controller offsets, per game or global, for SteamVR on Windows.
+// UTMTFTM ("use the medium to fix the medium"): grab-to-place controller offsets, per game or global, for SteamVR.
 // Grab one hand with the other, place it, let go and it stays; let go beyond the distance limit and it's pulled back.
 // All drawing lives in ui.cpp (no VR calls) so every screen is rendered and checked offline.
 #include <openvr.h>
@@ -14,9 +14,9 @@
 
 #include "controller_vr.h"
 #include "controls.h"
-#include "d3dupload.h"
 #include "ghost3d.h"
 #include "glove.h"
+#include "overlay_upload.h"
 #include "placement.h"
 #include "platform.h"
 #include "store.h"
@@ -139,8 +139,11 @@ struct App {
 
   std::string sceneKey, sceneName;
   uint32_t scenePid = 0;
-  bool driverOn = false;   // the driver add-on is loaded in SteamVR and seeing poses
+  bool driverOn = false;   // the driver add-on is loaded in SteamVR and can move the hands
   bool driverCounted = false;
+  bool driverAlive = false, handsHeard = false;
+  uint64_t handCount = 0;
+  Clock::time_point handsQuietSince{};  // when a hand was on and the driver had heard nothing from either
   bool askedTrue = false;   // the driver has been asked to report the true controller poses
   bool truePoseSeen[2] = {false, false};
   float poseCheckCm[2] = {0, 0}, poseCheckDeg[2] = {0, 0};
@@ -204,7 +207,7 @@ struct App {
     logf("status: %s", s.c_str());
   }
 
-  // Overlay images go to SteamVR as D3D11 textures (see d3dupload.h for why not SetOverlayRaw).
+  // Overlay images go to SteamVR as GPU textures (see overlay_upload.h for why not SetOverlayRaw).
   // Returns false if SteamVR didn't take the image, so the caller redraws and retries.
   bool put(vr::VROverlayHandle_t o, const uint8_t* px, uint32_t w, uint32_t h, bool stream) {
     vr::EVROverlayError e = vr::VROverlayError_RequestFailed, raw = vr::VROverlayError_None;
@@ -217,7 +220,7 @@ struct App {
     }
     bool ok = e == vr::VROverlayError_None || raw == vr::VROverlayError_None;
     if (e != vr::VROverlayError_None && uploader.ready() && (++uploadFails <= 5 || uploadFails % 500 == 0))
-      logf("overlay upload: d3d11 %s, raw %s (%d so far)", vr::VROverlay()->GetOverlayErrorNameFromEnum(e),
+      logf("overlay upload: texture %s, raw %s (%d so far)", vr::VROverlay()->GetOverlayErrorNameFromEnum(e),
            vr::VROverlay()->GetOverlayErrorNameFromEnum(raw), uploadFails);
     return ok;
   }
@@ -230,8 +233,8 @@ struct App {
     if (!store.load()) store.save();
     in.init();
     std::string gpu;
-    if (uploader.init(&gpu)) logf("overlay images via D3D11: %s", gpu.c_str());
-    else logf("D3D11 unavailable (%s): falling back to SetOverlayRaw", gpu.c_str());
+    if (uploader.init(&gpu)) logf("overlay images via the GPU: %s", gpu.c_str());
+    else logf("no GPU path (%s): falling back to SetOverlayRaw", gpu.c_str());
     refreshControllers();
     auto O = vr::VROverlay();
     O->CreateDashboardOverlay("utmtftm.dashboard", "UTMTFTM", &dash, &thumb);
@@ -311,18 +314,29 @@ struct App {
 
   // The driver counts every pose it sees, so a moving count means it's loaded and working. It stays "on"
   // once seen, because a sleeping headset stops the count for a while.
+  // It can only move a controller whose poses come through the call it hooks. If a hand is on and the driver hasn't
+  // heard from either hand in 10 seconds, they're reaching SteamVR some other way, so don't claim to be live.
   void refreshDriver() {
-    uint64_t n = Store::driverPoseUpdates();
-    if (driverCounted && n != driverCount) {
-      if (!driverOn) logf("driver add-on is running");
-      driverOn = true;
-    }
+    uint64_t n = Store::driverPoseUpdates(), hands = Store::driverHandUpdates();
+    if (driverCounted && n != driverCount) driverAlive = true;
+    if (driverCounted && hands != handCount) handsHeard = true;
     driverCount = n;
+    handCount = hands;
     driverCounted = true;
     uint32_t dev[2];
     dev[0] = vr::VRSystem()->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
     dev[1] = vr::VRSystem()->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
     for (auto& d : dev) if (d == vr::k_unTrackedDeviceIndexInvalid) d = fhlive::kNoDevice;
+    const bool aHandIsOn = dev[0] != fhlive::kNoDevice || dev[1] != fhlive::kNoDevice;
+    if (!driverAlive || handsHeard || !aHandIsOn) handsQuietSince = {};
+    else if (handsQuietSince == Clock::time_point{}) handsQuietSince = Clock::now();
+    const bool bypassed = handsQuietSince != Clock::time_point{} && Clock::now() - handsQuietSince > std::chrono::seconds(10);
+    const bool on = driverAlive && !bypassed;
+    if (on != driverOn) {
+      if (on) logf("driver add-on is running");
+      else logf("the driver add-on sees poses, but none from the controllers: offsets can't be live here, so using bindings");
+      driverOn = on;
+    }
     if (driverOn == store.useDriver && dev[0] == store.device[0] && dev[1] == store.device[1]) return;
     store.useDriver = driverOn;
     store.device[0] = dev[0];

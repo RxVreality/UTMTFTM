@@ -1,10 +1,7 @@
 // Session guarantees: the ghost starts exactly on the matched game hand, moves 1:1 with the
 // in-game hand while placing, matching never changes offsets, and the driver gets exactly what was placed.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -126,7 +123,11 @@ int main() {
     std::string home = (std::filesystem::temp_directory_path() / "fh-test-session").string();
     std::filesystem::remove_all(home);
     std::filesystem::create_directories(home);
+#ifdef _WIN32
     _putenv_s("LOCALAPPDATA", home.c_str());
+#else
+    setenv("HOME", home.c_str(), 1);
+#endif
     // It gets the move in the device's own frame: raw * want * C == raw * C * O.
     {
       fhlive::Shared* m = platform::mapLive();
@@ -266,6 +267,16 @@ int main() {
   {
     std::string k = platform::processExeKey(platform::currentPid());
     CHECK(k == "exe.test_session", "exe key is the lowercase name without .exe (got '%s')", k.c_str());
+#ifndef _WIN32
+    using std::string;
+    auto nul = [](std::initializer_list<const char*> parts) { string s; for (const char* p : parts) { s += p; s += '\0'; } return s; };
+    CHECK(platform::exeKeyFrom(nul({"PATH=/usr/bin", "SteamAppId=448280"}), nul({"app_process64"})) == "steam.app.448280", "Steam's app id wins");
+    CHECK(platform::exeKeyFrom(nul({"SteamAppId=0"}), nul({"/opt/thing/Thing"})) == "exe.thing", "an app id of 0 means none");
+    CHECK(platform::exeKeyFrom(nul({"SteamAppId=abc"}), nul({"/opt/thing/Thing"})) == "exe.thing", "an app id has to be a number");
+    CHECK(platform::exeKeyFrom("", nul({"/usr/bin/FEXInterpreter", "/home/steamos/wine64", "Z:\\Games\\Big Game\\Game.EXE", "-vr"})) == "exe.game", "past FEX and Wine to the game");
+    CHECK(platform::exeKeyFrom("", nul({"C:\\Games\\Thing.exe"})) == "exe.thing", "a Windows path");
+    CHECK(platform::exeKeyFrom("", "") == "", "a process that can't be read");
+#endif
   }
 
   printf("%s: %d checks, %d failures\n", fails ? "FAILED" : "PASSED", checks, fails);

@@ -10,6 +10,12 @@
 #include <cstdlib>
 #include <fstream>
 
+#ifndef _WIN32
+#include <cairo-ft.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
 namespace fh {
 
 // ---------------------------------------------------------------- canvas
@@ -76,9 +82,10 @@ void frame(cairo_t* c, double x, double y, double w, double h, RGB k, double a =
   cairo_set_line_width(c, width); cairo_set_line_join(c, CAIRO_LINE_JOIN_MITER); cairo_stroke(c);
 }
 
+enum Face { Body, Semi };
+#ifdef _WIN32
 // Bahnschrift is Windows' own DIN-style face, on every PC since Windows 10 1709. It's a variable font, and through
 // cairo only its regular and bold load: its other named weights silently come out as Arial.
-enum Face { Body, Semi };
 void face(cairo_t* c, Face f, double size) {
   static const bool din = [] {
     const char* w = std::getenv("WINDIR");
@@ -87,6 +94,29 @@ void face(cairo_t* c, Face f, double size) {
   cairo_select_font_face(c, din ? "Bahnschrift" : "Segoe UI", CAIRO_FONT_SLANT_NORMAL, f == Body ? CAIRO_FONT_WEIGHT_NORMAL : CAIRO_FONT_WEIGHT_BOLD);
   cairo_set_font_size(c, size);
 }
+#else
+// Linux has no Bahnschrift, and which fonts a headset has isn't ours to count on, so Barlow, the closest free match,
+// ships with the program. Both faces stay loaded for as long as it runs.
+cairo_font_face_t* loadFace(const char* file) {
+  static FT_Library ft = nullptr;
+  if (!ft && FT_Init_FreeType(&ft)) return nullptr;
+  FT_Face f = nullptr;
+  if (FT_New_Face(ft, (platform::exeDir() + "/fonts/" + file).c_str(), 0, &f)) return nullptr;
+  return cairo_ft_font_face_create_for_ft_face(f, 0);
+}
+void face(cairo_t* c, Face f, double size) {
+  static cairo_font_face_t* const faces[2] = {loadFace("Barlow-Regular.ttf"), loadFace("Barlow-SemiBold.ttf")};
+  static cairo_font_options_t* const options = [] {  // exact letter widths, so spaced-out capitals sit evenly
+    cairo_font_options_t* o = cairo_font_options_create();
+    cairo_font_options_set_hint_metrics(o, CAIRO_HINT_METRICS_OFF);
+    return o;
+  }();
+  if (faces[f]) cairo_set_font_face(c, faces[f]);
+  else cairo_select_font_face(c, "sans-serif", CAIRO_FONT_SLANT_NORMAL, f == Body ? CAIRO_FONT_WEIGHT_NORMAL : CAIRO_FONT_WEIGHT_BOLD);
+  cairo_set_font_options(c, options);
+  cairo_set_font_size(c, size);
+}
+#endif
 double textW(cairo_t* c, const std::string& s, double size, bool bold) {
   face(c, bold ? Semi : Body, size);
   cairo_text_extents_t e; cairo_text_extents(c, s.c_str(), &e);
