@@ -7,6 +7,8 @@
 //              real driver, in the real poses a game would get
 //   bypass     the controllers' poses never reach the driver's hook, and the program has to notice and not claim "Live"
 //   addon_off  the add-on is switched off in SteamVR, and the program has to leave without showing anything
+//   bindings   opens the bindings page, puts a game on another controller's layout, rewires a button and takes it all back,
+//              checking what it tells SteamVR at each step
 // Results go to FAKE_STEAMVR_LOG, and pictures of what it really sent as Vulkan textures go to FAKE_STEAMVR_SHOTS.
 //
 // The interfaces are C++ classes with hundreds of methods between them and only a few matter here, so each is a vtable
@@ -35,7 +37,10 @@
 #include <thread>
 #include <vector>
 
+#include "bindings.h"
 #include "fake_vrserver.h"
+#include "fixture_steamvr.h"
+#include "model_files.h"
 #include "platform.h"
 #include "ui.h"
 
@@ -115,7 +120,7 @@ size_t slotOf(R (C::*f)(A...)) {
 }
 #define FILL(iface, cls, method, fn) iface.table[slotOf(&vr::cls::method)] = reinterpret_cast<void*>(fn)
 
-Interface g_system, g_overlay, g_input, g_apps, g_settings, g_other;
+Interface g_system, g_overlay, g_input, g_apps, g_settings, g_models, g_other;
 
 vr::HmdMatrix34_t toMatrix(const Pose& p) {
   const double w = p.rot[0], x = p.rot[1], y = p.rot[2], z = p.rot[3];
@@ -399,9 +404,85 @@ bool setGetBool(void*, const char* section, const char* key, vr::EVRSettingsErro
   if (err) *err = vr::VRSettingsError_UnsetSettingHasNoDefault;
   return false;
 }
-void setGetString(void*, const char*, const char*, char* out, uint32_t size, vr::EVRSettingsError* err) {
-  if (out && size) out[0] = 0;
-  if (err) *err = vr::VRSettingsError_UnsetSettingHasNoDefault;
+std::map<std::string, std::string> g_strings;
+void setGetString(void*, const char* section, const char* key, char* out, uint32_t size, vr::EVRSettingsError* err) {
+  std::lock_guard<std::mutex> lock(g.m);
+  auto it = g_strings.find(std::string(section) + "/" + key);
+  if (out && size) snprintf(out, size, "%s", it == g_strings.end() ? "" : it->second.c_str());
+  if (err) *err = it == g_strings.end() ? vr::VRSettingsError_UnsetSettingHasNoDefault : vr::VRSettingsError_None;
+}
+void setSetString(void*, const char* section, const char* key, const char* value, vr::EVRSettingsError* err) {
+  {
+    std::lock_guard<std::mutex> lock(g.m);
+    g_strings[std::string(section) + "/" + key] = value;
+  }
+  say("SetString %s %s %s", section, key, value);
+  if (err) *err = vr::VRSettingsError_None;
+}
+void setRemoveKey(void*, const char* section, const char* key, vr::EVRSettingsError* err) {
+  {
+    std::lock_guard<std::mutex> lock(g.m);
+    g_strings.erase(std::string(section) + "/" + key);
+  }
+  say("RemoveKey %s %s", section, key);
+  if (err) *err = vr::VRSettingsError_None;
+}
+
+// ---------------------------------------------------------------- IVRRenderModels
+// The made-up models from fixture_steamvr.h. A part's "file" is <model>|<part>.
+uint32_t modelParts(void*, const char* model) { return uint32_t(fh::fixture::partsOf(model).size()); }
+uint32_t modelPartName(void*, const char* model, uint32_t index, char* out, uint32_t size) {
+  const auto parts = fh::fixture::partsOf(model);
+  if (index >= parts.size()) return 0;
+  if (out && size) snprintf(out, size, "%s", parts[index].name);
+  return uint32_t(strlen(parts[index].name) + 1);
+}
+uint32_t modelPartFile(void*, const char* model, const char* part, char* out, uint32_t size) {
+  const std::string file = std::string(model) + "|" + part;
+  if (out && size) snprintf(out, size, "%s", file.c_str());
+  return uint32_t(file.size() + 1);
+}
+bool modelPartState(void*, const char* model, const char* part, const vr::VRControllerState_t*, const vr::RenderModel_ControllerMode_State_t*, vr::RenderModel_ComponentState_t* st) {
+  for (const auto& p : fh::fixture::partsOf(model)) {
+    if (strcmp(p.name, part) != 0) continue;
+    memset(st, 0, sizeof *st);
+    st->mTrackingToComponentRenderModel = sysIdentity(nullptr);
+    st->mTrackingToComponentLocal = sysIdentity(nullptr);
+    st->uProperties = vr::VRComponentProperty_IsVisible;
+    return true;
+  }
+  return false;
+}
+vr::EVRRenderModelError modelLoad(void*, const char* file, vr::RenderModel_t** out) {
+  const std::string f = file;
+  const size_t bar = f.find('|');
+  if (bar == std::string::npos) return vr::VRRenderModelError_InvalidArg;
+  for (const auto& p : fh::fixture::partsOf(f.substr(0, bar))) {
+    if (f.substr(bar + 1) != p.name) continue;
+    const fh::Mesh m = fh::fixture::boxMesh(p);
+    auto* rm = new vr::RenderModel_t{};
+    auto* v = new vr::RenderModel_Vertex_t[m.p.size()];
+    auto* idx = new uint16_t[m.idx.size()];
+    for (size_t i = 0; i < m.p.size(); ++i) {
+      v[i] = {};
+      v[i].vPosition.v[0] = m.p[i].x; v[i].vPosition.v[1] = m.p[i].y; v[i].vPosition.v[2] = m.p[i].z;
+      v[i].vNormal.v[0] = m.n[i].x; v[i].vNormal.v[1] = m.n[i].y; v[i].vNormal.v[2] = m.n[i].z;
+    }
+    for (size_t i = 0; i < m.idx.size(); ++i) idx[i] = uint16_t(m.idx[i]);
+    rm->rVertexData = v;
+    rm->unVertexCount = uint32_t(m.p.size());
+    rm->rIndexData = idx;
+    rm->unTriangleCount = uint32_t(m.idx.size() / 3);
+    *out = rm;
+    return vr::VRRenderModelError_None;
+  }
+  return vr::VRRenderModelError_InvalidModel;
+}
+void modelFree(void*, vr::RenderModel_t* rm) {
+  if (!rm) return;
+  delete[] rm->rVertexData;
+  delete[] rm->rIndexData;
+  delete rm;
 }
 
 void fillInterfaces() {
@@ -439,6 +520,15 @@ void fillInterfaces() {
   FILL(g_settings, IVRSettings, GetSettingsErrorNameFromEnum, setErrorName);
   FILL(g_settings, IVRSettings, GetBool, setGetBool);
   FILL(g_settings, IVRSettings, GetString, setGetString);
+  FILL(g_settings, IVRSettings, SetString, setSetString);
+  FILL(g_settings, IVRSettings, RemoveKeyInSection, setRemoveKey);
+
+  FILL(g_models, IVRRenderModels, GetComponentCount, modelParts);
+  FILL(g_models, IVRRenderModels, GetComponentName, modelPartName);
+  FILL(g_models, IVRRenderModels, GetComponentRenderModelName, modelPartFile);
+  FILL(g_models, IVRRenderModels, GetComponentState, modelPartState);
+  FILL(g_models, IVRRenderModels, LoadRenderModel_Async, modelLoad);
+  FILL(g_models, IVRRenderModels, FreeRenderModel, modelFree);
 }
 
 // ---------------------------------------------------------------- scenarios
@@ -483,6 +573,33 @@ void click(const std::string& id) {
     return;
   }
   check(false, ("there's no button called " + id).c_str());
+}
+
+// The same, on the bindings page. The buttons come from the page's own code, reading the same files the program does.
+fh::bind::Page* g_pageForClicks = nullptr;
+void clickBindings(const std::string& id) {
+  fh::bind::Page& page = *g_pageForClicks;
+  for (const std::string& name : page.modelsWanted()) {
+    fh::Mesh mesh;
+    std::vector<fh::ModelPart> parts;
+    if (fh::modelFromFiles(fh::platform::steamvrDir(), name, mesh, parts)) page.give(name, mesh, parts);
+  }
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::drawBindings(cv, page.model("", ""), buttons);
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    page.click(id);  // so this copy of the page has the same buttons as the real one next time
+    return;
+  }
+  check(false, ("there's no button called " + id + " on the bindings page").c_str());
 }
 
 void setDashboard(bool on) {
@@ -620,6 +737,109 @@ void scenarioPlace() {
   finish();
 }
 
+std::string settingNow(const std::string& name) {
+  std::lock_guard<std::mutex> lock(g.m);
+  auto it = g_strings.find(name);
+  return it == g_strings.end() ? "" : it->second;
+}
+
+bool logHas(const std::string& what) {
+  std::ifstream in(fh::platform::dataDir() + "/utmtftm.log");
+  std::stringstream log;
+  log << in.rdbuf();
+  return log.str().find(what) != std::string::npos;
+}
+
+void scenarioBindings() {
+  // SteamVR's files for two controllers and two games, where the program will look for them.
+  const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
+  fh::fixture::writeSteamVR(steamvr, config, fh::platform::dataDir() + "/../fake-games");
+  fh::bind::Dirs dirs;
+  dirs.steamvr = steamvr;
+  dirs.steam = fh::platform::steamDir();
+  dirs.data = fh::platform::dataDir() + "/../fake-page-data";
+  dirs.config = fh::platform::configDirs();
+  fh::bind::Page page(dirs, fh::bind::Settings{[](const std::string&, const std::string&) { return std::string(); }, [](const std::string&, const std::string&, const std::string&) { return true; }, [](const std::string&, const std::string&) {}});
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  page.setGame("steam.app.12345", "steam.app.12345", "Simulated Game");
+  g_pageForClicks = &page;
+
+  startServer(true);
+  setScene(kGamePid);
+  wait(3500);
+  const std::string setting = "steam.app.12345/frame_controller_250820_CurrentURL_openxr";
+  const int beforePage = g_dashUploads;
+  click("page_bindings");
+  wait(1500);
+  check(g_dashUploads > beforePage, "opening the page sends SteamVR a new picture", g_dashUploads - beforePage);
+  check(logHas("read SteamVR's controller files"), "the program read the controller files");
+  check(logHas("bindings page: frame_controller_left loaded, 7 parts"), "and loaded your left controller's model, in parts");
+  check(logHas("bindings page: oculus_quest_plus_controller_right loaded, 7 parts"), "and the other controller's");
+  check(settingNow(setting).empty(), "just looking changes nothing");
+
+  clickBindings("bind_layout");
+  wait(600);
+  const std::string url = settingNow(setting);
+  check(url.rfind("file:///", 0) == 0, "putting the game on the Quest layout points its setting at a file");
+  const std::string file = "/" + url.substr(8);
+  {
+    std::ifstream in(file);
+    Json::Value v;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    check(in && Json::parseFromStream(b, in, &v, &errs), "and the file's there, at that path, and reads");
+    check(v["controller_type"].asString() == "frame_controller", "it's for the Frame");
+    check(v["interaction_profile"].asString() == "/interaction_profiles/oculus/touch_controller", "and the game goes on seeing a Quest controller");
+  }
+
+  clickBindings("y:right/input/x");
+  wait(300);
+  clickBindings("t:right/input/a");
+  wait(600);
+  {
+    std::ifstream in(file);
+    std::stringstream text;
+    text << in.rdbuf();
+    check(text.str().find("/user/hand/right/input/x") != std::string::npos, "rewiring X rewrites the file");
+  }
+  clickBindings("bind_reset_wiring");
+  wait(400);
+
+  const int beforeHands = g_dashUploads;
+  click("page_hands");
+  wait(500);
+  check(g_dashUploads > beforeHands, "the Hands tab goes back", g_dashUploads - beforeHands);
+  check(settingNow(setting) == url, "and leaves the layout alone");
+  click("page_bindings");
+  wait(500);
+
+  clickBindings("bind_dev");
+  wait(500);
+  check(settingNow(setting).empty(), "going back to the developer's takes the setting off");
+  check(access(file.c_str(), F_OK) != 0, "and our file's gone");
+
+  // The default for all games reaches a game the next time it starts.
+  clickBindings("bind_scope_global");
+  wait(200);
+  clickBindings("bind_layout");
+  wait(500);
+  check(settingNow(setting).rfind("file:///", 0) == 0, "all games includes this one");
+  clickBindings("bind_scope_game");
+  wait(200);
+  clickBindings("bind_dev");
+  wait(500);
+  check(settingNow(setting).empty(), "and this game can opt out");
+  setScene(0);
+  wait(1500);
+  setScene(kGamePid);
+  wait(1500);
+  check(settingNow(setting).empty(), "it stays out when it starts again");
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  g_pageForClicks = nullptr;
+  finish();
+}
+
 void scenarioBypass() {
   startServer(false);
   setScene(kGamePid);
@@ -640,6 +860,7 @@ class ClientCore {
     fillInterfaces();
     if (type == vr::VRApplication_Overlay && g_scenarioName == "place") g_scenario = std::thread(scenarioPlace);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "bypass") g_scenario = std::thread(scenarioBypass);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "bindings") g_scenario = std::thread(scenarioBindings);
     return vr::VRInitError_None;
   }
   virtual void Cleanup() {
@@ -655,6 +876,7 @@ class ClientCore {
     if (!strncmp(name, "IVRInput_", 9)) return &g_input;
     if (!strncmp(name, "IVRApplications_", 16)) return &g_apps;
     if (!strncmp(name, "IVRSettings_", 12)) return &g_settings;
+    if (!strncmp(name, "IVRRenderModels_", 16)) return &g_models;
     return &g_other;
   }
   virtual bool BIsHmdPresent() { return true; }

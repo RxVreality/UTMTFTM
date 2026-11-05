@@ -59,6 +59,21 @@ ARM also doesn't keep memory writes in order the way x86 does. The offsets in th
 
 When a Frame streams from a PC, it runs Steam Link as its scene app, `vrlink.client`. Offsets only apply when the scene is a game, so UTMTFTM on the Frame stays out of the way of UTMTFTM on the PC.
 
+## The bindings page
+
+It's all read from files SteamVR already keeps, and most of the work is in `src/bindings.cpp`, which makes no VR calls.
+
+- A controller's buttons come from its input profile, `*_profile.json`, in SteamVR's driver folders.
+- Which controllers you can compare with is whichever of those have a model on disk. The Frame's SteamVR has the Index and Quest families, the PC's has those plus Vive, Pico and Focus 3. The picture is the controller's own render model, loaded through SteamVR in parts. Each line ends on the middle of what can be seen of that part. The Frame's D-pad is one part, so its four directions come from the buttons they mirror on the right controller.
+- A game's bindings come from wherever SteamVR got them, in this order: the binding it's set to use for that game, what an OpenXR game asked for last time it ran (`config/openxr/<app>_<controller>_<n>_binding.json`, rewritten at each launch), bindings SteamVR ships for that game, and the game's own action file, which Steam lists in `steamapps.vrmanifest`.
+- A game's names for its actions are in its action file. OpenXR games have no such file on disk, and Unity's and Unreal's plugins name their actions after the input anyway, like `oculustouch_right_a_click`, so all the page can say is that the button's in use.
+
+The translation starts from SteamVR's own, `*_remapping.json`, read backwards to say which of their buttons each of yours acts as. Anything you rewire goes on top of that. Applying it copies the game's binding for the other controller, moves each input to your button and changes how it reads where it has to: a Touch trigger on a Frame bumper can't half-press, so it becomes a full pull. SteamVR leaves its last automatic translation in `auto-remapping_toBinding.json`, and `test_bindings` checks ours comes out the same.
+
+The result is a binding file in `bindings/` in the data folder, with its `controller_type` set to yours and its `interaction_profile` left as theirs, so an OpenXR game goes on thinking it's talking to the other controller. Games written for SteamVR Input get `simulated_controller_type` instead. It goes live through `<controller>_250820_CurrentURL_<category>` in that game's section of SteamVR's settings, the same way the offset fallback does, and SteamVR reads that when the game starts. Going back restores whatever was there.
+
+None of it runs unless the page is open, except a string compare once a second, and on a game's start it applies a saved layout if there's one to apply. `test_bindings` prints what it costs. On my PC that's about 15 ms to read the controller files, 40 ms to find a game's bindings and 65 ms to draw the four controllers the first time, then about 30 ms to redraw the page when the laser moves.
+
 ## Tests
 
 None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh` on ARM64 Linux.
@@ -68,7 +83,10 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 - `test_ghost` covers the 3D drawing and rotation freedom.
 - `test_ui` renders every screen to `build\ui\*.png`, so you can look at them without a headset.
 - `test_controllers` checks each binding file against SteamVR's own description of that controller, if SteamVR is installed: the button exists, it's on that hand, every stick and pad is blocked while placing, and the panel names the button that's really bound.
+- `test_bindings` covers the bindings page against a small made-up SteamVR, including what it writes and what it puts back. If SteamVR's installed it does the same against the real files: every controller's model and buttons, the real games on that machine, and a comparison with SteamVR's own translation. It also renders the page to `build\ui`.
 - `tests/test_frame_run.sh` is for the Frame build. It installs the packed download into a throwaway home folder and runs it against a simulated SteamVR (`tests/fake_steamvr.cpp`), which clicks Move, drags a hand and checks what comes out of the real driver. It also saves the pictures the program really sent as Vulkan textures. GitHub runs it on an ARM64 machine for every push. It shows the program works, not that the real SteamVR does what the simulated one does.
+
+`dist\bind_sheet.exe <folder> [app key ...]` needs SteamVR running. It draws the bindings page from what the real SteamVR says, through the same calls the program makes, and only reads.
 
 `dist\glove_sheet.exe <folder>` needs SteamVR installed, and starts its server if it isn't running. It loads every hand controller SteamVR can draw, the same way the overlay does, and writes `controllers.png` with the hand on each one. Go by the picture rather than its finger-depth numbers, because controller models are made of overlapping shells.
 
@@ -76,6 +94,7 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.
+- Any layout from the bindings page in a real game. What's written matches SteamVR's own translation and uses the settings route that's worked for offsets, but only a game can show it's right.
 - Index's squeeze threshold. Its grip reads as fully closed just from holding the controller, so the binding goes by squeeze force. 0.6 is a judgement call.
 
 ## Known limits

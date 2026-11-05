@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 
 #ifndef _WIN32
 #include <cairo-ft.h>
@@ -179,13 +180,14 @@ double label(cairo_t* c, double x, double y, double size, const std::string& s, 
 // A small indicator light.
 void lamp(cairo_t* c, double x, double y, double s, RGB k) { slab(c, x, y, s * 1.2, s, k); }
 
-const DashModel* g_m = nullptr;  // the dashboard being drawn, for click feedback
+const std::string* g_hover = nullptr;  // the laser and press states of the page being drawn, for click feedback
+const std::string* g_down = nullptr;
 
 // Static press states over any tappable shape: outlined under the laser, darker while held.
 // onFill: the shape is filled with a bright colour, so the marks have to be dark to show.
 void fxOver(cairo_t* c, double x, double y, double w, double h, const std::string& id, bool enabled = true, bool onFill = false) {
-  if (!g_m) return;
-  bool hov = g_m->hover == id, dn = g_m->down == id && enabled;
+  if (!g_hover || !g_down) return;
+  bool hov = *g_hover == id, dn = *g_down == id && enabled;
   if (!hov && !dn) return;
   if (dn) slab(c, x, y, w, h, {0, 0, 0}, 0.22);
   else if (enabled && !onFill) slab(c, x, y, w, h, PAPER, 0.10);
@@ -198,7 +200,7 @@ enum Style { Outline, Primary, Danger, Solid, OnSignal };
 void button(cairo_t* c, std::vector<Button>& out, double x, double y, double w, double h, const std::string& id,
             const std::string& text, Style style, bool enabled = true) {
   out.push_back({x, y, w, h, id, enabled});
-  bool dn = g_m && g_m->down == id && enabled;
+  bool dn = g_down && *g_down == id && enabled;
   if (dn) { x += 2.5; y += 2.5; w -= 5; h -= 5; }  // pushed in
   bool filled = enabled && (style == Primary || style == Danger || style == Solid);
   if (filled) slab(c, x, y, w, h, style == Primary ? SIGNAL : style == Danger ? ALERT : PAPER);
@@ -429,6 +431,35 @@ void drawHandPreview(Canvas& cv, double x, double y, double size, bool left, con
 }
 
 // ---------------------------------------------------------------- dashboard
+// The top of both pages: the mark and name, which page this is, what's running and how it's connected, and Close.
+static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const std::string& game, LiveState live, bool confirmClose, DashPage page) {
+  const double L = 44, R = width - 44;
+  markTile(c, L, 20, 80, 64);
+  caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
+  label(c, L + 95, 82, 15, "Use the medium to fix the medium");
+  const double tabX = 462, tabY = 34, tabH = 42, tabW = 124, tabD = tabH * kLean;
+  const struct { DashPage p; const char* id; const char* name; } tabs[2] = {{DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}};
+  for (int i = 0; i < 2; ++i) {
+    const double x = tabX + i * (tabW - tabD + 3);
+    const bool on = tabs[i].p == page;
+    if (on) slab(c, x, tabY, tabW, tabH, PAPER);
+    else frame(c, x, tabY, tabW, tabH, PAPER, 0.45, 2);
+    fxOver(c, x, tabY, tabW, tabH, tabs[i].id, true, on);
+    caps(c, x + tabW / 2, tabY + 28, 18, tabs[i].name, on ? INK : PAPER, 1, 1, 1.4);
+    btn.push_back({i == 0 ? x : x + tabD / 2, tabY, tabW - tabD / 2, tabH, tabs[i].id});
+  }
+  if (confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
+  else button(c, btn, R - 110, 30, 110, 46, "close", "Close", Outline);
+  const double right = R - (confirmClose ? 234 : 130);
+  text(c, right, 50, 21, game.empty() ? "No game running" : game, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 2 * tabW - tabD + 12));
+  if (live == LiveState::Live || live == LiveState::NextLaunch) {
+    const bool on = live == LiveState::Live;
+    const double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
+    lamp(c, right - w - 24, 65, 12, on ? LIVE : SIGNAL);
+  }
+  hline(c, L, R, 98, PAPER, 0.9, 2);
+}
+
 std::string dashKey(const DashModel& m) {
   std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.saveForGame) +
                   std::to_string(m.gameHasCustom) + std::to_string(m.needsMatch) + std::to_string(m.armed) +
@@ -448,25 +479,13 @@ std::string dashKey(const DashModel& m) {
 
 void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   btn.clear();
-  g_m = &m;
+  g_hover = &m.hover;
+  g_down = &m.down;
   cairo_t* c = cv.c;
   set(c, INK); cairo_paint(c);
   const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
 
-  // header: the mark and name on the left; what's running and how it's connected on the right
-  markTile(c, L, 20, 80, 64);
-  caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
-  label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  if (m.confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
-  else button(c, btn, R - 110, 30, 110, 46, "close", "Close", Outline);
-  double right = R - (m.confirmClose ? 234 : 130);
-  text(c, right, 50, 21, m.game.empty() ? "No game running" : m.game, false, m.game.empty() ? DIM : PAPER, 1, 2, 480);
-  if (m.live == LiveState::Live || m.live == LiveState::NextLaunch) {
-    bool on = m.live == LiveState::Live;
-    double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
-    lamp(c, right - w - 24, 65, 12, on ? LIVE : SIGNAL);
-  }
-  hline(c, L, R, 98, PAPER, 0.9, 2);
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Hands);
 
   // the next thing to do. Waiting on the dashboard beats everything else, live games explain the bubble,
   // and only a running game that can't move live offers the ghost match.
@@ -587,7 +606,308 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     else st = "This game takes new offsets the next time it launches.";
     if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
   }
-  g_m = nullptr;
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- bindings page
+ControllerPicture::ControllerPicture(std::shared_ptr<cairo_surface_t> image, std::vector<float> nearest, std::map<std::string, Spot> spots, int sizePx, V3 centre, V3 x, V3 y, V3 n, V3 eye, float span)
+    : image_(std::move(image)), nearest_(std::move(nearest)), spots_(std::move(spots)), size_(sizePx), c_(centre), x_(x), y_(y), n_(n), eye_(eye), span_(span) {}
+
+const ControllerPicture::Spot* ControllerPicture::spot(const std::string& part) const {
+  auto it = spots_.find(part);
+  return it == spots_.end() ? nullptr : &it->second;
+}
+
+void ControllerPicture::place(V3 p, double& x, double& y, bool& behind) const {
+  GhostRenderer::Plane pl{c_, x_, y_, n_, span_};
+  float u = 0, v = 0, w = 0;
+  behind = false;
+  if (!GhostRenderer::proj(pl, eye_, p, u, v, w)) { x = y = -1; return; }
+  x = u;
+  y = v;
+  const int px = int(u * size_), py = int(v * size_);
+  if (px < 0 || py < 0 || px >= size_ || py >= size_) return;
+  const float front = nearest_[size_t(py) * size_ + px];
+  behind = front > 0 && front < w - 0.012f;  // a part's middle is a little under its own surface
+}
+
+// Seen from in front and to the outside, so the trigger and the grip show as well as the buttons on top. The body is
+// drawn dark and everything you can press pale, which is how you tell them apart at this size.
+ControllerPicture bakeController(const Mesh& mesh, const std::vector<ModelPart>& parts, bool left, int S) {
+  const float sx = left ? 1.f : -1.f;
+  Mesh body, controls;
+  auto copy = [&](Mesh& to, const ModelPart* part) {
+    const size_t first = part ? part->firstIndex : 0, count = part ? part->indexCount : mesh.idx.size();
+    const uint32_t base = (uint32_t)to.p.size();
+    std::map<uint32_t, uint32_t> seen;
+    for (size_t i = first; i < first + count && i < mesh.idx.size(); ++i) {
+      const uint32_t v = mesh.idx[i];
+      auto it = seen.find(v);
+      if (it == seen.end()) {
+        it = seen.emplace(v, base + uint32_t(seen.size())).first;
+        to.p.push_back(mesh.p[v]);
+        to.n.push_back(mesh.n[v]);
+      }
+      to.idx.push_back(it->second);
+    }
+  };
+  for (const ModelPart& part : parts) {
+    const bool isBody = part.name == "body" || part.name == "status" || part.name == "led" || part.name == "trackhat";
+    copy(isBody ? body : controls, &part);
+  }
+  if (parts.empty()) copy(body, nullptr);
+
+  std::vector<V3> pts = body.p;
+  pts.insert(pts.end(), controls.p.begin(), controls.p.end());
+  if (pts.empty()) pts.push_back({0, 0, 0});
+  V3 lo = pts[0], hi = pts[0];
+  for (const V3& p : pts) {
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+  }
+  const V3 centre = (lo + hi) * 0.5f;
+  float radius = 0;
+  for (const V3& p : pts) radius = std::max(radius, len(p - centre));
+  const V3 N = norm(V3{sx * 0.68f, 0.36f, -0.64f}), up = norm(V3{0, 0.25f, -1});
+  const V3 cam = centre + N * (0.60f + radius);
+  const V3 X = norm(cross(up, N)), Y = cross(N, X);
+  float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+  for (const V3& p : pts) {
+    const V3 q = cam + (p - cam) * (dot(centre - cam, N) / dot(p - cam, N));
+    const float u = dot(q - centre, X), v = dot(q - centre, Y);
+    u0 = std::min(u0, u); u1 = std::max(u1, u); v0 = std::min(v0, v); v1 = std::max(v1, v);
+  }
+  const V3 c2 = centre + X * ((u0 + u1) * 0.5f) + Y * ((v0 + v1) * 0.5f);
+  const float span = std::max(u1 - u0, v1 - v0) * 1.06f;
+  GhostRenderer::Plane pl{c2, X, Y, N, span};
+  V3 eyes[1] = {cam};
+
+  const int kSS = 3, R = S * kSS;
+  GhostRenderer draw(R, R);
+  draw.clear();
+  const V3 light = norm(N * 0.60f + up * 0.70f + X * (sx * -0.30f));
+  const M I = ident();
+  draw.drawMesh(body, I, pl, eyes, 1, 0.55f, false, &light);
+  draw.drawMesh(controls, I, pl, eyes, 1, 1.0f, false, &light);
+
+  cairo_surface_t* img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, S, S);
+  uint8_t* d = cairo_image_surface_get_data(img);
+  const int stride = cairo_image_surface_get_stride(img);
+  std::vector<float> nearest(size_t(S) * S, 0.f);
+  for (int y = 0; y < S; ++y)
+    for (int x = 0; x < S; ++x) {
+      float lum = 0, cover = 0, closest = 0;
+      for (int a = 0; a < kSS; ++a)
+        for (int b = 0; b < kSS; ++b) {
+          const size_t k = size_t(y * kSS + a) * 2 * R + (x * kSS + b);
+          if (draw.zbuf[k] > 0) { lum += draw.rgba[k * 4] / 255.f; cover += 1; closest = std::max(closest, draw.zbuf[k]); }
+        }
+      lum /= kSS * kSS;
+      cover /= kSS * kSS;
+      nearest[size_t(y) * S + x] = closest > 0 ? 1 / closest : 0;
+      uint8_t* o = d + y * stride + x * 4;
+      const uint8_t v = uint8_t(std::min(1.f, lum * 0.92f) * 255);
+      o[0] = o[1] = o[2] = v;
+      o[3] = uint8_t(cover * 255);
+    }
+  cairo_surface_mark_dirty(img);
+
+  // Each part's line ends on the middle of what can be seen of it. A trigger's centre is inside the controller.
+  std::map<std::string, ControllerPicture::Spot> spots;
+  for (const ModelPart& part : parts) {
+    double sumX = 0, sumY = 0;
+    int visible = 0;
+    for (size_t i = part.firstIndex; i < size_t(part.firstIndex) + part.indexCount && i < mesh.idx.size(); ++i) {
+      float u = 0, v = 0, w = 0;
+      if (!GhostRenderer::proj(pl, cam, mesh.p[mesh.idx[i]], u, v, w)) continue;
+      const int px = int(u * S), py = int(v * S);
+      if (px < 0 || py < 0 || px >= S || py >= S) continue;
+      const float front = nearest[size_t(py) * S + px];
+      if (front > 0 && w <= front + 0.002f) { sumX += u; sumY += v; ++visible; }
+    }
+    if (visible > 0) spots[part.name] = {sumX / visible, sumY / visible, false};
+    else {
+      float u = 0, v = 0, w = 0;
+      if (GhostRenderer::proj(pl, cam, part.centre, u, v, w)) spots[part.name] = {u, v, true};
+    }
+  }
+  return ControllerPicture(std::shared_ptr<cairo_surface_t>(img, cairo_surface_destroy), std::move(nearest), std::move(spots), S, c2, X, Y, N, cam, span);
+}
+
+std::string bindKey(const BindModel& m) {
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + m.ref + "|" + m.layoutName + std::to_string(m.layoutOn) +
+                  std::to_string(m.layoutOther) + std::to_string(m.layoutOk) + std::to_string(m.saveForGame) + m.controls +
+                  std::to_string(m.wiringChanged) + std::to_string(m.confirmClose) + "|" + m.armed + "|" + m.status +
+                  std::to_string(m.statusWarn) + std::to_string(m.statusGood) + "|fx:" + m.hover + "," + m.down + "|";
+  for (const BindSide* s : {&m.theirs, &m.yours}) {
+    k += s->title + "," + s->note + ",";
+    for (int h = 0; h < 2; ++h) {
+      k += s->pic[h] ? "p" : "-";
+      for (const BindRow& r : s->rows[h]) k += r.id + "=" + r.action + ";";
+    }
+  }
+  for (const auto& l : m.lit) k += l + ",";
+  return k;
+}
+
+// The one-choice-of-several control: the chosen one solid, the others outlined.
+struct Segment { std::string id, text; bool on, enabled; };
+static void segments(cairo_t* c, std::vector<Button>& out, double x, double y, double w, double h, const std::vector<Segment>& list, double textSize = 19) {
+  const double d = h * kLean, gap = 3;
+  const double each = (w + d * (list.size() - 1) - gap * (list.size() - 1)) / list.size();
+  for (size_t i = 0; i < list.size(); ++i) {
+    const Segment& s = list[i];
+    const double bx = x + i * (each - d + gap);
+    if (s.on) slab(c, bx, y, each, h, PAPER);
+    else frame(c, bx, y, each, h, s.enabled ? PAPER : FAINT, s.enabled ? 0.45 : 0.5, 2);
+    fxOver(c, bx, y, each, h, s.id, s.enabled, s.on);
+    caps(c, bx + each / 2, y + h / 2 + textSize * 0.36, textSize, s.text, s.on ? INK : s.enabled ? PAPER : FAINT, 1, 1, 1.4, each - 24);
+    const double hitX = i == 0 ? bx : bx + d / 2;
+    out.push_back({hitX, y, each - d / 2, h, s.id, s.enabled});
+  }
+}
+
+// One hand: the controller in the middle, the buttons down either side with a line to where each one really is.
+static void bindHand(cairo_t* c, std::vector<Button>& btn, const BindModel& m, const ControllerPicture* pic, const std::vector<BindRow>& rows, double X0, double W, double y0, double H) {
+  const double S = 184, px = X0 + (W - S) / 2, py = y0 + (H - S) / 2, cellW = (W - S) / 2 - 4, rowH = 34;
+  if (pic) {
+    cairo_set_source_surface(c, pic->image(), px, py);
+    cairo_paint(c);
+  }
+  std::vector<const BindRow*> col[2];
+  for (const BindRow& r : rows) {
+    if (r.x >= 0) col[r.x < 0.5 ? 0 : 1].push_back(&r);
+    else col[col[0].size() <= col[1].size() ? 0 : 1].push_back(&r);
+  }
+  for (int a = 0; a < 2; ++a)
+    while (col[a].size() > 6) {  // too many on one side: the nearest to the middle goes across
+      auto nearest = std::min_element(col[a].begin(), col[a].end(), [](const BindRow* p, const BindRow* q) { return std::fabs(p->x - 0.5) < std::fabs(q->x - 0.5); });
+      col[1 - a].push_back(*nearest);
+      col[a].erase(nearest);
+    }
+  for (int a = 0; a < 2; ++a) {
+    std::stable_sort(col[a].begin(), col[a].end(), [](const BindRow* p, const BindRow* q) { return p->y < q->y; });
+    const double top = y0 + (H - col[a].size() * rowH) / 2;
+    for (size_t i = 0; i < col[a].size(); ++i) {
+      const BindRow& r = *col[a][i];
+      const bool lit = m.lit.count(r.id) > 0, armed = m.armed == r.id;
+      const double cx = a == 0 ? X0 : X0 + W - cellW, cy = top + i * rowH, mid = cy + rowH / 2;
+      if (armed) slab(c, cx, cy + 1, cellW, rowH - 2, SIGNAL);
+      else if (lit) slab(c, cx, cy + 1, cellW, rowH - 2, PAPER, 0.14);
+      if (r.x >= 0) {
+        const double ex = px + r.x * S, ey = py + r.y * S, sx = a == 0 ? cx + cellW : cx;
+        set(c, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.42);
+        cairo_set_line_width(c, armed || lit ? 2 : 1);
+        cairo_move_to(c, sx, mid);
+        cairo_line_to(c, ex, ey);
+        cairo_stroke(c);
+        const double dot = armed || lit ? 5 : 3.5;
+        if (r.behind) frame(c, ex - dot, ey - dot, dot * 2.4, dot * 2, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.8, 1.2);
+        else slab(c, ex - dot, ey - dot, dot * 2.4, dot * 2, armed ? SIGNAL : PAPER, armed || lit ? 1 : 0.85);
+      }
+      const int align = a == 0 ? 2 : 0;
+      const double tx = a == 0 ? cx + cellW - 10 : cx + 12, tw = cellW - 18;
+      if (r.unused) {
+        label(c, tx, cy + 14, 13, r.name, armed ? INK : DIM, align);
+        text(c, tx, cy + 31, 17, "Not used", false, armed ? INK : FAINT, 1, align, tw);
+      } else if (r.action.empty()) {
+        caps(c, tx, mid + 7, 18, r.name, armed ? INK : PAPER, 1, align, 1.2, tw);
+      } else {
+        label(c, tx, cy + 14, 13, r.name, armed ? INK : DIM, align);
+        // Two things on one button only stay if they can still be read.
+        std::string says = r.action;
+        const size_t both = says.find(" / ");
+        if (both != std::string::npos && textW(c, says, 15, true) > tw) says = says.substr(0, both);
+        text(c, tx, cy + 31, 18, says, true, armed ? INK : PAPER, 1, align, tw);
+      }
+      fxOver(c, cx, cy + 1, cellW, rowH - 2, r.id, true, armed);
+      btn.push_back({cx, cy, cellW, rowH, r.id, true});
+    }
+  }
+}
+
+void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Bindings);
+
+  // Which controller to hold yours up against. As many as this SteamVR can draw, so the names shrink to share the line.
+  const double chipY = 108, chipH = 36, chipD = chipH * kLean;
+  const double compareW = label(c, L, chipY + 24, 16, "Compare with");
+  const double chipX0 = L + compareW + 16, chipSpace = R - chipX0;
+  double size = 16, total = 0;
+  for (; size > 11; size -= 1) {
+    total = 0;
+    for (const std::string& n : m.refs) total += capsW(c, upper(n), size, 1) + 22 + 3;
+    if (total + chipD <= chipSpace) break;
+  }
+  double chipX = chipX0;
+  for (const std::string& n : m.refs) {
+    const double w = capsW(c, upper(n), size, 1) + 22 + chipD;
+    const bool on = n == m.ref;
+    const std::string id = "ref_" + n;
+    if (on) slab(c, chipX, chipY, w, chipH, PAPER);
+    else frame(c, chipX, chipY, w, chipH, PAPER, 0.35, 1.5);
+    fxOver(c, chipX, chipY, w, chipH, id, true, on);
+    caps(c, chipX + w / 2, chipY + chipH / 2 + size * 0.36, size, n, on ? INK : PAPER, 1, 1, 1);
+    btn.push_back({chipX + chipD / 2, chipY, w - chipD, chipH, id});
+    chipX += w - chipD + 3;
+  }
+
+  // The two controllers, theirs above yours.
+  const BindSide* sides[2] = {&m.theirs, &m.yours};
+  const double panelY[2] = {150, 390}, stripH = 30, bodyH = 208, cw = mid - 12 - L;
+  for (int i = 0; i < 2; ++i) {
+    const BindSide& s = *sides[i];
+    const double y = panelY[i];
+    hline(c, L, R, y, LINE);
+    const double tw = caps(c, L, y + 23, 19, s.title + (i ? " (yours)" : ""), PAPER, 1, 0, 1.6);
+    label(c, L + tw + 18, y + 22, 15, s.note, DIM);
+    if (i == 1 && m.wiringChanged) button(c, btn, R - 170, y + 2, 170, 26, "bind_reset_wiring", "Undo rewiring", Outline);
+    if (i == 0 && !m.controls.empty()) {  // the game's different sets of controls, one at a time
+      const double w = capsW(c, upper(m.controls), 16, 1.2), prevX = R - 54 - w - 54;
+      button(c, btn, R - 44, y + 2, 44, 26, "bind_controls_next", "", Outline);
+      button(c, btn, prevX, y + 2, 44, 26, "bind_controls_prev", "", Outline);
+      caps(c, R - 22, y + 21, 18, ">", PAPER, 1, 1, 0);
+      caps(c, prevX + 22, y + 21, 18, "<", PAPER, 1, 1, 0);
+      caps(c, R - 54, y + 22, 16, m.controls, PAPER, 1, 2, 1.2);
+    }
+    for (int h = 0; h < 2; ++h)
+      bindHand(c, btn, m, s.pic[h], s.rows[h], h ? mid + 12 : L, cw, y + stripH, bodyH);
+  }
+
+  // What this game does about it, or the next step if you've picked a button to rewire.
+  const double ay = 632, ah = 54, sx = mid + 12;
+  hline(c, L, R, ay - 4, LINE);
+  if (!m.armed.empty()) {
+    slab(c, L, ay, R - L, ah, SIGNAL);
+    text(c, L + 26, ay + 35, 23, "Now tap what your " + m.armedName + " should do, on the " + m.ref + " above", true, INK, 1, 0, R - L - 320);
+    button(c, btn, R - 290, ay + 7, 130, 40, "bind_nothing", "Nothing", OnSignal);
+    button(c, btn, R - 150, ay + 7, 130, 40, "bind_cancel", "Cancel", OnSignal);
+  } else {
+    const double useW = label(c, L, ay + 34, 16, m.hasGame ? "This game uses" : "Games use");
+    const double segX = L + useW + 16;
+    segments(c, btn, segX, ay, L + cw - segX, ah, {{"bind_dev", "Developer's", !m.layoutOn && !m.layoutOther, true}, {"bind_layout", m.layoutName, m.layoutOn, m.layoutOk}});
+    const double saveW = label(c, sx, ay + 34, 16, "Save for");
+    const double seg2 = sx + saveW + 18;
+    segments(c, btn, seg2, ay, R - seg2, ah, {{"bind_scope_game", "This game", m.saveForGame, m.hasGame}, {"bind_scope_global", "All games", !m.saveForGame, true}});
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else {
+    const std::string st = m.hasGame ? "Point at a button to find it on the other controller. Tap one of yours to change what it does."
+                                     : "No game running, so this shows how the buttons match up. Tap one of yours to change it.";
+    text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
 }
 
 // ---------------------------------------------------------------- in-headset panel

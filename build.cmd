@@ -13,3 +13,4 @@ dist\test_driver.exe || exit /b 1
 dist\test_controllers.exe || exit /b 1
 if not exist build\ui mkdir build\ui
 dist\test_ui.exe build\ui || exit /b 1
+dist\test_bindings.exe build\ui || exit /b 1

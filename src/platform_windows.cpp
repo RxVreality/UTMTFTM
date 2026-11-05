@@ -74,6 +74,19 @@ std::string steamvrDir() {
   return steamDir() + "/steamapps/common/SteamVR";
 }
 
+std::vector<std::string> configDirs() {
+  std::vector<std::string> out;
+  std::ifstream in(wide(localAppData() + "/openvr/openvrpaths.vrpath"));
+  Json::Value v;
+  Json::CharReaderBuilder b;
+  std::string errs;
+  if (in && Json::parseFromStream(b, in, &v, &errs))
+    for (const auto& c : v["config"]) out.push_back(slashes(c.asString()));
+  const std::string steam = steamDir() + "/config";
+  if (std::find(out.begin(), out.end(), steam) == out.end()) out.push_back(steam);
+  return out;
+}
+
 std::string documentsDir() {
   PWSTR p = nullptr;
   std::string out;

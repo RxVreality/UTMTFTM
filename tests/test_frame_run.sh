@@ -90,6 +90,19 @@ cat "$FAKE_STEAMVR_LOG"
 expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
 expect "it noticed, and didn't claim to be live" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
 
+echo "--- the bindings page"
+: > "$FAKE_STEAMVR_LOG"
+mkdir -p "$OUT/bindings"
+FAKE_STEAMVR_SHOTS="$OUT/bindings" FAKE_STEAMVR_SCENARIO=bindings timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-bindings.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/bindings.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+expect "what's chosen is saved" "[ -f '$DATA/bindings.json' ]"
+cp "$DATA/bindings.json" "$OUT/bindings.json"
+rm -f "$DATA/bindings.json"
+
 echo "--- updating over the top"
 : > "$FAKE_STEAMVR_LOG"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null

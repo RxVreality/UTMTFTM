@@ -11,3 +11,4 @@ dist/test_driver
 dist/test_controllers
 mkdir -p build/ui
 dist/test_ui build/ui
+dist/test_bindings build/ui

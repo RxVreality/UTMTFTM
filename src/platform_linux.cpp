@@ -64,6 +64,21 @@ std::string steamvrDir() {
   return steamDir() + "/steamapps/common/SteamVR";
 }
 
+std::vector<std::string> configDirs() {
+  const char* xdg = std::getenv("XDG_CONFIG_HOME");
+  std::string config = xdg && xdg[0] ? std::string(xdg) : fhlive::linuxHome() + "/.config";
+  std::vector<std::string> out;
+  std::ifstream in(config + "/openvr/openvrpaths.vrpath");
+  Json::Value v;
+  Json::CharReaderBuilder b;
+  std::string errs;
+  if (in && Json::parseFromStream(b, in, &v, &errs))
+    for (const auto& c : v["config"]) out.push_back(c.asString());
+  const std::string steam = steamDir() + "/config";
+  if (std::find(out.begin(), out.end(), steam) == out.end()) out.push_back(steam);
+  return out;
+}
+
 // On Linux SteamVR keeps its per-user binding files in ~/steamvr, where Windows has them in Documents.
 std::string documentsDir() { return fhlive::linuxHome(); }
 

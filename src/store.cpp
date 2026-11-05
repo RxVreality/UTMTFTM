@@ -131,7 +131,8 @@ HandPair Store::effective(const std::string& app) const {
 std::string Store::controllerType;
 static const char* kCats[] = {"openxr", "steamvr_input", "legacy"};
 
-static std::string keyFor(const std::string& cat) { return Store::controllerType + "_250820_CurrentURL_" + cat; }
+// The setting spells it steamvrinput, the binding file steamvr_input.
+static std::string keyFor(const std::string& cat) { return Store::controllerType + "_250820_CurrentURL_" + (cat == "steamvr_input" ? "steamvrinput" : cat); }
 
 static std::string getSetting(const std::string& sec, const std::string& key) {
   char buf[4096] = {0};
@@ -177,6 +178,9 @@ static std::string resolveBase(const std::string& app, const std::string& url) {
   const std::string file = "file:///";
   if (url.rfind(file, 0) == 0) {
     std::string p = url.substr(file.size());
+#ifndef _WIN32
+    p = "/" + p;
+#endif
     if (fs::exists(p)) return p;
   }
   const std::string ws = "vr-input-workshop://";
@@ -222,7 +226,7 @@ std::string Store::apply(const std::string& app, std::string* err) {
   } else {
     url = getSetting(app, key);
   }
-  const std::string ours = "file:///" + ourPath(app);
+  const std::string ours = platform::fileUrl(ourPath(app));
   bool pointsAtUs = (url == ours);
 
   if (eff.zero()) {

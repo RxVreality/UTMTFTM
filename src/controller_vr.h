@@ -42,13 +42,14 @@ enum class ModelLoad { Loading, Done, Failed };
 class ModelLoader {
  public:
   Mesh mesh;
+  std::vector<ModelPart> parts;
 
   explicit ModelLoader(const std::string& model = "") : model_(model) {}
 
   ModelLoad step() {
     auto R = vr::VRRenderModels();
-    const uint32_t parts = R->GetComponentCount(model_.c_str());
-    while (next_ < parts) {
+    const uint32_t count = R->GetComponentCount(model_.c_str());
+    while (next_ < count) {
       char part[128] = {0}, file[256] = {0};
       R->GetComponentName(model_.c_str(), next_, part, sizeof part);
       vr::RenderModel_ComponentState_t st{};
@@ -57,7 +58,15 @@ class ModelLoader {
       // Parts with no mesh are just named points on the controller, and hidden ones only show while they're touched.
       const bool drawn = R->GetComponentRenderModelName(model_.c_str(), part, file, sizeof file) && file[0] &&
                          R->GetComponentState(model_.c_str(), part, &state, &mode, &st) && (st.uProperties & vr::VRComponentProperty_IsVisible);
-      if (drawn && add(file, st.mTrackingToComponentRenderModel) == vr::VRRenderModelError_Loading) return ModelLoad::Loading;
+      if (drawn) {
+        const uint32_t firstVertex = (uint32_t)mesh.p.size(), firstIndex = (uint32_t)mesh.idx.size();
+        if (add(file, st.mTrackingToComponentRenderModel) == vr::VRRenderModelError_Loading) return ModelLoad::Loading;
+        if (mesh.p.size() > firstVertex) {
+          V3 sum{0, 0, 0};
+          for (size_t i = firstVertex; i < mesh.p.size(); ++i) sum = sum + mesh.p[i];
+          parts.push_back({part, firstIndex, (uint32_t)mesh.idx.size() - firstIndex, sum * (1.f / float(mesh.p.size() - firstVertex))});
+        }
+      }
       ++next_;
     }
     if (!mesh.p.empty()) return ModelLoad::Done;

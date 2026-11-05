@@ -56,6 +56,28 @@ On a Frame you can also get to it from the **+** on the bar at the bottom.
 
 It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-on moves the controller inside SteamVR, so nothing gets loaded into the game. Pavlov has been fine with that, but I can't speak for every anti-cheat out there.
 
+## Bindings
+
+The **Bindings** tab at the top of the page shows your controllers underneath any other one you pick. Each button has a line to where it really is on the controller, and says what it does in the game you're in. Point at a button and its match lights up on the other controller.
+
+So if you're on a Frame playing No Man's Sky and you want to know what the Quest's B does, pick Quest 3 and read it off. It's Jump, and on your Frame it's on A.
+
+If you don't like what the developer picked for your controller:
+
+1. Pick the controller whose layout you'd rather have. **This game uses** then offers it, like **Quest layout**.
+2. Tap it. It's saved, and the game uses it the next time it launches. **Developer's** puts it back.
+
+To change one button, tap it on your own controller, then tap what it should do on the other one. Compare your controller with itself to just swap things around.
+
+**Save for** works like it does for offsets. With **All games**, any game that has a binding for that controller gets the layout, starting from its second launch, because a game only tells SteamVR about its bindings once it's been run.
+
+A few things to know:
+
+- Lots of games don't say what their buttons do. Unity and Unreal games usually just pass the button along, so the page can only show that a button is in use. The ones that name their actions, like No Man's Sky, show the names.
+- It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
+- A new layout doesn't apply until the game restarts. SteamVR's own binding page can switch mid-game, but it does that through a web API this add-on stays away from.
+- A layout is a normal SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
+
 ## Controllers
 
 The picture on the page and the position of the grip come from SteamVR, so it should follow whatever controller you're holding. The buttons need a binding for each kind of controller, and these are the ones it has:
@@ -88,6 +110,8 @@ Anything else, like PSVR2, depends on SteamVR mapping one of these bindings acro
 
 **No yellow hand in the dashboard.** Same fix. The program closes itself when the add-on is switched off, on purpose.
 
+**A game's buttons stopped working after picking a layout.** Tap **Developer's** on the Bindings tab and restart the game. If you'd tell me which game and which layout, I'd like to know.
+
 The logs are `utmtftm.log` and `driver.log`, in `%LOCALAPPDATA%\UTMTFTM` on Windows and `~/.local/share/UTMTFTM` on a Frame. Please attach them to bug reports.
 
 ## Removing it
@@ -101,12 +125,6 @@ sh ~/.local/share/UTMTFTM/app/uninstall.sh
 ```
 
 If you just want it out of the way for a while, switch it off in Manage Add-ons.
-
-## Roadmap
-
-No dates on any of this.
-
-- A controller bindings page. Steam's is too complicated. I want to see my controller next to any other headset's, with where each binding sits on both, and defaults that translate from one to the other.
 
 ## Building
 

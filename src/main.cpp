@@ -8,10 +8,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "bindings.h"
 #include "controller_vr.h"
 #include "controls.h"
 #include "ghost3d.h"
@@ -137,8 +139,15 @@ struct App {
   bool modelPending[2] = {false, false};
   ModelLoader modelLoader[2];
 
-  std::string sceneKey, sceneName;
+  std::string sceneKey, sceneName, sceneRaw;
   uint32_t scenePid = 0;
+
+  // The bindings page. It reads nothing until it's opened, or until a game starts when there's a layout saved.
+  DashPage page = DashPage::Hands;
+  bind::Page bindings{bindDirs(), bindSettings()};
+  ModelLoader bindLoader;
+  std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
+  uint32_t bindStatusSeen = 0;
   bool driverOn = false;   // the driver add-on is loaded in SteamVR and can move the hands
   bool driverCounted = false;
   bool driverAlive = false, handsHeard = false;
@@ -252,6 +261,106 @@ struct App {
     drawIcon(thumbCv);
     upload(thumb, thumbCv);
     return true;
+  }
+
+  // ---------------- the bindings page's way to SteamVR
+  static bind::Dirs bindDirs() {
+    bind::Dirs d;
+    d.steamvr = platform::steamvrDir();
+    d.steam = platform::steamDir();
+    d.data = platform::dataDir();
+    d.config = platform::configDirs();
+    return d;
+  }
+
+  static bind::Settings bindSettings() {
+    bind::Settings s;
+    s.get = [](const std::string& section, const std::string& key) {
+      char buf[4096] = {0};
+      vr::EVRSettingsError e = vr::VRSettingsError_None;
+      vr::VRSettings()->GetString(section.c_str(), key.c_str(), buf, sizeof buf, &e);
+      return e == vr::VRSettingsError_None ? std::string(buf) : std::string();
+    };
+    s.set = [](const std::string& section, const std::string& key, const std::string& value) {
+      vr::EVRSettingsError e = vr::VRSettingsError_None;
+      vr::VRSettings()->SetString(section.c_str(), key.c_str(), value.c_str(), &e);
+      logf("bindings: %s %s = %s (%s)", section.c_str(), key.c_str(), value.c_str(), vr::VRSettings()->GetSettingsErrorNameFromEnum(e));
+      return e == vr::VRSettingsError_None;
+    };
+    s.remove = [](const std::string& section, const std::string& key) {
+      vr::EVRSettingsError e = vr::VRSettingsError_None;
+      vr::VRSettings()->RemoveKeyInSection(section.c_str(), key.c_str(), &e);
+      logf("bindings: %s %s removed (%s)", section.c_str(), key.c_str(), vr::VRSettings()->GetSettingsErrorNameFromEnum(e));
+    };
+    return s;
+  }
+
+  void syncBindings() {
+    if (!bindings.loaded()) {
+      auto t0 = Clock::now();
+      bindings.load();
+      logf("bindings page: read SteamVR's controller files in %.0f ms", std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
+    }
+    bindings.setYours(Store::controllerType, modelName[0], modelName[1]);
+    bindings.setGame(sceneKey.empty() ? "" : (sceneRaw.empty() ? sceneKey : sceneRaw), sceneKey, sceneKey.empty() ? "" : sceneName);
+  }
+
+  // One model at a time, a little on each pass of the loop, and only while the page is on screen.
+  void loadBindModels() {
+    if (page != DashPage::Bindings || !bindings.loaded() || !panelShowing()) return;
+    if (bindLoading.empty()) {
+      const auto wanted = bindings.modelsWanted();
+      if (wanted.empty()) return;
+      bindLoading = wanted[0];
+      bindLoader = ModelLoader(bindLoading);
+    }
+    const ModelLoad r = bindLoader.step();
+    if (r == ModelLoad::Loading) return;
+    logf("bindings page: %s %s, %zu parts", bindLoading.c_str(), r == ModelLoad::Done ? "loaded" : "didn't load", bindLoader.parts.size());
+    bindings.give(bindLoading, bindLoader.mesh, bindLoader.parts);
+    bindLoader = ModelLoader{};
+    bindLoading.clear();
+    dashForce = true;
+  }
+
+  // A layout saved for this game, or for all games, goes in when it starts, and again when it closes, because a game that's
+  // never been run has only just told SteamVR what its bindings are. SteamVR reads it the next time the game launches.
+  // Nothing here runs for someone who's never used the page.
+  void checkBindings() {
+    if (sceneKey.empty() && bindChecked.empty()) return;
+    if (!sceneKey.empty() && (bindChecked == sceneKey || Store::controllerType.empty())) return;
+    std::error_code ec;
+    const bool used = fs::exists(fs::u8path(platform::dataDir()) / "bindings.json", ec);
+    guarded([&] {
+      if (sceneKey.empty()) {
+        if (used) {
+          bindings.setGame(bindCheckedRaw.empty() ? bindChecked : bindCheckedRaw, bindChecked, bindCheckedName);
+          bindings.gameStarted();
+        }
+        bindings.setGame("", "", "");
+      } else if (used) {
+        syncBindings();
+        bindings.gameStarted();
+      }
+    });
+    bindChecked = sceneKey;
+    bindCheckedRaw = sceneRaw;
+    bindCheckedName = sceneName;
+  }
+
+  // The bindings page reads files that belong to games and to SteamVR. If one of them isn't what it should be, that shouldn't
+  // take the hand offsets down with it.
+  template <class F> bool guarded(F f) {
+    try {
+      f();
+      return true;
+    } catch (const std::exception& e) {
+      logf("bindings page: %s", e.what());
+      page = DashPage::Hands;
+      setStatus("The bindings page couldn't read one of SteamVR's files. It's in the log.", Warn);
+      dashForce = true;
+      return false;
+    }
   }
 
   // ---------------- scene app tracking
@@ -380,8 +489,10 @@ struct App {
     static uint32_t lastPid = ~0u;
     std::string k = gameKey(key, pid);
     scenePid = pid;
+    sceneRaw = key;
     refreshControllers();
     refreshDriver();
+    checkBindings();
     if (pid != lastPid) {
       logf("scene pid %u key '%s' -> '%s'", pid, key, k.c_str());
       lastPid = pid;
@@ -465,10 +576,29 @@ struct App {
     if (!dashForce && !dashPoke && Clock::now() - lastDashCheck < std::chrono::milliseconds(200)) return;
     lastDashCheck = Clock::now();
     dashPoke = false;
-    DashModel m = dashModel();
-    std::string key = dashKey(m);
-    if (!dashForce && key == dashDrawn) return;
-    drawDashboard(dashCv, m, buttons);
+    std::string key;
+    bool drawn = false;
+    if (page == DashPage::Bindings)
+      guarded([&] {
+        syncBindings();
+        BindModel m = bindings.model(fx.hover, fx.down);
+        m.live = sceneKey.empty() ? LiveState::NoGame : sceneLive() ? LiveState::Live : LiveState::NextLaunch;
+        m.confirmClose = Clock::now() < confirmUntil;
+        m.status.clear();
+        m.statusWarn = m.statusGood = false;
+        if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+        key = bindKey(m);
+        if (!dashForce && key == dashDrawn) { drawn = true; return; }
+        drawBindings(dashCv, m, buttons);
+        drawn = true;
+      });
+    if (drawn && key == dashDrawn && !dashForce) return;
+    if (!drawn) {
+      DashModel m = dashModel();
+      key = dashKey(m);
+      if (!dashForce && key == dashDrawn) return;
+      drawDashboard(dashCv, m, buttons);
+    }
     if (!upload(dash, dashCv)) { dashForce = true; return; }  // SteamVR refused it: try again next tick
     if (first) logf("panel image ready");
     dashDrawn = key;
@@ -489,11 +619,26 @@ struct App {
     if (const Button* hb = hitButton(buttons, x, y)) {
       const std::string id = hb->id;  // copy: buttons are rebuilt on the next draw
       logf("click %s%s", id.c_str(), hb->enabled ? "" : " (greyed)");
+      if (page == DashPage::Bindings && id != "close" && id.rfind("page_", 0) != 0) {
+        guarded([&] {
+          if (hb->enabled) bindings.click(id);
+          else bindings.clickGreyed(id);
+        });
+        if (bindings.statusSerial != bindStatusSeen) {
+          bindStatusSeen = bindings.statusSerial;
+          setStatus(bindings.status, bindings.statusKind);
+        }
+        confirmUntil = {};
+        dashForce = true;
+        return;
+      }
       if (!hb->enabled) { explainGreyed(id); return; }
       if (id == "close") {
         if (Clock::now() < confirmUntil) { quit = true; logf("closed from the dashboard"); }
         else confirmUntil = Clock::now() + std::chrono::seconds(4);
       }
+      else if (id == "page_hands") { page = DashPage::Hands; statusUntil = {}; }
+      else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); }); }
       else if (id == "scope_game") { saveForGame = true; setStatus("Saving for this game only."); }
       else if (id == "scope_global") { saveForGame = false; setStatus("Saving for all games."); }
       else if (id == "cancel_armed") { mode = Mode::Idle; in.release(); setStatus("Cancelled. Nothing changed."); }
@@ -933,6 +1078,7 @@ struct App {
       if (mode != Mode::Idle) { in.poll(mode == Mode::Placing); truePoses(); }  // controllers only matter while placing
       checkScene();
       loadControllerModels();
+      loadBindModels();
       tickSession(dt);
       if (mode == Mode::Idle && !panelDrawn.empty()) {
         if (panelDrawn == "#message" && now < messageUntil) placePanel(nullptr);
@@ -987,6 +1133,12 @@ int main(int argc, char** argv) {
     } else {
       auto r = A->RemoveApplicationManifest(manifest.c_str());
       logf("uninstall: RemoveApplicationManifest=%d", (int)r);
+      // A game's setting mustn't be left pointing at a file that's about to go.
+      try {
+        bind::Page(App::bindDirs(), App::bindSettings()).restoreAll();
+      } catch (const std::exception& ex) {
+        logf("uninstall: couldn't restore every game's binding: %s", ex.what());
+      }
     }
     vr::VR_Shutdown();
     return regOk ? 0 : 3;

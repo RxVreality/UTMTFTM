@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "xform.h"
@@ -35,6 +36,13 @@ struct Mesh {
   std::vector<V3> p, n;
   std::vector<float> palm;  // 0..1: how much this vertex is on the palm side
   std::vector<uint32_t> idx;
+};
+
+// A named part of a controller's model: its triangles in the mesh it was added to, and where it sits.
+struct ModelPart {
+  std::string name;
+  uint32_t firstIndex = 0, indexCount = 0;
+  V3 centre{0, 0, 0};
 };
 
 // Tube along a polyline with per-point radius, rounded caps. Frames are parallel-transported.

@@ -2,6 +2,9 @@
 #pragma once
 #include <cairo.h>
 
+#include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -57,6 +60,9 @@ struct DashModel {
   std::string hover, down;
 };
 
+// The two pages share the dashboard panel. This says which one's showing.
+enum class DashPage { Hands, Bindings };
+
 // Dashboard press feedback as plain state, testable without VR. Static states only (the user
 // doesn't want motion in a settings UI): highlighted under the laser, pushed in while held.
 // What a tap DID is shown by the screen itself (values, selected chip, greyed Reset) plus one
@@ -73,6 +79,66 @@ struct DashFx {
 // Stable text form of everything the dashboard shows: redraw whenever it changes.
 std::string dashKey(const DashModel& m);
 void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- bindings page
+// A controller drawn once and kept: the image, and how to find a point on it.
+class ControllerPicture {
+ public:
+  struct Spot { double x, y; bool behind; };
+  ControllerPicture(std::shared_ptr<cairo_surface_t> image, std::vector<float> nearest, std::map<std::string, Spot> spots, int sizePx, V3 centre, V3 x, V3 y, V3 n, V3 eye, float span);
+  cairo_surface_t* image() const { return image_.get(); }
+  int size() const { return size_; }
+  // Where a point on the controller lands, as 0..1 of the picture, and whether the body's in front of it from here.
+  void place(V3 p, double& x, double& y, bool& behind) const;
+  // Where a part is on the picture: the middle of as much of it as shows.
+  const Spot* spot(const std::string& part) const;
+
+ private:
+  std::shared_ptr<cairo_surface_t> image_;
+  std::vector<float> nearest_;  // how far away the nearest surface is at each pixel. 0: nothing there
+  std::map<std::string, Spot> spots_;
+  int size_;
+  V3 c_, x_, y_, n_, eye_;
+  float span_;
+};
+ControllerPicture bakeController(const Mesh& mesh, const std::vector<ModelPart>& parts, bool left, int sizePx);
+
+struct BindRow {
+  std::string id;       // "y:left/input/a", "t:right/input/b"
+  std::string name;     // "A"
+  std::string action;   // what it does, "" = its own name says it all
+  bool unused = false;  // a game's binding is showing, and this button isn't on it
+  double x = -1, y = -1;  // where it sits on the picture, 0..1. Negative: nowhere known
+  bool behind = false;    // it's round the back from this angle, so the mark is drawn hollow
+};
+struct BindSide {
+  std::string title, note;
+  const ControllerPicture* pic[2] = {nullptr, nullptr};
+  std::vector<BindRow> rows[2];
+};
+struct BindModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  bool hasGame = false;
+  std::vector<std::string> refs;  // every controller there is to compare with
+  std::string ref;
+  std::string controls;  // which of the game's sets of controls is showing, when it has several
+  BindSide theirs, yours;
+  std::string layoutName;       // "Quest layout"
+  bool layoutOn = false;        // this game's on it
+  bool layoutOther = false;     // on another controller's layout
+  bool layoutOk = false;        // there's something to translate
+  bool saveForGame = true;
+  bool wiringChanged = false;
+  std::string armed, armedName;  // the button of yours being rewired
+  std::set<std::string> lit;    // rows lit up because the laser is on them or their match
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string bindKey(const BindModel& m);
+void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- in-headset instruction panel
 struct PanelModel {

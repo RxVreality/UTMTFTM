@@ -81,7 +81,7 @@ if(NOT WIN32)
   target_link_options(driver_utmtftm PRIVATE -Wl,-z,defs -Wl,--exclude-libs,ALL)
 endif()
 
-add_executable(utmtftm src/main.cpp src/store.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
+add_executable(utmtftm src/main.cpp src/store.cpp src/bindings.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
 target_link_libraries(utmtftm PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS})
 add_custom_command(TARGET utmtftm POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/input ${CMAKE_SOURCE_DIR}/dist/input
@@ -122,9 +122,19 @@ add_executable(test_driver tests/test_driver.cpp)
 target_link_libraries(test_driver PRIVATE ${THREAD_LIBS})
 add_dependencies(test_driver driver_utmtftm)
 
+add_executable(test_bindings tests/test_bindings.cpp src/bindings.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+target_link_libraries(test_bindings PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
+target_include_directories(test_bindings PRIVATE tests)
+add_dependencies(test_bindings utmtftm)
+
 add_executable(test_controllers tests/test_controllers.cpp ${PLATFORM_SRC})
 target_link_libraries(test_controllers PRIVATE ${JSON_LIBS})
 add_dependencies(test_controllers utmtftm)
+
+# Review tool for the bindings page against the real SteamVR. It only reads. Needs SteamVR running.
+add_executable(bind_sheet tests/bind_sheet.cpp src/bindings.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+target_link_libraries(bind_sheet PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS})
+add_dependencies(bind_sheet utmtftm)
 
 if(WIN32)
   # Review tool for the hand on every controller SteamVR can draw. Needs SteamVR installed.
@@ -133,7 +143,8 @@ if(WIN32)
   add_dependencies(glove_sheet utmtftm)
 else()
   # A stand-in for SteamVR, so the real program can run on a machine with no headset. See tests/test_frame_run.sh.
-  add_library(fake_vrclient SHARED tests/fake_steamvr.cpp tests/fake_vrserver.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+  add_library(fake_vrclient SHARED tests/fake_steamvr.cpp tests/fake_vrserver.cpp src/bindings.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+  target_include_directories(fake_vrclient PRIVATE tests)
   set_target_properties(fake_vrclient PROPERTIES PREFIX "" OUTPUT_NAME vrclient LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist/fake_steamvr)
   target_link_libraries(fake_vrclient PRIVATE ${JSON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS} ${THREAD_LIBS})
   target_link_options(fake_vrclient PRIVATE -Wl,--exclude-libs,ALL)
