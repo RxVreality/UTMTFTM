@@ -58,6 +58,7 @@ struct Headset {
 struct Dirs {
   std::string steamvr, steam, data;
   std::vector<std::string> config;  // SteamVR's config folders, from openvrpaths.vrpath
+  std::string guides;               // input/game_labels.json
 };
 
 struct Library {
@@ -117,6 +118,29 @@ std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* bin
 struct ControlGroup { std::string id, name; int labelled = 0; };
 std::vector<ControlGroup> controlGroups(const Found& binding);
 
+// What a game's buttons do when the game doesn't tell SteamVR: input/game_labels.json, written from researched sources.
+// Each entry says which controller its source described. A stick's press is kept apart as "<row>/click", since it's a
+// separate action from pushing the stick.
+struct GameGuide {
+  std::string game;
+  std::string from;                 // finishes "What Pavlov does by default, from ...": "the game's own files", "guides and reviews"
+  std::vector<std::string> keys;    // SteamVR's names for it, like "steam.app.555160"
+  std::vector<std::string> names;   // what it's called, for a copy that isn't on Steam
+  std::map<std::string, std::map<std::string, std::string>> on;  // controller type -> "right/input/a" -> "Reload"
+  bool overGamesWords = false;  // the game's names are for its developers ("Udon Trigger Axis"), and this says it better
+};
+std::vector<GameGuide> loadGuides(const std::string& path);
+const GameGuide* findGuide(const std::vector<GameGuide>& guides, const std::string& key, const std::string& alt, const std::string& name);
+
+// What each row on this controller does in that game. A controller the guide describes uses its words as they stand. Any
+// other gets them only if the game's own bindings prove it's the same action: the action on your button has to be on a
+// button of a controller the guide does describe. Games can and do give another controller a different layout, and most
+// name their actions per controller, so a button with the same name proves nothing and stays blank.
+// translated: SteamVR is running this controller on another's bindings, so the game doesn't know it's this controller and
+// whatever a source says about it doesn't apply. Only the actions count then. clickOnly: a stick's press alone.
+struct GuideRoute { std::string type; const Found* binding; const Profile* profile; };
+std::map<std::string, std::string> guideLabels(const GameGuide& g, const Profile& p, const Found* shown, const std::vector<GuideRoute>& routes, bool translated, bool clickOnly = false);
+
 // Which of a model's parts an input is. The picture's lines end there.
 std::vector<std::string> partsFor(const std::string& key);
 
@@ -138,6 +162,7 @@ std::string comboText(const std::vector<ComboInput>& inputs, const Profile& your
 // game's action file. Sticks and half-pulls aren't on or off, so they aren't in it.
 struct GameAction {
   std::string output, group, label, where;
+  std::string row;  // the button it's on now, if it's on one
   bool nameless = false;  // its name only says which button it came from, so the game's meaning for it can't be known
 };
 std::vector<GameAction> comboActions(const Found& binding, const Profile& yours);
@@ -196,6 +221,10 @@ class Page {
   bool applyNow(const std::string& from);
   void revertNow();
   bool reapply();
+  std::vector<GameAction> namedActions(const Found& binding, const Profile& yours);  // comboActions, with the guide's words
+  bool guideOn(std::vector<RowText> rows[2], const Profile& p, const Found* shown);  // true if it labelled anything
+  const GameGuide* guide() const;
+  std::vector<GuideRoute> guideRoutes(const GameGuide& g);
   std::string autoFrom();    // what SteamVR would translate this game from, for a controller it has nothing for
   std::string comboBase();   // the controller's binding to add combos to, when this game isn't on a layout. Empty: there's none
   Found activeBinding();     // what this game runs on now, or would on its next launch, before any combos
@@ -222,6 +251,7 @@ class Page {
   std::string comboGroup_;
   int comboPage_ = 0;
   std::map<std::string, Found> found_;
+  std::vector<GameGuide> guides_;
   struct Held { Mesh mesh; std::vector<ModelPart> parts; bool have = false; std::shared_ptr<ControllerPicture> pic; };
   std::map<std::string, Held> models_;
   std::string savedRef_;

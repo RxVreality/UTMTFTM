@@ -10,6 +10,8 @@ Yaw and roll now read positive to the right, so all six numbers go the way their
 
 On the Bindings tab, pointing at a button now lights up the one that does the same thing on the other controller, in games that name their buttons. In No Man's Sky, Jump on your Frame's A used to light up the Quest's A, and now it lights up the Quest's B.
 
+The Bindings tab now says what buttons do in 47 games that don't tell SteamVR, like Pavlov, Forefront and Titan Isles. I looked them up, from the game's own files where I could and otherwise from developers' guides and reviews, and the top of the page says which. A label only moves to another controller if the game's own bindings prove it's the same action, so you'll see some blanks on purpose. The Combos tab uses the same words.
+
 ## 0.3.0
 
 A Bindings tab: your controllers under any other one you pick, with where each button is and what it does in the game you're in. You can put a game on another controller's layout, rewire single buttons, and set either as the default for all games. It reads and writes SteamVR's own binding files, and changes apply the next time the game launches.

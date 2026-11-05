@@ -125,6 +125,9 @@ add_dependencies(test_driver driver_utmtftm)
 add_executable(test_bindings tests/test_bindings.cpp src/bindings.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
 target_link_libraries(test_bindings PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
 target_include_directories(test_bindings PRIVATE tests)
+# The label table is data, so a change to it has to reach dist without anything being relinked.
+add_custom_target(input_files ALL COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/input ${CMAKE_SOURCE_DIR}/dist/input VERBATIM)
+add_dependencies(test_bindings input_files)
 add_dependencies(test_bindings utmtftm)
 
 add_executable(test_controllers tests/test_controllers.cpp ${PLATFORM_SRC})

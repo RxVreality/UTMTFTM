@@ -158,6 +158,10 @@ static void testFixture(const std::string& work, const std::string& out) {
   actionLabel("/actions/ue/in/framecontroller_right_a_touch", {}, &pass, &hide);
   check(hide, "touching isn't something to list");
   check(actionLabel("/actions/x/in/primarybutton", {}, &pass, &hide) == "Primary" && !pass && !hide, "Unity's role names read as they are");
+  check(actionLabel("/actions/x/in/leftbuttona", {}, &pass, &hide) == "X" && pass && !hide, "a plugin's own word for a button isn't taken for the game's");
+  check(actionLabel("/actions/x/in/rtrigger", {}, &pass, &hide) == "Trigger" && pass && !hide, "nor is a shortened one");
+  actionLabel("/actions/x/in/touch_a", {}, &pass, &hide);
+  check(hide, "and a touch sensor isn't a separate thing to show");
   check(actionLabel("/actions/ue/in/framecontroller_left_dpadup_click", {}, &pass, &hide) == "D-pad up", "a D-pad direction reads as words");
   check(actionLabel("/actions/x/in/ToggleCrouch", {}, &pass, &hide) == "Toggle Crouch" && !pass && !hide, "a real action's name is split into words");
   check(actionLabel("/actions/x/in/facebuttontop", {}, &pass, &hide) == "Face Button Top", "and so is one that's all lower case around \"button\"");
@@ -653,6 +657,313 @@ static void testFixture(const std::string& work, const std::string& out) {
   shot(m, out + "/fixture_off.png");
 }
 
+// ---------------------------------------------------------------- what a guide says a game's buttons do
+static std::string openxrBinding(const std::string& type, const std::vector<std::pair<std::string, std::string>>& buttons) {
+  std::string sources;
+  for (const auto& [path, action] : buttons) {
+    if (!sources.empty()) sources += ",";
+    sources += R"({"inputs": {"click": {"output": "/actions/game/in/)" + action + R"("}}, "mode": "button", "path": "/user/hand/)" + path + R"("})";
+  }
+  return R"({"category": "openxr", "controller_type": ")" + type + R"(", "interaction_profile": "/interaction_profiles/x", "name": "x", "bindings": {"/actions/game": {"sources": [)" + sources + "]}}}";
+}
+
+static const BindRow* guideRow(const BindSide& side, const std::string& id) {
+  for (int hand = 0; hand < 2; ++hand)
+    for (const BindRow& r : side.rows[hand])
+      if (r.id == id) return &r;
+  return nullptr;
+}
+static std::string guideText(const BindSide& side, const std::string& id) {
+  const BindRow* r = guideRow(side, id);
+  return r ? r->action : "(no such row)";
+}
+
+static void testGuides(const std::string& work) {
+  const std::string steamvr = work + "/gsteamvr", config = work + "/gconfig", guides = work + "/guides.json";
+  fixture::writeSteamVR(steamvr, config, work + "/ggames");
+  const fs::path xr = fs::u8path(config) / "openxr";
+  // Unreal names actions after the key, so each controller's are different and nothing connects them but the names.
+  fixture::writeFile(xr / "steam.app.50_oculus_touch_0_binding.json", openxrBinding("oculus_touch", {{"right/input/a", "oculustouch_right_a_click"}, {"right/input/trigger", "oculustouch_right_trigger_click"}, {"left/input/x", "oculustouch_left_x_click"}}));
+  fixture::writeFile(xr / "steam.app.50_frame_controller_0_binding.json", openxrBinding("frame_controller", {{"right/input/a", "framecontroller_right_a_click"}, {"right/input/trigger", "framecontroller_right_trigger_click"}, {"right/input/bumper", "framecontroller_right_bumper_click"}, {"left/input/dpad_down", "framecontroller_left_dpaddown_click"}}));
+  fixture::writeFile(xr / "steam.app.51_frame_controller_0_binding.json", openxrBinding("frame_controller", {{"right/input/a", "framecontroller_right_a_click"}, {"left/input/dpad_down", "framecontroller_left_dpaddown_click"}}));
+  fixture::writeFile(xr / "steam.app.53_oculus_touch_0_binding.json", openxrBinding("oculus_touch", {{"right/input/a", "primarybutton"}}));
+  fixture::writeFile(xr / "steam.app.55_oculus_touch_0_binding.json", openxrBinding("oculus_touch", {{"right/input/a", "primarybutton"}, {"right/input/b", "secondarybutton"}}));
+  // One thumb-touch action across A and the stick, as VRChat has, and one action on two buttons.
+  fixture::writeFile(xr / "steam.app.56_oculus_touch_0_binding.json", R"({"category": "openxr", "controller_type": "oculus_touch", "interaction_profile": "/interaction_profiles/x", "name": "x", "bindings": {"/actions/game": {"sources": [
+    {"inputs": {"touch": {"output": "/actions/game/in/thumb"}}, "mode": "button", "path": "/user/hand/right/input/joystick"},
+    {"inputs": {"position": {"output": "/actions/game/in/turn"}}, "mode": "joystick", "path": "/user/hand/right/input/joystick"},
+    {"inputs": {"touch": {"output": "/actions/game/in/thumb"}}, "mode": "button", "path": "/user/hand/right/input/a"},
+    {"inputs": {"click": {"output": "/actions/game/in/jump"}}, "mode": "button", "path": "/user/hand/right/input/a"},
+    {"inputs": {"click": {"output": "/actions/game/in/both"}}, "mode": "button", "path": "/user/hand/right/input/b"},
+    {"inputs": {"click": {"output": "/actions/game/in/both"}}, "mode": "button", "path": "/user/hand/right/input/trigger"}
+  ]}}})");
+  fixture::writeFile(guides, R"({"games": [
+    {"game": "Frame Known", "from": "the game's own files", "keys": ["steam.app.57"], "on": {"frame_controller": {"right/input/a": "Sprint"}}},
+    {"game": "Thumb Game", "from": "guides and reviews", "keys": ["steam.app.56"], "on": {"oculus_touch": {"right/input/joystick": "Turn", "right/input/a": "Jump", "right/input/b": "One thing", "right/input/trigger": "Another"}}},
+    {"game": "Unity Game", "from": "guides and reviews", "keys": ["steam.app.12345"], "on": {"oculus_touch": {"right/input/a": "Jump", "right/input/b": "Reload", "right/input/trigger": "Fire", "left/input/joystick": "Move", "left/input/joystick/click": "Run", "left/input/system": "Pause"}}},
+    {"game": "Named Game", "from": "guides and reviews", "keys": ["steam.app.777"], "on": {"oculus_touch": {"right/input/trigger": "Wrong words", "right/input/b": "Fills a gap"}}},
+    {"game": "Unreal Game", "from": "the game's own files", "keys": ["steam.app.50"], "on": {"oculus_touch": {"right/input/a": "Jump", "right/input/trigger": "Fire", "left/input/x": "Crouch"}}},
+    {"game": "Exact Game", "from": "the game's own files", "keys": ["steam.app.51"], "on": {"oculus_touch": {"right/input/a": "Jump"}, "frame_controller": {"right/input/a": "Sprint", "left/input/dpad_down": "Duck"}}},
+    {"game": "Never Played", "from": "the developer's guide", "keys": ["steam.app.52"], "on": {"oculus_touch": {"right/input/a": "Jump", "right/input/trigger": "Fire", "left/input/x": "Crouch"}}},
+    {"game": "Half Bound", "from": "guides and reviews", "keys": ["steam.app.53"], "on": {"oculus_touch": {"right/input/a": "Jump", "right/input/b": "Nothing hears this"}}},
+    {"game": "Translated Exact", "from": "the game's own files", "keys": ["steam.app.55"], "on": {"oculus_touch": {"right/input/a": "Jump", "right/input/b": "Reload"}, "frame_controller": {"right/input/a": "Sprint", "right/input/y": "Duck"}}},
+    {"game": "Rift Copy", "from": "guides and reviews", "keys": ["steam.app.54"], "names": ["Other Name"], "on": {"oculus_touch": {"right/input/a": "Jump"}}}
+  ]})");
+
+  Dirs d;
+  d.steamvr = steamvr;
+  d.steam = work + "/gsteam";
+  d.data = work + "/gdata";
+  d.config = {config};
+  d.guides = guides;
+  FakeSettings fake;
+  Library lib;
+  lib.load(d);
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+  std::string quest;
+  for (const Headset& h : lib.headsets) if (h.type == "oculus_touch") { quest = h.name; break; }
+  page.setReference(quest);
+
+  // A Unity game with one Quest binding: the labels follow SteamVR's translation onto the Frame.
+  page.setGame("steam.app.12345", "steam.app.12345", "Unity Game");
+  BindModel m = page.model("", "");
+  check(guideText(m.theirs, "t:right/input/a") == "Jump", "the guide labels Quest's A");
+  check(guideText(m.theirs, "t:left/input/joystick") == "Move / Run", "a stick says both what pushing and pressing it do");
+  check(guideText(m.theirs, "t:left/input/system") == "Pause", "and Quest's menu button is labelled");
+  check(m.theirs.note == "What Unity Game does by default, from guides and reviews", "the page says where the words came from");
+  check(guideText(m.yours, "y:right/input/a") == "Jump", "A on a Frame acts as the Quest's A, so it says Jump");
+  check(guideText(m.yours, "y:right/input/x") == "Reload" && guideText(m.yours, "y:right/input/y") == "Reload", "X and Y act as B there");
+  check(guideText(m.yours, "y:left/input/thumbstick") == "Move / Run", "a stick carries over");
+  check(guideText(m.yours, "y:right/input/bumper") == "Fire", "SteamVR's translation makes the bumper a trigger here, so that's what it says");
+  check(m.yours.note.find("translating") != std::string::npos, "the note about translating stays");
+  const BindModel lit = page.model("t:right/input/a", "");
+  check(lit.lit.count("y:right/input/a") == 1, "pointing at Jump lights up Jump on the other controller");
+
+  // The combo list says the same: what the button does in the game, rather than the button's own name.
+  page.comboClick("combo_new");
+  page.comboClick("c:left/input/dpad_up");
+  page.comboClick("c:left/input/dpad_down");
+  page.comboClick("combo_next");
+  {
+    const ComboModel cm = page.comboModel("", "");
+    bool jump = false, primary = false, reload = false;
+    std::string listed;
+    for (const ComboChoice& e : cm.choices) {
+      listed += e.name + "; ";
+      jump = jump || e.name == "Jump";
+      reload = reload || e.name == "Reload";
+      primary = primary || e.name == "Primary";
+    }
+    check(jump && reload, "a combo can pick what the guide calls it: " + listed);
+    check(!primary, "instead of Primary");
+    check(cm.note.empty(), "and it doesn't say the game only names its buttons");
+  }
+  page.comboClick("combo_back");
+  page.comboClick("combo_cancel");
+
+  // A game that names its own buttons keeps its own words, and a guide only fills what it leaves blank.
+  page.setGame("steam.app.777", "steam.app.777", "Named Game");
+  m = page.model("", "");
+  check(guideText(m.theirs, "t:right/input/trigger") == "Fire the gun", "a game's own words beat a guide");
+  check(guideRow(m.theirs, "t:right/input/b") && guideRow(m.theirs, "t:right/input/b")->unused, "and a button it doesn't use stays Not used, whatever a guide says");
+
+  // Unless the entry says its words are better, for a game whose names are only for its developers.
+  {
+    fixture::writeFile(work + "/guides_over.json", R"({"games": [{"game": "Named Game", "from": "the developer's guide", "keys": ["steam.app.777"], "over_games_words": true, "on": {"oculus_touch": {"right/input/trigger": "Shoot"}}}]})");
+    Dirs over = d;
+    over.guides = work + "/guides_over.json";
+    FakeSettings overFake;
+    Page overPage(over, overFake.make());
+    overPage.load();
+    overPage.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+    overPage.setReference(quest);
+    overPage.setGame("steam.app.777", "steam.app.777", "Named Game");
+    const BindModel o = overPage.model("", "");
+    check(guideText(o.theirs, "t:right/input/trigger") == "Shoot", "an entry can say its words beat the game's");
+    check(guideText(o.theirs, "t:right/input/a") == "Reload", "and the game's words stay on what it doesn't cover");
+  }
+
+  // Each controller with its own action names: nothing connects them, so nothing carries over, not even A to A. Games do
+  // give another controller a different layout. It's still in use, it just doesn't say what for.
+  page.setGame("steam.app.50", "steam.app.50", "Unreal Game");
+  m = page.model("", "");
+  check(guideText(m.theirs, "t:right/input/a") == "Jump", "the controller the guide describes is labelled");
+  check(guideText(m.yours, "y:right/input/a").empty(), "framecontroller_right_a isn't assumed to be the same as Touch's A");
+  check(guideText(m.yours, "y:right/input/trigger").empty(), "nor is its trigger");
+  check(guideText(m.yours, "y:right/input/bumper").empty(), "nor its bumper");
+  check(guideRow(m.yours, "y:right/input/a") && !guideRow(m.yours, "y:right/input/a")->unused, "and none of that makes it Not used");
+
+  // A source that covers the Frame by name is used as it stands, with nothing carried over.
+  page.setGame("steam.app.51", "steam.app.51", "Exact Game");
+  m = page.model("", "");
+  check(guideText(m.yours, "y:right/input/a") == "Sprint", "the Frame's own entry beats Touch's");
+  check(guideText(m.yours, "y:left/input/dpad_down") == "Duck", "including a button Touch hasn't got");
+
+  // The game has a Frame layout, but it isn't running on it here: SteamVR is translating Quest's. The game thinks it's holding
+  // a Quest controller, so the Quest's words are the true ones and the Frame's would be wrong.
+  page.setGame("steam.app.55", "steam.app.55", "Translated Exact");
+  m = page.model("", "");
+  check(m.yours.note.find("translating") != std::string::npos, "this one is being translated");
+  check(guideText(m.yours, "y:right/input/a") == "Jump", "so A says what it does through the translation, not what the Frame layout has on it");
+  check(guideText(m.yours, "y:right/input/y") == "Reload", "and Y acts as the Quest's B");
+
+  // Not played here, but the source covers the Frame, so there's something to show and the note says where it's from.
+  page.setGame("steam.app.57", "steam.app.57", "Frame Known");
+  m = page.model("", "");
+  check(guideText(m.yours, "y:right/input/a") == "Sprint", "the Frame's own words show with no bindings on disk");
+  check(m.yours.note == "From the game's own files", "and the note says where they're from rather than asking you to play it");
+
+  // A touch sensor shared across buttons says nothing about which button is which, and an action on two buttons can't be placed.
+  page.setGame("steam.app.56", "steam.app.56", "Thumb Game");
+  m = page.model("", "");
+  check(guideText(m.yours, "y:right/input/a") == "Jump", "A follows what pressing it does, not the thumb sensor it shares with the stick");
+  check(guideText(m.yours, "y:right/input/thumbstick") == "Turn", "and the stick is still the stick");
+  check(guideText(m.yours, "y:right/input/x").empty(), "an action on two of the source's buttons could be either, so it stays blank");
+
+  // Never played here, so no bindings at all. The controller the guide describes still gets its words, and nothing else does.
+  page.setGame("steam.app.52", "steam.app.52", "Never Played");
+  m = page.model("", "");
+  check(guideText(m.theirs, "t:right/input/a") == "Jump", "a game with no bindings on disk still gets its guide");
+  check(m.theirs.note == "What Never Played does by default, from the developer's guide", "with the same note");
+  check(guideText(m.yours, "y:left/input/dpad_down").empty(), "the Frame can't be proven the same, so it stays blank");
+  check(m.yours.note == "No bindings found yet. Play it once", "and it says why");
+
+  // A button the game's own binding doesn't have can't do what a guide says.
+  page.setGame("steam.app.53", "steam.app.53", "Half Bound");
+  m = page.model("", "");
+  check(guideText(m.theirs, "t:right/input/a") == "Jump", "what's bound is labelled");
+  check(guideRow(m.theirs, "t:right/input/b") && guideRow(m.theirs, "t:right/input/b")->unused && guideText(m.theirs, "t:right/input/b").empty(), "and what isn't stays Not used");
+
+  // Found by name when the key doesn't match, as with a copy that isn't Steam's.
+  std::vector<GameGuide> list = loadGuides(guides);
+  check(list.size() == 10, "the guides are read");
+  check(findGuide(list, "steam.app.999", "", "Rift Copy (Rift)") && findGuide(list, "steam.app.999", "", "Rift Copy (Rift)")->game == "Rift Copy", "brackets don't stop a name matching");
+  check(findGuide(list, "steam.app.999", "", "Other Name") && findGuide(list, "steam.app.999", "", "Other Name")->game == "Rift Copy", "nor does a second name");
+  check(!findGuide(list, "steam.app.999", "", "Not Listed"), "and a game that isn't listed has no guide");
+  check(loadGuides(work + "/missing.json").empty(), "no file just means no guides");
+
+  // No guide, no change.
+  page.setGame("steam.app.888", "steam.app.888", "Not Listed");
+  m = page.model("", "");
+  check(m.theirs.note.find("from") == std::string::npos, "a game with no guide doesn't claim a source");
+}
+
+// The table itself, as it ships. Every entry has to be something the page can show, and say where it came from.
+static void testGuideTable() {
+  const fs::path file = fs::u8path(platform::exeDir()) / "input" / "game_labels.json";
+  Json::Value v;
+  {
+    Json::CharReaderBuilder b;
+    std::string errs;
+    std::ifstream in(file, std::ios::binary);
+    check(in && Json::parseFromStream(b, in, &v, &errs), "input/game_labels.json can be read");
+  }
+  static const std::map<std::string, std::set<std::string>> rowsOf = {
+      {"oculus_touch", {"left/input/x", "left/input/y", "left/input/system", "left/input/trigger", "left/input/grip", "left/input/joystick", "left/input/joystick/click", "right/input/a", "right/input/b", "right/input/trigger", "right/input/grip", "right/input/joystick", "right/input/joystick/click"}},
+      {"knuckles", {"left/input/a", "left/input/b", "left/input/trigger", "left/input/grip", "left/input/thumbstick", "left/input/thumbstick/click", "right/input/a", "right/input/b", "right/input/trigger", "right/input/grip", "right/input/thumbstick", "right/input/thumbstick/click"}},
+      {"frame_controller", {"left/input/view", "left/input/dpad_up", "left/input/dpad_down", "left/input/dpad_left", "left/input/dpad_right", "left/input/bumper", "left/input/trigger", "left/input/grip", "left/input/thumbstick", "left/input/thumbstick/click", "right/input/menu", "right/input/a", "right/input/b", "right/input/x", "right/input/y", "right/input/bumper", "right/input/trigger", "right/input/grip", "right/input/thumbstick", "right/input/thumbstick/click"}}};
+  static const std::set<std::string> sources = {"the game's own files", "the developer's guide", "guides and reviews"};
+  std::set<std::string> keys, names;
+  int labels = 0;
+  for (const Json::Value& e : v["games"]) {
+    const std::string game = e["game"].asString();
+    check(!game.empty(), "every entry names its game");
+    check(sources.count(e["from"].asString()) == 1, game + ": says what kind of source it came from");
+    check(e["sources"].isArray() && e["sources"].size() >= 1, game + ": lists its sources");
+    for (const Json::Value& s : e["sources"]) check(!s.asString().empty(), game + ": a source isn't blank");
+    check(names.insert(game).second, game + ": is only listed once");
+    for (const Json::Value& k : e["keys"]) check(keys.insert(k.asString()).second, game + ": " + k.asString() + " isn't claimed twice");
+    check(e["on"].size() >= 1, game + ": has something to say");
+    check(!e["checked"].asString().empty(), game + ": says when it was checked");
+    check(e["headset_checked"].isBool(), game + ": says whether anyone's confirmed it in a headset");
+    for (const std::string& type : e["on"].getMemberNames()) {
+      auto rows = rowsOf.find(type);
+      check(rows != rowsOf.end(), game + ": " + type + " is a controller the table knows");
+      if (rows == rowsOf.end()) continue;
+      check(e["on"][type].size() >= 1, game + ": " + type + " isn't empty");
+      for (const std::string& k : e["on"][type].getMemberNames()) {
+        const std::string words = e["on"][type][k].asString();
+        check(rows->second.count(k) == 1, game + ": " + k + " is a " + type + " button");
+        check(!words.empty() && words.size() <= 30, game + ": " + k + " fits on a row: " + words);
+        ++labels;
+      }
+    }
+  }
+  printf("game labels: %d games, %d labels\n", int(v["games"].size()), labels);
+  check(v["games"].size() >= 1, "the table isn't empty");
+}
+
+// Every game the table knows that's been played on this machine, drawn on a Frame next to a Quest 3 for checking by eye. The
+// bindings on disk also check the table: a button it labels that the game's own Touch binding hasn't got gets printed.
+static void testGuideShots(const std::string& work, const std::string& out) {
+  Dirs d;
+  d.steamvr = platform::steamvrDir();
+  d.steam = platform::steamDir();
+  d.data = work + "/shotsdata";
+  d.config = platform::configDirs();
+  d.guides = (fs::u8path(platform::exeDir()) / "input" / "game_labels.json").generic_u8string();
+  Library lib;
+  lib.load(d);
+  if (lib.profiles.empty()) return;
+  FakeSettings fake;
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  page.setReference("Quest 3");
+  giveModels(page, d.steamvr);
+  int drawn = 0;
+  std::error_code ec;
+  fs::create_directories(fs::u8path(out) / "guides", ec);
+
+  // Anything in a real OpenXR binding that reads as the game's own word gets shown as one, so here's what those are.
+  {
+    std::set<std::string> words;
+    for (const std::string& dir : d.config)
+      for (const auto& f : fs::directory_iterator(fs::u8path(dir) / "openxr", ec)) {
+        if (f.path().extension() != ".json") continue;
+        Json::Value v;
+        Json::CharReaderBuilder rb;
+        std::string errs;
+        std::ifstream in(f.path(), std::ios::binary);
+        if (!in || !Json::parseFromStream(rb, in, &v, &errs)) continue;
+        for (const auto& set : v["bindings"].getMemberNames())
+          for (const auto& src : v["bindings"][set]["sources"])
+            for (const auto& name : src["inputs"].getMemberNames()) {
+              const std::string output = src["inputs"][name]["output"].asString();
+              bool pass = false, hide = false;
+              const std::string label = actionLabel(output, {}, &pass, &hide);
+              if (!pass && !hide && !label.empty()) words.insert(output.substr(output.rfind('/') + 1) + "=" + label);
+            }
+      }
+    printf("openxr action names read as real words (%zu):", words.size());
+    for (const std::string& w : words) printf(" %s;", w.c_str());
+    printf("\n");
+  }
+  Settings settings = fake.make();
+  for (const GameGuide& g : loadGuides(d.guides)) {
+    const std::string key = g.keys.empty() ? "steam.app.0" : g.keys[0];
+    const Found touch = findBinding(d, lib, settings, {key}, "oculus_touch");
+    page.setGame(key, key, g.game);
+    giveModels(page, d.steamvr);
+    const BindModel m = page.model("", "");
+    check(m.theirs.note.find(g.from) != std::string::npos || !touch.names.empty(), g.game + ": the page says where its labels came from");
+    auto touchWords = g.on.find("oculus_touch");
+    if (touch.ok && touch.names.empty() && touchWords != g.on.end())
+      for (const auto& [path, words] : touchWords->second) {
+        const std::string row = path.size() > 6 && path.compare(path.size() - 6, 6, "/click") == 0 ? path.substr(0, path.size() - 6) : path;
+        const BindRow* r = guideRow(m.theirs, "t:" + row);
+        if (!r || r->action.find(words) == std::string::npos) printf("  note: %s says %s = %s, but the game's Quest binding doesn't have that button\n", g.game.c_str(), path.c_str(), words.c_str());
+      }
+    std::string safe = g.game;
+    for (char& ch : safe) if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
+    shot(m, (fs::u8path(out) / "guides" / (safe + ".png")).generic_u8string());
+    ++drawn;
+  }
+  printf("drew %d games from the table\n", drawn);
+}
+
 // ---------------------------------------------------------------- the real SteamVR on this machine, if there is one
 static void testReal(const std::string& work, const std::string& out) {
   Dirs d;
@@ -839,6 +1150,9 @@ int main(int argc, char** argv) {
   fs::create_directories(tmp, ec);
   fs::create_directories(fs::u8path(out), ec);
   testFixture(tmp.generic_u8string(), out);
+  testGuides(tmp.generic_u8string());
+  testGuideTable();
+  testGuideShots(tmp.generic_u8string(), out);
   testReal(tmp.generic_u8string(), out);
   fs::remove_all(tmp, ec);
   printf("test_bindings: %d checks, %d failures\n", checks, fails);

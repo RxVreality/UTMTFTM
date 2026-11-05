@@ -271,6 +271,7 @@ struct App {
     d.steam = platform::steamDir();
     d.data = platform::dataDir();
     d.config = platform::configDirs();
+    d.guides = g_root + "/input/game_labels.json";
     return d;
   }
 

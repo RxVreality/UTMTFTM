@@ -451,7 +451,14 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   if (confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
   else button(c, btn, R - 110, 30, 110, 46, "close", "Close", Outline);
   const double right = R - (confirmClose ? 234 : 130);
-  text(c, right, 50, 21, game.empty() ? "No game running" : game, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 3 * tabW - 2 * tabD + 12));
+  // The page's note has the whole name. Up here it has to stay big enough to read and clear of the tabs.
+  std::string shownName = game;
+  if (shownName.size() > 34) {
+    size_t cut = 32;
+    while (cut > 0 && (static_cast<unsigned char>(shownName[cut]) & 0xC0) == 0x80) --cut;
+    shownName = shownName.substr(0, cut) + "...";
+  }
+  text(c, right, 50, 21, game.empty() ? "No game running" : shownName, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 3 * tabW - 2 * tabD + 12));
   if (live == LiveState::Live || live == LiveState::NextLaunch) {
     const bool on = live == LiveState::Live;
     const double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);

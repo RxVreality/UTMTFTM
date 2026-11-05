@@ -725,9 +725,20 @@ std::string actionLabel(const std::string& output, const std::map<std::string, s
         {"secondary2daxis", "Trackpad"}, {"select", "Select"}, {"ax", "A / X"}, {"by", "B / Y"}, {"stick", "Stick"}, {"thumbstick_click", "Stick click"},
         {"stick_clicks", "Stick click"}, {"a", "A"}, {"b", "B"}, {"x", "X"}, {"y", "Y"},
         {"dpadup", "D-pad up"}, {"dpaddown", "D-pad down"}, {"dpadleft", "D-pad left"}, {"dpadright", "D-pad right"}};
+    // Other plugins' words for the same thing. They only say which button it came from, however much they look like names.
+    static const std::map<std::string, std::string> buttonWords = {
+        {"leftbuttona", "X"}, {"leftbuttonb", "Y"}, {"rightbuttona", "A"}, {"rightbuttonb", "B"}, {"leftgrip", "Grip"}, {"rightgrip", "Grip"},
+        {"leftthumbstick", "Stick"}, {"rightthumbstick", "Stick"}, {"lthumb", "Stick"}, {"rthumb", "Stick"}, {"leftoculusmenu", "Menu"},
+        {"lefttriggerclick", "Trigger"}, {"lefttriggerpull", "Trigger"}, {"righttriggerclick", "Trigger"}, {"righttriggerpull", "Trigger"}, {"ltrigger", "Trigger"}, {"rtrigger", "Trigger"},
+        {"ax_button", "A / X"}, {"by_button", "B / Y"}, {"menu_button", "Menu"}, {"select_button", "Select"}, {"system", "System"}, {"click", "Click"},
+        {"trackpad", "Trackpad"}, {"trackpadclicked", "Trackpad"}};
+    auto plainWord = buttonWords.find(n);
+    if (plainWord != buttonWords.end()) { word = n; pass = true; }
+    if (n == "trackpadforce" || n.rfind("touch_", 0) == 0) hidden = true;
     auto u = unity.find(word);
     if (endsWith(n, "touched") || endsWith(n, "touch") || n == "gripforce" || endsWith(n, "ready")) hidden = true;
     if (u != unity.end()) { label = u->second; if (word != "primarybutton" && word != "secondarybutton") pass = true; }
+    else if (plainWord != buttonWords.end()) label = plainWord->second;
     else label = spacedWords(word == n ? raw : word);
   }
   if (passThrough) *passThrough = pass;
@@ -858,6 +869,112 @@ std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* bin
   return rows;
 }
 
+// ---------------------------------------------------------------- what a guide says a game's buttons do
+std::vector<GameGuide> loadGuides(const std::string& path) {
+  std::vector<GameGuide> out;
+  Json::Value v;
+  if (path.empty() || !readJson(path, v)) return out;
+  for (const Json::Value& e : v["games"]) {
+    GameGuide g;
+    g.game = e["game"].asString();
+    g.from = e["from"].asString();
+    g.overGamesWords = e["over_games_words"].asBool();
+    for (const Json::Value& k : e["keys"]) g.keys.push_back(lowered(k.asString()));
+    for (const Json::Value& n : e["names"]) g.names.push_back(n.asString());
+    for (const std::string& type : e["on"].getMemberNames())
+      for (const std::string& k : e["on"][type].getMemberNames()) g.on[type][k] = e["on"][type][k].asString();
+    if (!g.game.empty() && !g.from.empty()) out.push_back(std::move(g));
+  }
+  return out;
+}
+
+// "Beat Saber (Rift)" and "Beat Saber" are the same game to anyone holding the controllers.
+static std::string plainName(const std::string& name) {
+  std::string out;
+  bool inBrackets = false;
+  for (char ch : name) {
+    if (ch == '(') inBrackets = true;
+    else if (ch == ')') inBrackets = false;
+    else if (!inBrackets && std::isalnum(static_cast<unsigned char>(ch))) out += char(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return out;
+}
+
+const GameGuide* findGuide(const std::vector<GameGuide>& guides, const std::string& key, const std::string& alt, const std::string& name) {
+  const std::string a = lowered(key), b = lowered(alt);
+  for (const GameGuide& g : guides)
+    if (std::find(g.keys.begin(), g.keys.end(), a) != g.keys.end() || (!b.empty() && std::find(g.keys.begin(), g.keys.end(), b) != g.keys.end())) return &g;
+  const std::string plain = plainName(name);
+  if (plain.empty()) return nullptr;
+  for (const GameGuide& g : guides) {
+    if (plainName(g.game) == plain) return &g;
+    for (const std::string& n : g.names) if (plainName(n) == plain) return &g;
+  }
+  return nullptr;
+}
+
+// What a row says: pushing a stick and pressing it are separate actions, and the row has room for both.
+static std::string rowWords(const std::map<std::string, std::string>& m, const std::string& row, bool clickOnly) {
+  auto plain = m.find(row);
+  auto press = m.find(row + "/click");
+  if (clickOnly) return press != m.end() ? press->second : plain != m.end() ? plain->second : "";
+  if (plain != m.end() && press != m.end() && !plain->second.empty() && !press->second.empty()) return plain->second + " / " + press->second;
+  if (plain != m.end() && !plain->second.empty()) return plain->second;
+  return press != m.end() ? press->second : "";
+}
+
+std::map<std::string, std::string> guideLabels(const GameGuide& g, const Profile& p, const Found* shown, const std::vector<GuideRoute>& routes, bool translated, bool clickOnly) {
+  std::map<std::string, std::string> out;
+  auto own = translated ? g.on.end() : g.on.find(p.type);
+
+  // Which button each action is on, on the controllers the guide describes. Sensors don't count: VRChat has one thumb-touch
+  // action on A, B and the stick, so it says nothing about which button is which. An action on two buttons doesn't prove
+  // anything either, so it's left out.
+  const auto isSensor = [](const std::string& in) { return in == "touch" || in == "ready_ext" || in == "force" || in == "proximity"; };
+  struct Described { const std::map<std::string, std::string>* words; std::map<std::string, std::set<std::string>> rowsOf; };
+  std::vector<Described> described;
+  if (own == g.on.end())
+    for (const GuideRoute& r : routes) {
+      auto words = g.on.find(r.type);
+      if (words == g.on.end() || !r.binding || !r.binding->ok || !r.profile) continue;
+      Described d{&words->second, {}};
+      for (const auto& setName : r.binding->json["bindings"].getMemberNames())
+        for (const auto& src : r.binding->json["bindings"][setName]["sources"]) {
+          const std::string path = after(src["path"].asString(), "/user/hand/");
+          const std::string row = r.profile->rowOf(path);
+          if (row.empty()) continue;
+          for (const auto& in : src["inputs"].getMemberNames())
+            if (!isSensor(in)) d.rowsOf[path.substr(0, path.find('/')) + "|" + lowered(src["inputs"][in]["output"].asString())].insert(row);
+        }
+      described.push_back(std::move(d));
+    }
+
+  for (const Input& i : p.inputs) {
+    if (!i.shown) continue;
+    for (const char* hand : {"left", "right"}) {
+      if (!i.side.empty() && i.side != hand) continue;
+      const std::string id = std::string(hand) + i.key;
+      std::string words;
+      if (own != g.on.end()) words = rowWords(own->second, id, clickOnly);
+      else if (shown && shown->ok)
+        for (const auto& setName : shown->json["bindings"].getMemberNames())
+          for (const auto& src : shown->json["bindings"][setName]["sources"]) {
+            if (!words.empty() || p.rowOf(after(src["path"].asString(), "/user/hand/")) != id) continue;
+            for (const auto& in : src["inputs"].getMemberNames()) {
+              if (isSensor(in)) continue;
+              const std::string action = std::string(hand) + "|" + lowered(src["inputs"][in]["output"].asString());
+              for (const Described& d : described) {
+                auto rows = d.rowsOf.find(action);
+                if (rows != d.rowsOf.end() && rows->second.size() == 1 && words.empty()) words = rowWords(*d.words, *rows->second.begin(), clickOnly);
+              }
+            }
+          }
+      if (!words.empty()) out[id] = words;
+    }
+  }
+  return out;
+}
+
 std::vector<std::string> partsFor(const std::string& key) {
   static const std::map<std::string, std::vector<std::string>> table = {
       {"/input/a", {"button_a", "a_button", "button"}},
@@ -979,6 +1096,7 @@ std::vector<GameAction> comboActions(const Found& binding, const Profile& yours)
       const Input* i = inputAt(yours, row.empty() ? onPath : row);
       if (i && i->key == "/input/system" && !i->shown) return;
       if (i) a.where = std::string("On ") + (i->side.empty() ? (onPath.rfind("left/", 0) == 0 ? "left " : "right ") : "") + i->name;
+      a.row = row.empty() ? onPath : row;
     }
     seen[key] = out.size();
     out.push_back(a);
@@ -1100,6 +1218,7 @@ void Page::savePrefs() const {
 
 void Page::load() {
   lib_.load(d_);
+  guides_ = loadGuides(d_.guides);
   loadPrefs();
   loaded_ = true;
   setReference(savedRef_);
@@ -1322,6 +1441,89 @@ static const ModelPart* partNamed(const std::vector<ModelPart>& parts, const std
   return nullptr;
 }
 
+const GameGuide* Page::guide() const {
+  return gameKey_.empty() ? nullptr : findGuide(guides_, gameKey_, gameAlt_, gameName_);
+}
+
+static std::vector<std::string> splitWords(const std::string& words) {
+  std::vector<std::string> out;
+  size_t at = 0;
+  while (at <= words.size()) {
+    const size_t next = words.find(" / ", at);
+    out.push_back(words.substr(at, next == std::string::npos ? next : next - at));
+    if (next == std::string::npos) break;
+    at = next + 3;
+  }
+  return out;
+}
+
+// The controllers the guide describes, Touch first because that's what most sources describe.
+std::vector<GuideRoute> Page::guideRoutes(const GameGuide& g) {
+  std::vector<std::string> types;
+  if (g.on.count("oculus_touch")) types.push_back("oculus_touch");
+  for (const auto& [type, words] : g.on) if (type != "oculus_touch") types.push_back(type);
+  std::vector<GuideRoute> routes;
+  for (const std::string& type : types) routes.push_back({type, &binding(type), lib_.profile(type)});
+  return routes;
+}
+
+// The game's own words win where it has any, and a button the game can't hear stays Not used whatever a guide says.
+bool Page::guideOn(std::vector<RowText> rows[2], const Profile& p, const Found* shown) {
+  const GameGuide* g = guide();
+  if (!g) return false;
+  const bool hasBinding = shown && shown->ok;
+  const std::map<std::string, std::string> labels = guideLabels(*g, p, shown, guideRoutes(*g), hasBinding && !binding(p.type).ok);
+  const bool gameNames = hasBinding && !shown->names.empty();
+  bool any = false;
+  for (int hand = 0; hand < 2; ++hand)
+    for (RowText& r : rows[hand]) {
+      if (gameNames && !g->overGamesWords && !r.actions.empty()) continue;
+      auto it = labels.find(r.id);
+      if (it == labels.end() || (hasBinding && !r.bound)) {
+        // Next to real words, the button's own name again only gets in the way.
+        if (!gameNames) { r.action.clear(); r.actions.clear(); }
+        continue;
+      }
+      r.action = it->second;
+      r.actions.clear();
+      for (const std::string& w : splitWords(it->second)) r.actions.push_back(squeezed(w));
+      r.passThrough = false;
+      any = true;
+    }
+  return any;
+}
+
+std::vector<GameAction> Page::namedActions(const Found& active, const Profile& yours) {
+  std::vector<GameAction> actions = comboActions(active, yours);
+  const GameGuide* g = guide();
+  if (!g) return actions;
+  const std::map<std::string, std::string> words = guideLabels(*g, yours, &active, guideRoutes(*g), active.ok && !binding(yours.type).ok, true);
+  // Unity's actions are shared between the hands, so one can be two things: Jump on the right, Scoreboard on the left.
+  std::map<std::string, std::vector<std::string>> saidOn;
+  if (active.ok)
+    for (const auto& setName : active.json["bindings"].getMemberNames())
+      for (const auto& src : active.json["bindings"][setName]["sources"]) {
+        const std::string path = after(src["path"].asString(), "/user/hand/");
+        const std::string row = yours.rowOf(path);
+        auto said = words.find(row.empty() ? path : row);
+        if (said == words.end()) continue;
+        for (const auto& in : src["inputs"].getMemberNames()) {
+          std::vector<std::string>& list = saidOn[lowered(src["inputs"][in]["output"].asString())];
+          for (const std::string& w : splitWords(said->second))
+            if (std::find(list.begin(), list.end(), w) == list.end()) list.push_back(w);
+        }
+      }
+  for (GameAction& a : actions) {
+    if (!active.names.empty() && !g->overGamesWords && !a.nameless) continue;
+    auto it = saidOn.find(lowered(a.output));
+    if (it == saidOn.end() || it->second.empty()) continue;
+    a.label = it->second[0];
+    if (it->second.size() > 1) a.label += " / " + it->second[1];
+    a.nameless = false;
+  }
+  return actions;
+}
+
 void Page::fillRows(BindSide& side, const std::string& prefix, const Headset& h, const std::vector<RowText> rows[2]) {
   const Profile* prof = lib_.profile(h.type);
   for (int hand = 0; hand < 2; ++hand) {
@@ -1378,6 +1580,7 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
 
   // Their side: the reference, with what this game has on it.
   std::vector<RowText> theirRows[2];
+  bool theirGuide = false;
   const Found* theirBinding = nullptr;
   if (theirP && m.hasGame && binding(ref_.type).ok) theirBinding = &binding(ref_.type);
   // Which of the game's sets of controls is showing, when it has more than one.
@@ -1398,6 +1601,7 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   if (theirP) {
     theirRows[0] = rowsOn(*theirP, "left", theirBinding, group_);
     theirRows[1] = rowsOn(*theirP, "right", theirBinding, group_);
+    theirGuide = guideOn(theirRows, *theirP, theirBinding);
     for (auto& rows : theirRows)
       for (RowText& r : rows) r.unused = theirBinding && !r.bound;
   }
@@ -1406,9 +1610,10 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   for (const auto& rows : theirRows)
     for (const RowText& r : rows) anyNamed = anyNamed || !r.action.empty();
   if (!m.hasGame) m.theirs.note = "Where everything sits";
+  else if (theirGuide) m.theirs.note = "What " + gameName_ + " does by default, from " + guide()->from;
   else if (!theirBinding) m.theirs.note = gameName_ + " hasn't set this one up";
   else if (anyNamed) m.theirs.note = "What " + gameName_ + " has on it";
-  else m.theirs.note = gameName_ + " uses these, but doesn't say for what";
+  else m.theirs.note = gameName_ + " doesn't say what these do";
 
   // Your side: what it does now, or would do on the layout you're on.
   std::vector<RowText> yourRows[2];
@@ -1454,6 +1659,9 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
     const Found* shown = !translatedFrom.empty() ? &translated : native;
     for (int hand = 0; hand < 2; ++hand) {
       yourRows[hand] = rowsOn(*yourP, hand ? "right" : "left", showWiring ? nullptr : shown, group_);
+    }
+    const bool yourGuide = !showWiring && !m.layoutOther && guideOn(yourRows, *yourP, shown);
+    for (int hand = 0; hand < 2; ++hand)
       for (RowText& r : yourRows[hand]) {
         if (showWiring) {
           const RowText a = actsAs(r);
@@ -1461,7 +1669,6 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
           r.unused = a.unused;
         } else r.unused = shown && shown->ok && !r.bound;
       }
-    }
     if (!m.hasGame) m.yours.note = "How it translates to the " + ref_.name;
     else if (m.layoutOn) m.yours.note = ref_.type == yours_.type ? "Rewired by you" : "On the " + refShort + " layout";
     else if (m.layoutOther) {
@@ -1474,7 +1681,8 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
       std::string otherName = titleCase(translatedFrom);
       for (const Headset& h : lib_.headsets) if (h.type == translatedFrom) { otherName = h.name; break; }
       m.yours.note = "SteamVR is translating the game's " + otherName + " bindings";
-    } else m.yours.note = "No bindings found yet. Play it once";
+    } else if (yourGuide) m.yours.note = "From " + guide()->from;
+    else m.yours.note = "No bindings found yet. Play it once";
     if (m.hasGame && !combosHere().empty()) m.yours.note += ", plus " + std::to_string(combosHere().size()) + (combosHere().size() == 1 ? " combo" : " combos");
   } else {
     m.yours.note = yours_.type.empty() ? "Turn your controllers on" : "SteamVR has no description of this controller";
@@ -1762,7 +1970,7 @@ ComboModel Page::comboModel(const std::string& hover, const std::string& down) {
     if (m.note.empty() && picked_.size() == 1 && picked_.begin()->second == "touch") m.note = "With only one touch, this goes off whenever your thumb or finger brushes it.";
   }
   if (comboStep_ == 2) {
-    const std::vector<GameAction> actions = comboActions(active, *mine);
+    const std::vector<GameAction> actions = namedActions(active, *mine);
     std::vector<std::string> groups;
     for (const GameAction& a : actions)
       if (std::find(groups.begin(), groups.end(), a.group) == groups.end()) groups.push_back(a.group);
@@ -1848,7 +2056,7 @@ void Page::comboClick(const std::string& id) {
   if (id == "combo_page_next") { ++comboPage_; return; }
   if (id == "combo_page_prev") { comboPage_ = std::max(0, comboPage_ - 1); return; }
   if (id == "combo_group_next" || id == "combo_group_prev") {
-    const std::vector<GameAction> actions = comboActions(activeBinding(), *mine);
+    const std::vector<GameAction> actions = namedActions(activeBinding(), *mine);
     std::vector<std::string> groups;
     for (const GameAction& a : actions)
       if (std::find(groups.begin(), groups.end(), a.group) == groups.end()) groups.push_back(a.group);
@@ -1865,7 +2073,7 @@ void Page::comboClick(const std::string& id) {
     savePrefs();
   };
   if (id.rfind("combo_pick_", 0) == 0) {
-    const std::vector<GameAction> actions = comboActions(activeBinding(), *mine);
+    const std::vector<GameAction> actions = namedActions(activeBinding(), *mine);
     const size_t at = size_t(std::atoi(id.c_str() + 11));
     if (at >= actions.size() || picked_.empty()) return;
     Combo c;

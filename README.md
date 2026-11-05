@@ -62,7 +62,7 @@ I never got on with Steam's binding screen, so there's a simpler one here. The *
 
 ![Steam Frame controllers on the Quest layout in Pavlov, with the laser on X](docs/bindings.png)
 
-Pick what to compare with from the row of names. With a game running, each button says what it does in that game, as far as the game tells SteamVR. No Man's Sky names everything, so if you pick Quest 3 there, the page shows that the Quest's B is Jump, and that Jump is A on your Frame. Games with a lot of controls split them into sets like On Foot and Flight, and the arrows at the top right move between them.
+Pick what to compare with from the row of names. With a game running, each button says what it does in that game, either because the game tells SteamVR or because I looked it up. No Man's Sky names everything, so if you pick Quest 3 there, the page shows that the Quest's B is Jump, and that Jump is A on your Frame. Games with a lot of controls split them into sets like On Foot and Flight, and the arrows at the top right move between them.
 
 ![Steam Frame controllers under Quest 3 in No Man's Sky, with every button named](docs/bindings-names.png)
 
@@ -84,7 +84,9 @@ Tap the button on your own controller, and a yellow bar asks what it should do. 
 
 ### What to expect
 
-- Lots of games don't say what their buttons do. Unity and Unreal games usually give SteamVR only the button's own name, so for those, like Pavlov, the page can only show which buttons are in use and how they match up.
+- Lots of games don't tell SteamVR what their buttons do, because Unity and Unreal usually pass along only the button's own name. For 47 of them I looked up the controls, from the game's own files where I could and otherwise from developers' guides and reviews, and the top of the page says which. Plenty of games had nothing solid, so those only show how the buttons match up. The full list and sources are in [input/game_labels.json](input/game_labels.json).
+- Those are the default controls, so a setting, a left-handed mode or a game update can change them. If you spot a wrong one, please tell me.
+- You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action. A wrong label is worse than none.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
 - Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.

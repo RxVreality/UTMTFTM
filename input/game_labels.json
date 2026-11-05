@@ -1,0 +1,1299 @@
+{
+ "about": "What buttons do in games that don't tell SteamVR, and where each game's labels came from. 'on' says which controller the labels are for. Sources often describe another controller or don't name one, usually for something every controller has, like the trigger; those are filed under Quest Touch and source_controller says what the source really described. On any controller not listed, a label only shows if the game's own bindings prove it's the same action. headset_checked means someone has confirmed it in the game. Corrections welcome.",
+ "games": [
+  {
+   "game": "AMID EVIL VR",
+   "from": "the game's own files",
+   "keys": [
+    "steam.app.2320910"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unreal input settings, read from an installed copy of the game on 2026-11-05"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Jump",
+     "right/input/b": "Hand menu",
+     "right/input/trigger": "Fire",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Crouch",
+     "left/input/y": "Hand menu",
+     "left/input/trigger": "Fire",
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Run",
+     "left/input/system": "Menu"
+    },
+    "knuckles": {
+     "right/input/a": "Jump",
+     "right/input/b": "Hand menu",
+     "right/input/trigger": "Fire",
+     "right/input/thumbstick": "Turn",
+     "right/input/thumbstick/click": "Crouch",
+     "left/input/b": "Hand menu",
+     "left/input/trigger": "Fire",
+     "left/input/thumbstick": "Move",
+     "left/input/thumbstick/click": "Run"
+    }
+   }
+  },
+  {
+   "game": "Among Us VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1849900"
+   ],
+   "names": [
+    "Among Us 3D: VR",
+    "Among Us 3D"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Rift, Rift S and Quest 2",
+   "sources": [
+    "https://thevrdimension.com/among-us-vr-the-review/11/12/2022/",
+    "https://schellgames.com/games/among-us-vr",
+    "https://store.steampowered.com/app/1849900/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move",
+     "right/input/a": "Open map",
+     "left/input/x": "Open map",
+     "right/input/trigger": "Interact",
+     "left/input/trigger": "Interact"
+    }
+   }
+  },
+  {
+   "game": "Asgard's Wrath 2",
+   "from": "guides and reviews",
+   "keys": [],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (Quest version)",
+   "sources": [
+    "https://gamingnexus.com/Article/13961/Asgards-Wrath-2",
+    "https://playday.one/2023/12/14/review-asgards-wrath-2/",
+    "https://zybervr.com/blogs/news/asgards-wrath-2-guide-weapons-combat-exploration-tips-1",
+    "https://www.meta.com/blog/asgards-wrath-2-players-guide-game-overview/",
+    "https://en.wikipedia.org/wiki/Asgard%27s_Wrath_2"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Run",
+     "right/input/joystick/click": "Reset position",
+     "left/input/joystick/click": "Belt items"
+    }
+   }
+  },
+  {
+   "game": "Audica",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1020340"
+   ],
+   "names": [
+    "AUDICA: Rhythm Shooter"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Vive Pro and Index captions on the PC review; PS Move on the PS VR review",
+   "sources": [
+    "https://gamingtrend.com/reviews/virtual-beat-blasting-audica-vr-review/",
+    "https://www.playstationcountry.com/audica-psvr-review/",
+    "https://store.steampowered.com/app/1020340/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Shoot / Hold note",
+     "left/input/trigger": "Shoot / Hold note"
+    }
+   }
+  },
+  {
+   "game": "Battlewake",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.814400"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Unnamed motion controller (UploadVR); PS Move (Use a Potion)",
+   "sources": [
+    "https://www.uploadvr.com/battlewake-hands-on-preview/",
+    "https://www.useapotion.com/2019/09/battlewake-review",
+    "https://cogconnected.com/review/battlewake-review/",
+    "https://roadtovr.com/hands-on-battlewake-e3-2019/",
+    "https://survios.zendesk.com/hc/en-us/articles/360035159634-Is-Battlewake-compatible-with-Valve-Index-or-WMR-headsets"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Fire weapons",
+     "left/input/trigger": "Fire weapons"
+    }
+   }
+  },
+  {
+   "game": "BONEWORKS",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.823500"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://www.uploadvr.com/boneworks-touch-index/",
+    "https://www.ludo.guide/guide/boneworks/getting-started/basic-controls-movement",
+    "https://steamcommunity.com/app/823500/discussions/0/3963662189544270247",
+    "https://steamcommunity.com/app/823500/discussions/0/1740009778259372926",
+    "https://steamcommunity.com/app/823500/discussions/0/1740009710702190017",
+    "https://en.wikipedia.org/wiki/Boneworks"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/grip": "Grab",
+     "left/input/grip": "Grab"
+    }
+   }
+  },
+  {
+   "game": "Climbey",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.520010"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Unnamed (reviews); wiki names stick layout",
+   "sources": [
+    "https://www.thevrgrid.com/climbey/",
+    "https://www.vrfitnessinsider.com/?p=101032",
+    "https://vrarwiki.com/wiki/Climbey",
+    "https://store.steampowered.com/app/520010/?cc=ca"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Grab",
+     "left/input/trigger": "Grab",
+     "left/input/joystick": "Rotate",
+     "right/input/joystick": "Walk"
+    }
+   }
+  },
+  {
+   "game": "Eleven Table Tennis",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.488310"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://stupaprodsguscentral.blob.core.windows.net/ettu-website-wordpress/2024/10/Guide-2-Using-the-Eleven-game.pdf",
+    "https://skarredghost.com/2018/02/11/eleven-table-tennis-vr-first-impressions/",
+    "https://steamcommunity.com/app/488310/discussions/0/1496741765130266552",
+    "https://eleven-vr.fandom.com/wiki/Controller_Settings",
+    "https://app-tatsujin.com/?p=50212"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/trigger": "Toss ball",
+     "right/input/a": "Open menu",
+     "left/input/x": "Open menu",
+     "right/input/grip": "Freeze paddle"
+    }
+   }
+  },
+  {
+   "game": "Espire 2",
+   "from": "guides and reviews",
+   "keys": [],
+   "names": [
+    "Espire 2: Stealth Operatives"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (Quest 2 version)",
+   "sources": [
+    "https://gamingtrend.com/reviews/espire-2-review-aspire-to-greatness/",
+    "https://waytoomany.games/2022/12/03/review-espire-2/",
+    "https://uploadvr.com/espire-2-review-quest-2/",
+    "https://worthplaying.com/article/2023/1/2/reviews/135272-quest-2-vr-review-espire-2/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Sprint",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Crouch",
+     "right/input/grip": "Grab / Climb",
+     "left/input/grip": "Grab / Climb",
+     "right/input/trigger": "Use item",
+     "left/input/trigger": "Use item",
+     "right/input/b": "Slow time",
+     "left/input/y": "Distraction menu"
+    }
+   }
+  },
+  {
+   "game": "Forefront",
+   "from": "the game's own files",
+   "keys": [
+    "steam.app.2981220"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unity input settings, read from an installed copy of the game on 2026-11-05"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Jump",
+     "right/input/b": "Reload / Menu",
+     "right/input/trigger": "Fire",
+     "right/input/grip": "Grab",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Crouch",
+     "left/input/x": "Scoreboard",
+     "left/input/y": "Reload",
+     "left/input/trigger": "Fire",
+     "left/input/grip": "Grab",
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Sprint",
+     "left/input/system": "Menu"
+    },
+    "frame_controller": {
+     "right/input/a": "Jump",
+     "right/input/y": "Reload",
+     "right/input/b": "Menu",
+     "right/input/trigger": "Fire",
+     "right/input/grip": "Grab",
+     "right/input/thumbstick": "Turn",
+     "right/input/thumbstick/click": "Crouch",
+     "left/input/dpad_up": "Reload",
+     "left/input/trigger": "Fire",
+     "left/input/grip": "Grab",
+     "left/input/thumbstick": "Move",
+     "left/input/thumbstick/click": "Sprint"
+    }
+   }
+  },
+  {
+   "game": "Ghost Town",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.2496180"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unity input settings, for grab, move, turn, run, pause and which buttons are used, read from an installed copy on 2026-11-05",
+    "https://dialognews.ca/?p=27472",
+    "https://www.uploadvr.com/ghost-town-vr-review/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Interact / Talk",
+     "right/input/b": "Inventory / HUD",
+     "right/input/grip": "Grab",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Run",
+     "left/input/x": "Interact / Talk",
+     "left/input/y": "Inventory / HUD",
+     "left/input/grip": "Grab",
+     "left/input/joystick": "Move",
+     "left/input/system": "Pause"
+    }
+   }
+  },
+  {
+   "game": "Google Earth VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.348250"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Touch (Digital Trends); Vive wand and Index in other sources",
+   "sources": [
+    "https://digitaltrends.com/computing/google-earth-vr-oculus-rift-video-hands-on",
+    "https://roadtovr.com/?p=165632",
+    "https://steamcommunity.com/app/348250/discussions/0/2865910035029686915",
+    "https://skarredghost.com/2017/01/13/google-earth-vr-review-and-how-to-make-it-work-with-oculus",
+    "https://store.steampowered.com/app/348250"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/joystick": "Zoom",
+     "left/input/y": "Open menu",
+     "left/input/x": "Save location"
+    }
+   }
+  },
+  {
+   "game": "Gravity Sketch",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.551370"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Generic layout by colour, right-handed default (official help)",
+   "sources": [
+    "https://help.gravitysketch.com/hc/en-us/articles/9380640515485-Controllers-Layout",
+    "https://cat2.mit.edu/4.562/_demos_4203/3dcapture/_startup_gravity_sketch_current.pdf",
+    "https://store.steampowered.com/app/551370"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Sketch / Select",
+     "right/input/grip": "Grab object",
+     "right/input/joystick": "Grab size / Stroke size",
+     "left/input/trigger": "Snap axis",
+     "left/input/grip": "Move viewpoint",
+     "left/input/joystick": "Step back history"
+    }
+   }
+  },
+  {
+   "game": "Green Hell VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1782330"
+   ],
+   "names": [
+    "Green Hell: Quest Edition"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch layout (one player confirmed on Pico Neo 3 Link)",
+   "sources": [
+    "https://steamcommunity.com/app/1782330/discussions/0/3423312514212153646/",
+    "https://www.uploadvr.com/sponsored-green-hell-vr-guide/",
+    "https://uploadvr.com/hands-on-green-hell-vr-is-inches-away-from-nailing-it/",
+    "https://www.nettosgameroom.com/2025/04/green-hell-vr-review.html?m=0",
+    "https://steamcommunity.com/app/1782330/discussions/0/3417685271686794238/",
+    "https://steamcommunity.com/app/1782330/discussions/0/3423312514205811907/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/x": "Open menu"
+    }
+   }
+  },
+  {
+   "game": "Hubris",
+   "from": "the game's own files",
+   "keys": [
+    "steam.app.1265800"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unreal input settings, read from an installed copy of the game on 2026-11-05",
+    "https://steamcommunity.com/app/1265800/discussions/0/3183486320463360202/",
+    "https://steamcommunity.com/app/1265800/discussions/0/4133808904482393538/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Jump / Crouch",
+     "right/input/b": "Equip gun",
+     "right/input/trigger": "Use",
+     "right/input/grip": "Grab / Climb",
+     "right/input/joystick/click": "Sprint / Eject magazine",
+     "left/input/x": "Jump / Crouch",
+     "left/input/y": "Equip gun",
+     "left/input/trigger": "Use",
+     "left/input/grip": "Grab / Climb",
+     "left/input/joystick/click": "Sprint / Eject magazine"
+    },
+    "knuckles": {
+     "right/input/a": "Jump / Crouch",
+     "right/input/b": "Equip gun",
+     "right/input/trigger": "Use",
+     "right/input/grip": "Grab / Climb",
+     "right/input/thumbstick/click": "Sprint / Eject magazine",
+     "left/input/a": "Jump / Crouch",
+     "left/input/b": "Equip gun",
+     "left/input/trigger": "Use",
+     "left/input/grip": "Grab / Climb",
+     "left/input/thumbstick/click": "Menu / Sprint"
+    }
+   }
+  },
+  {
+   "game": "I Expect You To Die",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.587430"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Touch",
+   "sources": [
+    "https://www.uploadvr.com/i-expect-you-to-die-review/",
+    "https://steamcommunity.com/app/587430/discussions/0/2981907749296486968",
+    "https://www.meta.com/blog/oculus-touch-tuesdays-i-expect-you-to-die/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/grip": "Grab",
+     "right/input/grip": "Grab",
+     "left/input/trigger": "Grab",
+     "right/input/trigger": "Grab",
+     "left/input/joystick": "Pull / Push item",
+     "right/input/joystick": "Pull / Push item"
+    }
+   }
+  },
+  {
+   "game": "Marvel's Deadpool VR",
+   "from": "guides and reviews",
+   "keys": [],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (Quest 3 version)",
+   "sources": [
+    "https://www.laughingplace.com/entertainment/marvel-deadpool-vr-meta-quest-preview",
+    "http://worthplaying.com/article/2025/11/19/reviews/148283-meta-quest-3-review-marvels-deadpool-vr/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Fire gun",
+     "right/input/joystick": "Turn",
+     "left/input/trigger": "Fire gun",
+     "left/input/joystick": "Move"
+    }
+   }
+  },
+  {
+   "game": "Marvel's Iron Man VR",
+   "from": "guides and reviews",
+   "keys": [],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (Quest 2 version)",
+   "sources": [
+    "https://gamingnexus.com/Article/8749/Marvels-Iron-Man-VR",
+    "https://pushsquare.com/guides/marvels-iron-man-vr-tips-and-tricks-for-beginners",
+    "https://en.wikipedia.org/wiki/Marvel%27s_Iron_Man_VR"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Thrusters",
+     "left/input/trigger": "Thrusters"
+    }
+   }
+  },
+  {
+   "game": "Microsoft Flight Simulator (2020)",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1250410"
+   ],
+   "names": [
+    "Microsoft Flight Simulator (2020) 40th Anniversary Edition",
+    "Microsoft Flight Simulator"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "HP Reverb G2 (forum post); general guide names no controller",
+   "sources": [
+    "https://forums.flightsimulator.com/t/how-to-press-a-knob-using-vr-controller/491056",
+    "https://flyawaysimulation.com/ask/answers/set-up-vr-controllers-microsoft-flight-simulator/",
+    "https://flyawaysimulation.com/ask/answers/cockpit-interaction-microsoft-flight-simulator-vr/",
+    "https://uploadvr.com/microsoft-flight-simulator-vr-controller-support/",
+    "https://forums.flightsimulator.com/t/q2-controller-cockpit-interaction-bindings/496071",
+    "https://store.steampowered.com/app/1250410"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Select / Cockpit interact"
+    }
+   }
+  },
+  {
+   "game": "Microsoft Flight Simulator 2024",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.2537590"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest 3 Touch (user posts)",
+   "sources": [
+    "https://forums.flightsimulator.com/t/vr-controller-help-needed/751145",
+    "https://steamcommunity.com/app/2537590/discussions/9/599638625087431383",
+    "https://flyawaysimulation.com/ask/answers/set-up-vr-controllers-microsoft-flight-simulator/",
+    "https://steamcommunity.com/app/2537590/discussions/9/4626981087516648282",
+    "https://forums.flightsimulator.com/t/valve-index-controller-right-has-no-default-bindings/691361",
+    "https://forums.flightsimulator.com/t/making-small-adjustments-with-vr-controllers-esp-quest-3-touch-in-fs2024/678747"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Cockpit interact"
+    }
+   }
+  },
+  {
+   "game": "Moss",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.846470"
+   ],
+   "names": [
+    "Moss VR"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Touch",
+   "sources": [
+    "https://www.bit-tech.net/reviews/moss-review/1",
+    "https://steamcommunity.com/app/846470/discussions/0/1696049513770076128/",
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=1545634111",
+    "https://steamcommunity.com/app/846470/discussions/0/1642041106364067504/",
+    "https://steamcommunity.com/app/846470/discussions/0/1642041106351056282/",
+    "https://en.wikipedia.org/wiki/Moss_(video_game)"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move Quill"
+    }
+   }
+  },
+  {
+   "game": "Myst",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.1255560"
+   ],
+   "names": [
+    "Myst"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://steamcommunity.com/app/1255560/discussions/0/4692280867918219359/",
+    "https://cyan.com/2022/07/28/myst-patch-notes-hands-amp-more-1-8-0-quest/",
+    "https://developers.meta.com/horizon/blog/the-evolution-and-implementation-of-hand-tracking-in-myst/",
+    "https://equalentry.com/virtual-reality-accessibility-gaming-myst/",
+    "https://steamcommunity.com/app/1255560/discussions/0/3040480634933247895/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Open menu / Reset height",
+     "right/input/b": "Take screenshot",
+     "left/input/grip": "Grab",
+     "right/input/grip": "Grab"
+    }
+   }
+  },
+  {
+   "game": "Onward",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.496240"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3316730383",
+    "https://uploadvr.com/onward-guide-tips-strategies/",
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=755698425",
+    "https://www.roadtovr.com/popular-steamvr-shooter-onward-launches-oculus-rift-early-access-cross-play/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/b": "Tablet",
+     "right/input/trigger": "Fire",
+     "right/input/grip": "Grab weapon",
+     "left/input/trigger": "Radio / Grab gear",
+     "left/input/grip": "Steady rifle",
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Sprint"
+    }
+   }
+  },
+  {
+   "game": "Open Brush",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.1634870"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Rift Touch and Quest Touch, right-handed (official docs)",
+   "sources": [
+    "https://docs.openbrush.app/user-guide/painting-with-open-brush",
+    "https://docs.openbrush.app/user-guide/using-the-open-brush-tools-quick-tools-and-menu-panels",
+    "https://store.steampowered.com/app/1634870"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Paint / Select",
+     "right/input/grip": "Grab panel / Grab sketch",
+     "right/input/joystick": "Brush size",
+     "right/input/b": "Quick tools",
+     "left/input/grip": "Grab sketch",
+     "left/input/joystick": "Rotate palette",
+     "left/input/x": "Undo",
+     "left/input/y": "Redo"
+    }
+   }
+  },
+  {
+   "game": "Pavlov VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.555160"
+   ],
+   "names": [
+    "Pavlov"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unreal input settings, for which button is which on each controller, read from an installed copy on 2026-11-05",
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=2211883306"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Fire mode",
+     "right/input/b": "Drop magazine / Scoreboard",
+     "right/input/trigger": "Fire / Use",
+     "right/input/grip": "Pick up / Drop",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Buy menu",
+     "left/input/x": "Fire mode",
+     "left/input/y": "Drop magazine / Scoreboard",
+     "left/input/trigger": "Fire / Use",
+     "left/input/grip": "Pick up / Drop",
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Sprint",
+     "left/input/system": "Menu"
+    },
+    "knuckles": {
+     "right/input/a": "Fire mode",
+     "right/input/b": "Drop magazine",
+     "right/input/trigger": "Fire / Use",
+     "right/input/grip": "Pick up / Drop",
+     "right/input/thumbstick": "Turn",
+     "right/input/thumbstick/click": "Buy menu",
+     "left/input/a": "Fire mode",
+     "left/input/b": "Menu / Scoreboard",
+     "left/input/trigger": "Fire / Use",
+     "left/input/grip": "Pick up / Drop",
+     "left/input/thumbstick": "Move",
+     "left/input/thumbstick/click": "Sprint"
+    },
+    "frame_controller": {
+     "right/input/a": "Fire mode",
+     "right/input/b": "Drop magazine",
+     "right/input/y": "Scoreboard",
+     "right/input/menu": "Menu",
+     "right/input/trigger": "Fire / Use",
+     "right/input/grip": "Pick up / Drop",
+     "right/input/thumbstick": "Turn",
+     "right/input/thumbstick/click": "Buy menu",
+     "left/input/dpad_down": "Fire mode",
+     "left/input/dpad_left": "Drop magazine",
+     "left/input/dpad_up": "Scoreboard",
+     "left/input/view": "Menu",
+     "left/input/trigger": "Fire / Use",
+     "left/input/grip": "Pick up / Drop",
+     "left/input/thumbstick": "Move",
+     "left/input/thumbstick/click": "Sprint"
+    }
+   }
+  },
+  {
+   "game": "Phasmophobia",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.739630"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://steamcommunity.com/app/739630/discussions/0/2935742047962741472/",
+    "https://steamcommunity.com/app/739630/discussions/0/2948125678380402915/",
+    "https://www.touchtapplay.com/phasmophobia-oculus-quest-2-controls-guide/",
+    "https://steamah.com/phasmophobia-vr-controls-for-phasmophobia/",
+    "https://phasmophobia.fandom.com/wiki/Controls",
+    "https://dbltap.com/posts/phasmophobia-oculus-controls-how-to-use-controls-for-phasmophobia-for-oculus-01epjcjx689s"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move",
+     "right/input/joystick": "Turn view",
+     "right/input/grip": "Grab / Drop",
+     "left/input/grip": "Grab / Drop",
+     "right/input/trigger": "Use item",
+     "left/input/trigger": "Use item / Radio"
+    }
+   }
+  },
+  {
+   "game": "Pistol Whip",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1079800"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://www.cloudheadgames.com/post/how-to-play-pistol-whip-everything-you-ve-ever-wanted-to-know",
+    "https://steamcommunity.com/app/1079800/discussions/0/1640927348818182011",
+    "https://seekingtech.com/how-to-play-ps-vr2-version-of-pistol-whip-left-handed-or-right-handed/",
+    "https://uploadvr.com/5-ways-to-play-pistol-whip-using-modifiers-like-deadeye-and-dual-wield/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Shoot"
+    }
+   }
+  },
+  {
+   "game": "POOLS",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.2663530"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://www.uploadvr.com/pools-vr-review/",
+    "https://steamcommunity.com/app/2663530/discussions/0/4694532371788081454/",
+    "https://store.steampowered.com/app/2663530/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Run",
+     "left/input/trigger": "Run",
+     "right/input/joystick/click": "Crouch"
+    }
+   }
+  },
+  {
+   "game": "POPULATION: ONE",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.691260"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://www.meta.com/blog/oculus-tips-tricks-population-one/",
+    "https://store.steampowered.com/app/691260"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/joystick": "Drop magazine",
+     "right/input/grip": "Climb / Two-hand gun",
+     "left/input/grip": "Climb / Two-hand gun"
+    }
+   }
+  },
+  {
+   "game": "Red Matter 2",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.2081470"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "PC VR via Steam (controller not named)",
+   "sources": [
+    "https://multiplayer.it/recensioni/red-matter-2-recensione.html",
+    "https://steamcommunity.com/app/2081470/discussions/0/3454842150482947116"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move",
+     "right/input/joystick": "Teleport aim"
+    }
+   }
+  },
+  {
+   "game": "RUMBLE",
+   "from": "the game's own files",
+   "keys": [
+    "steam.app.890550"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unity input settings, read from an installed copy of the game on 2026-11-05"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Talk / Mute",
+     "right/input/b": "Measure",
+     "right/input/grip": "Interact",
+     "right/input/joystick": "Walk / Turn",
+     "right/input/joystick/click": "Summon tablet",
+     "left/input/x": "Talk / Mute",
+     "left/input/y": "Measure",
+     "left/input/grip": "Interact",
+     "left/input/joystick": "Walk / Turn",
+     "left/input/joystick/click": "Summon tablet"
+    },
+    "knuckles": {
+     "right/input/a": "Talk / Mute",
+     "right/input/b": "Measure",
+     "right/input/grip": "Interact",
+     "right/input/thumbstick": "Walk / Turn",
+     "right/input/thumbstick/click": "Summon tablet",
+     "left/input/a": "Talk / Mute",
+     "left/input/b": "Measure",
+     "left/input/grip": "Interact",
+     "left/input/thumbstick": "Walk / Turn",
+     "left/input/thumbstick/click": "Summon tablet"
+    },
+    "frame_controller": {
+     "right/input/a": "Talk / Mute",
+     "right/input/y": "Measure",
+     "right/input/grip": "Interact",
+     "right/input/thumbstick": "Walk / Turn",
+     "right/input/thumbstick/click": "Summon tablet",
+     "left/input/dpad_right": "Talk / Mute",
+     "left/input/dpad_up": "Measure",
+     "left/input/grip": "Interact",
+     "left/input/thumbstick": "Walk / Turn",
+     "left/input/thumbstick/click": "Summon tablet"
+    }
+   }
+  },
+  {
+   "game": "Skydance's BEHEMOTH",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1707990"
+   ],
+   "names": [
+    "BEHEMOTH"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (PC Steam build)",
+   "sources": [
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=3829647298",
+    "https://roadtovr.com/?p=172236",
+    "https://androidcentral.com/gaming/virtual-reality/behemoth-hands-on"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/b": "Switch grip",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Reset view",
+     "left/input/y": "Switch grip",
+     "left/input/joystick": "Move",
+     "left/input/x": "Wrist menu",
+     "left/input/system": "Pause"
+    }
+   }
+  },
+  {
+   "game": "Sniper Elite VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.752480"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://bit-tech.net/reviews/gaming/pc/sniper-elite-vr-review/1/",
+    "https://en.wikipedia.org/wiki/Sniper_Elite_VR",
+    "https://rebellion.com/?p=3340",
+    "https://www.uploadvr.com/sniper-elite-vr-review/",
+    "https://www.gamingnexus.com/Article/7370/Sniper-Elite-VR/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/trigger": "Focus aim",
+     "left/input/joystick": "Move"
+    }
+   }
+  },
+  {
+   "game": "Sprint Vector",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.590690"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "HTC Vive wand (previews); PS Move (reviews)",
+   "sources": [
+    "https://hardcoregamer.com/previews/run-at-high-speeds-in-vr-without-getting-nauseous-in-sprint-vector/249554/",
+    "https://uploadvr.com/e3-2017-hands-trek-sprint-vector/",
+    "https://gamingnexus.com/News/39657/E3-2017-Hands-On-Impressions-with-Sprint-Vector",
+    "https://www.useapotion.com/2018/02/sprint-vector-review/",
+    "https://www.thesixthaxis.com/2018/02/22/sprint-vector-review/",
+    "https://skarredghost.com/2018/04/08/sprint-vector-first-impressions-review-from-the-oculus-free-weekend/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Run",
+     "left/input/trigger": "Run"
+    }
+   }
+  },
+  {
+   "game": "Star Trek: Bridge Crew",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.527100"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://roadtovr.com/?p=165056",
+    "https://www.digitaltrends.com/?p=1040370",
+    "https://www.gamereactor.eu/star-trek-bridge-crew-review/",
+    "https://store.steampowered.com/app/527100"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Use console",
+     "left/input/trigger": "Use console",
+     "left/input/x": "Outside view"
+    }
+   }
+  },
+  {
+   "game": "Stormland",
+   "from": "guides and reviews",
+   "keys": [],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Touch",
+   "sources": [
+    "https://roadtovr.com/inside-vr-design-stormland-weapons-locomotion-open-world-analysis/",
+    "https://en.wikipedia.org/wiki/Stormland_(video_game)",
+    "https://uploadvr.com/gdc-2019-stormland-preview/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Fire",
+     "left/input/trigger": "Fire"
+    }
+   }
+  },
+  {
+   "game": "Swarm",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1347310"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://worthplaying.com/article/2021/5/21/reviews/126066-pc-vr-review-swarm/",
+    "https://www.thevrgrid.com/?p=76027",
+    "https://www.gamingnexus.com/Article/7307/SWARM/",
+    "https://uploadvr.com/swarm-quest-impressions/",
+    "https://store.steampowered.com/app/1347310"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/grip": "Grapple",
+     "left/input/grip": "Grapple",
+     "right/input/trigger": "Shoot",
+     "left/input/trigger": "Shoot",
+     "right/input/joystick": "Snap turn"
+    }
+   }
+  },
+  {
+   "game": "The Room VR: A Dark Matter",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1104380"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch (platform unnamed in one source; Quest 3 and PS VR2 in the other)",
+   "sources": [
+    "https://zybervr.com/blogs/news/the-room-vr-a-dark-matter-early-game-guide",
+    "https://dialognews.ca/?p=28069",
+    "https://steamcommunity.com/app/1104380/discussions/0/2143092024472778569",
+    "https://roadtovr.com/preview-the-room-a-dark-matter-vr/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/grip": "Grab",
+     "right/input/grip": "Grab",
+     "left/input/x": "Inventory / Lens menu",
+     "right/input/a": "Lens menu"
+    }
+   }
+  },
+  {
+   "game": "The Walking Dead: Saints & Sinners",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.916840"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://destructoid.com/?p=252103",
+    "https://steamcommunity.com/app/916840/discussions/0/5262978521339021605",
+    "https://www.thesixthaxis.com/2020/01/17/the-walking-dead-saints-sinners-preview-the-first-must-play-vr-game-of-2020/",
+    "https://mixed-news.com/en/the-walking-dead-saints-and-sinners-chapter-two-review/",
+    "https://www.ludo.guide/guide/the-walking-dead-saints-and-sinners/getting-started/controls-movement/controls-customization-keybindings",
+    "https://en.wikipedia.org/wiki/The_Walking_Dead:_Saints_%26_Sinners"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/joystick": "Move",
+     "right/input/joystick": "Turn",
+     "left/input/grip": "Grab",
+     "right/input/grip": "Grab"
+    }
+   }
+  },
+  {
+   "game": "The Walking Dead: Saints & Sinners Chapter 2 Retribution",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1947500"
+   ],
+   "names": [
+    "The Walking Dead: Saints & Sinners - Chapter 2: Retribution"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://mixed-news.com/en/the-walking-dead-saints-and-sinners-chapter-two-review/",
+    "https://steamcommunity.com/app/1947500/discussions/0/3824159062921452307"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/y": "Eject magazine / Confirm",
+     "left/input/grip": "Grab",
+     "right/input/grip": "Grab"
+    }
+   }
+  },
+  {
+   "game": "Titan Isles",
+   "from": "the game's own files",
+   "keys": [
+    "steam.app.1839680"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "sources": [
+    "Its Unity input settings, read from an installed copy of the game on 2026-11-05"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Jump",
+     "right/input/b": "Dash",
+     "right/input/trigger": "Use weapon / Grab",
+     "right/input/grip": "Grab",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Fly",
+     "left/input/x": "Jump",
+     "left/input/y": "Dash",
+     "left/input/trigger": "Use weapon / Grab",
+     "left/input/grip": "Grab",
+     "left/input/joystick": "Walk",
+     "left/input/joystick/click": "Fly",
+     "left/input/system": "Options"
+    },
+    "frame_controller": {
+     "right/input/a": "Jump",
+     "right/input/y": "Dash",
+     "right/input/x": "Dash",
+     "right/input/b": "Switch weapon",
+     "right/input/menu": "Options",
+     "right/input/trigger": "Use weapon / Grab",
+     "right/input/grip": "Grab",
+     "right/input/thumbstick": "Turn",
+     "right/input/thumbstick/click": "Crouch / Fly",
+     "left/input/dpad_down": "Jump",
+     "left/input/dpad_up": "Dash",
+     "left/input/dpad_right": "Dash",
+     "left/input/dpad_left": "Switch weapon",
+     "left/input/trigger": "Use weapon / Grab",
+     "left/input/grip": "Grab",
+     "left/input/thumbstick": "Walk",
+     "left/input/thumbstick/click": "Crouch / Fly"
+    }
+   }
+  },
+  {
+   "game": "VRChat",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.438100"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://docs.vrchat.com/docs/touch",
+    "https://docs.vrchat.com/docs/valve-index",
+    "https://wiki.vrchat.com/wiki/Controls"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "Jump",
+     "right/input/b": "Quick menu",
+     "right/input/trigger": "Use",
+     "right/input/grip": "Grab",
+     "right/input/joystick": "Turn",
+     "right/input/joystick/click": "Action menu",
+     "left/input/x": "Mute",
+     "left/input/y": "Quick menu",
+     "left/input/trigger": "Use",
+     "left/input/grip": "Grab",
+     "left/input/joystick": "Move",
+     "left/input/joystick/click": "Action menu"
+    }
+   },
+   "over_games_words": true
+  },
+  {
+   "game": "VTOL VR",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.667970"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Generic (source names trigger, grip, thumbpad, action button); grip and B/Y confirmed on Quest Touch",
+   "sources": [
+    "https://journal.3960.org/posts/2025-11-24-vtol-vr-settings-controls/",
+    "https://steamcommunity.com/app/667970/discussions/0/1471967615841496517",
+    "https://steamcommunity.com/app/667970/discussions/0/598514446184331966",
+    "https://steamcommunity.com/app/667970/discussions/0/1644294896725303329",
+    "https://store.steampowered.com/app/667970/VTOL_VR/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/trigger": "Press cockpit button",
+     "left/input/trigger": "Press cockpit button",
+     "right/input/grip": "Grab stick / Grab throttle",
+     "left/input/grip": "Grab stick / Grab throttle"
+    }
+   }
+  },
+  {
+   "game": "Walkabout Mini Golf",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1408230"
+   ],
+   "names": [
+    "Walkabout Mini Golf VR"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Quest Touch",
+   "sources": [
+    "https://www.mightycoconut.com/wmg-glossary",
+    "https://gamechronicles.com/walkabout-mini-golf-review-quest-3",
+    "https://www.uploadvr.com/puppeteering-walkabout/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/a": "God mode",
+     "right/input/trigger": "Warp to ball",
+     "left/input/trigger": "Warp to ball"
+    }
+   }
+  },
+  {
+   "game": "Warplanes: WW1 Fighters",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.1546500"
+   ],
+   "names": [
+    "Warplanes: WW1 Fighters VR"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Touch controllers",
+   "sources": [
+    "https://homenetgames.itch.io/warplanes-ww1-fighters-vr/devlog/228233/update-20-now-available-steam-version-release",
+    "https://www.skywardfm.com/post/warplanes-ww1-fighters-interactive-cockpit",
+    "https://skywardfm.com/post/warplanes-ww1-fighters-flying-in-blind",
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=2430334471",
+    "https://steamcommunity.com/app/1546500/discussions/0/3149682775482458376/?l=tchinese",
+    "https://store.steampowered.com/app/1546500"
+   ],
+   "on": {
+    "oculus_touch": {
+     "right/input/grip": "Grab stick / Grab throttle",
+     "left/input/grip": "Grab stick / Grab throttle",
+     "right/input/trigger": "Fire guns"
+    }
+   }
+  },
+  {
+   "game": "Windlands",
+   "from": "the developer's guide",
+   "keys": [
+    "steam.app.428370"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "HTC Vive wand (official manual)",
+   "sources": [
+    "https://store.steampowered.com/manual/428370",
+    "https://www.computerbase.de/artikel/gaming/steamvr-spiele-langzeitspass.54558/seite-4",
+    "https://uploadvr.com/windlands-developer-on-vr-motion-controls-oculus-touch-is-the-way-to-go/"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/trigger": "Left grapple",
+     "right/input/trigger": "Right grapple"
+    }
+   }
+  },
+  {
+   "game": "Windlands 2",
+   "from": "guides and reviews",
+   "keys": [
+    "steam.app.458580"
+   ],
+   "checked": "2026-11-05",
+   "headset_checked": false,
+   "source_controller": "Oculus Touch",
+   "sources": [
+    "https://roadtovr.com/windlands-2-review/",
+    "https://uploadvr.com/hands-on-windlands-2-has-you-fighting-robots-and-ignoring-gravity",
+    "https://www.thevrgrid.com/?p=70281",
+    "https://store.steampowered.com/app/458580"
+   ],
+   "on": {
+    "oculus_touch": {
+     "left/input/trigger": "Left grapple",
+     "right/input/trigger": "Right grapple",
+     "left/input/grip": "Ready bow / Draw arrow",
+     "right/input/grip": "Ready bow / Draw arrow"
+    }
+   }
+  }
+ ]
+}
