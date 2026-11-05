@@ -135,6 +135,7 @@ int main() {
         Store d;
         d.useDriver = true;
         d.scenePid = 4242;
+        d.sceneKey = "steam.app.1";
         d.device[0] = 3; d.device[1] = 4;
         d.gripFromRaw[0] = fromOffset(randOff(0.12f, 60)); d.gripFromRaw[1] = fromOffset(randOff(0.12f, 60));
         d.global.left = randOff(0.15f); d.global.right = randOff(0.15f);
@@ -163,6 +164,7 @@ int main() {
       Store dash;
       dash.useDriver = true;
       dash.scenePid = 4242;
+      dash.sceneKey = "steam.app.1";
       dash.global.left = randOff(0.15f);
       dash.dashboardUp = true;
       dash.publishLive();
@@ -179,6 +181,12 @@ int main() {
       dash.scenePid = 4242;
       dash.publishLive();
       CHECK(std::fabs(m->driver.want[0].pos[0]) + std::fabs(m->driver.want[0].pos[1]) + std::fabs(m->driver.want[0].pos[2]) > 0, "a game starting brings the offset back");
+      // A scene that isn't a game, like Steam Link when a Frame streams from a PC: the PC's SteamVR has its own offsets.
+      dash.sceneKey.clear();
+      dash.publishLive();
+      CHECK(!m->driver.want[0].pos[0] && !m->driver.want[0].pos[1] && !m->driver.want[0].pos[2] && std::fabs(std::fabs(m->driver.want[0].rot[3]) - 1) < 1e-5f,
+            "a scene with no game key: nothing may be moved");
+      dash.sceneKey = "steam.app.1";
       // The driver's report of where the controller really is.
       M truth;
       m->driver.trueSeq[1].store(0);
@@ -201,6 +209,7 @@ int main() {
         Store d;
         d.useDriver = true;
         d.scenePid = 4242;
+        d.sceneKey = "steam.app.1";
         d.device[0] = 3; d.device[1] = 4;
         const M table[2] = {mul(translate(-0.0031f, -0.0043f, 0.0995f), rotX(2.81f)), mul(translate(0.0031f, -0.0043f, 0.0995f), rotX(2.81f))};
         d.gripFromRaw[0] = table[0]; d.gripFromRaw[1] = table[1];

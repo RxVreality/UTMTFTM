@@ -502,8 +502,8 @@ void finish() {
 std::string driverPath() { return fh::platform::exeDir() + "/driver/bin/linuxarm64/driver_utmtftm.so"; }
 
 const Pose kHmdPose = {{0, 1.6, 0}, {1, 0, 0, 0}};
-const Pose kLeftStart = {{0.20, 1.10, -0.30}, {0.9238795, 0, 0, 0.3826834}};
-const Pose kRightStart = {{0.25, 1.12, -0.30}, {0.9659258, 0.258819, 0, 0}};
+const Pose kLeftStart = {{0.20, 1.10, -0.30}, {std::cos(0.3926990817), 0, 0, std::sin(0.3926990817)}};
+const Pose kRightStart = {{0.25, 1.12, -0.30}, {std::cos(0.2617993878), std::sin(0.2617993878), 0, 0}};
 
 void startServer(bool hooked) {
   fakeserver::setDevicePose(kHmd, kHmdPose);

@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -91,8 +92,8 @@ vr::HmdQuaternion_t hq(const double q[4]) {
 void fromHq(const vr::HmdQuaternion_t& h, double q[4]) { q[0] = h.w; q[1] = h.x; q[2] = h.y; q[3] = h.z; }
 
 // A device driver's own world and head transforms, deliberately not identity, because the real ones aren't.
-const Rigid kWorld = {{0.9238795, 0, 0.3826834, 0}, {0.4, -0.1, 0.25}};
-const Rigid kHead = {{0.9659258, 0.258819, 0, 0}, {0.01, -0.02, 0.03}};
+const Rigid kWorld = {{std::cos(0.3926990817), 0, std::sin(0.3926990817), 0}, {0.4, -0.1, 0.25}};
+const Rigid kHead = {{std::cos(0.2617993878), std::sin(0.2617993878), 0, 0}, {0.01, -0.02, 0.03}};
 
 vr::DriverPose_t reportFor(const Pose& p) {
   Rigid device;
