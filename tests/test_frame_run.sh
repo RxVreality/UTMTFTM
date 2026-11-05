@@ -110,6 +110,22 @@ sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null
 sh "$APP/uninstall.sh" --no-restart --purge >/dev/null
 expect "--purge removes the saved offsets too" "[ ! -e '$DATA' ]"
 
+# The one-line installer, with GitHub swapped for a local folder.
+FROM=$(dirname "$TAR")
+if [ -f "$FROM/install-frame.sh" ]; then
+  echo "--- the one-line installer"
+  NAME=$(basename "$TAR")
+  mkdir -p "$WORK/bad"
+  cp "$TAR" "$WORK/bad/"
+  echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$WORK/bad/$NAME.sha256"
+  sed "s|^BASE=.*|BASE=file://$WORK/bad|" "$FROM/install-frame.sh" > "$WORK/install-bad.sh"
+  sh "$WORK/install-bad.sh" --no-restart >/dev/null 2>&1
+  expect "it refuses a download that doesn't match its checksum" "[ $? -ne 0 ] && [ ! -e '$APP' ]"
+  sed "s|^BASE=.*|BASE=file://$FROM|" "$FROM/install-frame.sh" > "$WORK/install-good.sh"
+  sh "$WORK/install-good.sh" --no-restart >/dev/null 2>&1
+  expect "it downloads, checks and installs" "[ $? -eq 0 ] && [ -x '$APP/utmtftm' ]"
+fi
+
 echo "--- pictures"
 ls "$OUT"/*.png 2>/dev/null | wc -l
 
