@@ -39,7 +39,6 @@ put() {
   mv -f "$APP/$1.new" "$APP/$1"
 }
 put utmtftm 755
-put libopenvr_api.so 755
 put driver/bin/linuxarm64/driver_utmtftm.so 755
 put driver/driver.vrdrivermanifest 644
 put driver/resources/settings/default.vrsettings 644

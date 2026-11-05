@@ -57,9 +57,10 @@ else()
     URL_HASH SHA256=f93b6dd7ce796b13d02c108bc9f79812245a82e577581c4c9aabe57075c90ea2)
   FetchContent_MakeAvailable(jsoncpp)
 
-  # OpenVR's loader sits next to the program. If that copy goes missing, SteamVR on the Frame has its own.
+  # At run time OpenVR's loader is the one SteamVR keeps on the Frame. Valve's prebuilt ARM64 copy in the SDK is only for
+  # linking and the tests here: it looks for its settings in /data/work, an Android path, so it can't find SteamVR on a Frame.
   set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-  set(CMAKE_INSTALL_RPATH "\$ORIGIN:/opt/steamvr/bin/linuxarm64")
+  set(CMAKE_INSTALL_RPATH "/opt/steamvr/bin/linuxarm64:\$ORIGIN")
 
   set(PLATFORM_SRC src/platform_linux.cpp)
   set(UPLOAD_SRC src/vkupload.cpp)

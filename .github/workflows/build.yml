@@ -49,9 +49,19 @@ jobs:
         if: always()
         with:
           name: frame-screens
+          retention-days: 14
           path: |
             build/ui/*.png
             build/frame-run/
+
+      # Everything needed to run the same tests on a real headset.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-test-kit
+          retention-days: 14
+          path: |
+            dist/
+            tests/test_frame_run.sh
 
   windows:
     needs: frame

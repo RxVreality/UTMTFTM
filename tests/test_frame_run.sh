@@ -40,6 +40,13 @@ EOF
 mkdir -p "$WORK/config" "$WORK/logs"
 tar xzf "$TAR" -C "$WORK/unpack"
 
+# On a Frame this uses the headset's own OpenVR loader, which reads the file above, the way the installed program will.
+# Anywhere else there's only the SDK's copy, which ignores that file (it looks in /data/work) but listens to these.
+if [ ! -e /opt/steamvr/bin/linuxarm64/libopenvr_api.so ]; then
+  export LD_LIBRARY_PATH="$ROOT/dist"
+  export VR_OVERRIDE="$RUNTIME" VR_CONFIG_PATH="$WORK/config" VR_LOG_PATH="$WORK/logs"
+fi
+
 echo "--- installing"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart
 expect "install.sh finishes without an error" "[ $? -eq 0 ]"
