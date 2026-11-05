@@ -1,7 +1,7 @@
 // The hand UTMTFTM draws: SteamVR's own skinned glove, curled by SteamVR's own open-to-closed animation
 // and seated in the OpenXR grip frame, which is defined the same way on every controller. Everything is read
-// at run time from the SteamVR install on the user's PC, so none of Valve's data ships with this project.
-// If those files can't be read, the hand falls back to the procedural one in ghost3d.h.
+// at run time from the user's SteamVR install, so none of Valve's data ships with this project.
+// If those files aren't there, as on a Steam Frame, the hand falls back to the procedural one in ghost3d.h.
 #pragma once
 #include <cstdint>
 #include <string>

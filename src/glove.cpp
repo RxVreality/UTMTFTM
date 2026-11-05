@@ -253,8 +253,9 @@ BuiltHand buildGripHand(bool left) {
     for (auto& j : h.joints) j = xfP(seat, j);
     return h;
   }
+  // No glove to read. The Steam Frame's SteamVR doesn't ship one. So it's our own hand, closed around the handle.
   gripHandJoints(left, h.joints);
-  h.mesh = buildFromJoints(h.joints, left);
+  h.mesh = buildHand(left);
   return h;
 }
 
