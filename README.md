@@ -10,7 +10,7 @@ My in-game hands don't line up with my real hands, and it's different in each ga
 
 It runs in the background as a SteamVR add-on, on Windows for PC VR and on the Steam Frame itself for games running on the headset. The page only draws while the dashboard is open or you're placing a hand. There are numbers in [docs/how-it-works.md](docs/how-it-works.md) if you want them.
 
-It's free, and I'm sharing it in case it's useful to someone else.
+It's free, and I'm sharing it in case it's useful to someone else. Tip: Using this add-on in conjunction with translucent passthrough produces the best result. 
 
 ## Install
 
