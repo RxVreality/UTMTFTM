@@ -6,6 +6,8 @@ Use The Medium To Fix The Medium. It's an easy offset for your VR hands: open th
 
 My in-game hands don't line up with my real hands, and it's different in each game. SteamVR can offset your controllers, but you go through the binding menus, type in numbers and restart the game to find out if you guessed right. Here you move it by hand and see the result right away.
 
+![Moving my left hand in Bonelab with Quest 3 controllers, then resetting it](docs/demo.gif)
+
 I first got this working on the Steam Frame itself, as a change to my own setup. This version is for PC VR on Windows, running in the background as a SteamVR add-on. The page only draws while the dashboard is open or you're placing a hand. There are numbers in [docs/how-it-works.md](docs/how-it-works.md) if you want them.
 
 It's free, and I'm sharing it in case it's useful to someone else.
@@ -41,7 +43,7 @@ The picture on the page and the position of the grip come from SteamVR, so it sh
 | Controller | Status |
 | --- | --- |
 | Steam Frame | Tested in Pavlov, Forefront and The Light Brigade |
-| Quest 3 | Tested |
+| Quest 3 | Tested in Bonelab |
 | Quest 1, 2 and Pro, Rift, Rift S | Set up, not tried yet |
 | Valve Index | Set up, not tried yet |
 | Vive wands | Set up, not tried yet |

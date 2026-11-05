@@ -4,3 +4,4 @@
 *.dll binary
 *.lib binary
 *.png binary
+*.gif binary
