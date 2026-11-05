@@ -179,6 +179,11 @@ static void testFixture(const std::string& work, const std::string& out) {
   check(rowOf(m.yours, "y:right/input/menu") && rowOf(m.yours, "y:right/input/menu")->unused, "and a button that's not on it says so");
   check(m.layoutOk && !m.layoutOn, "the layout can be switched on");
   check(m.controls.empty(), "one set of controls, so no arrows");
+  {
+    const BindModel p = page.model("y:left/input/dpad_down", "");
+    check(p.lit.count("t:left/input/x") == 1, "pointing at Primary on your D-pad lights up Primary on the Quest");
+    check(p.lit.count("t:right/input/a") == 0, "on the same hand, when there's one there");
+  }
 
   // Switching the layout on: a file of ours, and SteamVR's setting pointing at it.
   page.click("bind_layout");
@@ -322,6 +327,24 @@ static void testFixture(const std::string& work, const std::string& out) {
   check(actionOf(m.yours, "y:left/input/thumbstick") == "Move", "the stick says what it does");
   check(rowOf(m.yours, "y:right/input/a") && rowOf(m.yours, "y:right/input/a")->unused, "a button it doesn't use says so");
   check(m.yours.note == "As the developer set it", "it's the developer's own, so no translating");
+  {
+    // Reload is on the Quest's A and your Y here, where the wiring would say the Quest's B.
+    BindModel p = page.model("y:right/input/y", "");
+    check(p.lit.count("t:right/input/a") == 1, "pointing at Reload on yours lights up Reload on the Quest");
+    check(p.lit.count("t:right/input/b") == 0, "and not the button the wiring would pick");
+    p = page.model("t:right/input/a", "");
+    check(p.lit.count("y:right/input/y") == 1, "and the same the other way");
+    check(p.lit.count("y:right/input/a") == 0, "and not the one with the same letter");
+    p = page.model("y:left/input/thumbstick", "");
+    check(p.lit.count("t:left/input/joystick") == 1, "the stick still finds the stick, by what it does");
+    p = page.model("y:right/input/x", "");
+    check(p.lit.count("t:right/input/b") == 1, "a button with nothing on it falls back to the wiring");
+    page.click("bind_layout");
+    p = page.model("y:right/input/y", "");
+    check(p.lit.count("t:right/input/b") == 1 && p.lit.count("t:right/input/a") == 0, "on a layout, the wiring is what's happening, so that's the match");
+    page.click("bind_dev");
+    page.status.clear();
+  }
   check(m.controls == "On Foot", "it starts on the biggest set of controls, by the game's name for it");
   check(actionOf(m.theirs, "t:right/input/a") == "Reload", "and shows only that set's");
   page.click("bind_controls_next");
@@ -437,6 +460,7 @@ static void testReal(const std::string& work, const std::string& out) {
     const BindModel m = page.model("", "");
     shot(m, out + "/game_" + g.file + ".png");
     shot(page.model("y:right/input/x", ""), out + "/game_" + g.file + "_hover.png");
+    shot(page.model("y:right/input/a", ""), out + "/game_" + g.file + "_hover_a.png");
     if (m.layoutOk) {
       page.click("bind_scope_game");
       page.click("bind_layout");

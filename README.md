@@ -58,7 +58,7 @@ It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-o
 
 ## Bindings
 
-I never got on with Steam's binding screen, so there's a simpler one here. The **Bindings** tab at the top of the page shows your controllers at the bottom and any other controller you pick at the top, both at once. Every button has a line to its spot on the controller. Point the laser at one and its line lights up, along with its match on the other controller.
+I never got on with Steam's binding screen, so there's a simpler one here. The **Bindings** tab at the top of the page shows your controllers at the bottom and any other controller you pick at the top, both at once. Every button has a line to its spot on the controller. Point the laser at one and its line lights up, along with its match on the other controller. If the game names its buttons, the match is whichever button does the same thing.
 
 ![Steam Frame controllers on the Quest layout in Pavlov, with the laser on X](docs/bindings.png)
 

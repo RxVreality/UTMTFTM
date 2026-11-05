@@ -1,5 +1,9 @@
 # Changelog
 
+## Next
+
+On the Bindings tab, pointing at a button now lights up the one that does the same thing on the other controller, in games that name their buttons. In No Man's Sky, Jump on your Frame's A used to light up the Quest's A, and now it lights up the Quest's B.
+
 ## 0.3.0
 
 A Bindings tab: your controllers under any other one you pick, with where each button is and what it does in the game you're in. You can put a game on another controller's layout, rewire single buttons, and set either as the default for all games. It reads and writes SteamVR's own binding files, and changes apply the next time the game launches.

@@ -102,7 +102,11 @@ Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profi
 std::string actionLabel(const std::string& output, const std::map<std::string, std::string>& names, bool* passThrough, bool* hide);
 
 // A row for each button on one hand, with what the binding has on it.
-struct RowText { std::string id, name, action; bool bound = false, passThrough = false, unused = false; };
+struct RowText {
+  std::string id, name, action;
+  bool bound = false, passThrough = false, unused = false;
+  std::vector<std::string> actions;  // what the game calls the things on it, most important first. Empty if it doesn't say
+};
 // group: only the controls in that group of action sets (see controlGroups). Empty, or one this binding doesn't have: all of it.
 std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* binding, const std::string& group = "");
 

@@ -781,6 +781,7 @@ static std::string startingGroup(const std::vector<ControlGroup>& groups) {
 std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* binding, const std::string& group) {
   std::vector<RowText> rows;
   std::map<std::string, std::vector<std::pair<int, std::string>>> labels;  // row -> (how much it matters, label)
+  std::map<std::string, std::set<std::string>> named;                       // row -> the labels that are the game's own words
   std::map<std::string, bool> onlyPass;
   if (binding && binding->ok) {
     bool haveGroup = false;
@@ -802,7 +803,11 @@ std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* bin
             const std::string l = actionLabel(src["inputs"][in]["output"].asString(), binding->names, &pass, &hide);
             if (first.empty()) first = l;
           }
-          if (!first.empty() && !hide && !pass) { labels[row].push_back({2 + 10 * variant, first}); onlyPass[row] = false; }
+          if (!first.empty() && !hide && !pass) {
+            labels[row].push_back({2 + 10 * variant, first});
+            named[row].insert(first);
+            onlyPass[row] = false;
+          }
           continue;
         }
         for (const auto& in : src["inputs"].getMemberNames()) {
@@ -812,7 +817,10 @@ std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* bin
           const int rank = in == "position" || in == "pull" || in == "force" || in == "position_x" ? 0 : in == "click" ? 1 : 3;
           labels[row].push_back({rank + 10 * variant, l});
           if (!onlyPass.count(row)) onlyPass[row] = true;
-          if (!pass) onlyPass[row] = false;
+          if (!pass) {
+            onlyPass[row] = false;
+            named[row].insert(l);
+          }
         }
       }
     }
@@ -829,6 +837,8 @@ std::vector<RowText> rowsOn(const Profile& p, const char* hand, const Found* bin
       std::vector<std::string> unique;
       for (const auto& e : list)
         if (std::find(unique.begin(), unique.end(), e.second) == unique.end()) unique.push_back(e.second);
+      for (const std::string& u : unique)
+        if (named[r.id].count(u)) r.actions.push_back(squeezed(u));
       r.bound = true;
       r.passThrough = onlyPass[r.id];
       r.action = r.passThrough && squeezed(unique[0]) == squeezed(i.name) ? "" : unique[0];
@@ -1313,15 +1323,38 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   fillRows(m.theirs, "t:", ref_, theirRows);
   fillRows(m.yours, "y:", yours_, yourRows);
 
-  // Point at a button on one and its match lights up on the other.
+  // Point at a button on one and its match lights up on the other. If the game says what its buttons do, the match is the
+  // button that does the same thing, on the same hand if there's one there. Otherwise, or on a layout, where the wiring is
+  // exactly what's happening, it's the button that's wired to it.
+  auto sameAction = [&](const std::string& id, const std::vector<RowText>* from, const std::vector<RowText>* to, const char* prefix) {
+    if (!m.hasGame || m.layoutOn) return false;
+    const RowText* row = nullptr;
+    for (int h = 0; h < 2; ++h)
+      for (const RowText& r : from[h]) if (r.id == id) row = &r;
+    if (!row) return false;
+    const std::string hand = id.substr(0, id.find('/') + 1);
+    for (const std::string& action : row->actions) {
+      std::vector<std::string> near, far;
+      for (int h = 0; h < 2; ++h)
+        for (const RowText& r : to[h])
+          if (std::find(r.actions.begin(), r.actions.end(), action) != r.actions.end()) (r.id.rfind(hand, 0) == 0 ? near : far).push_back(r.id);
+      if (near.empty() && far.empty()) continue;
+      for (const std::string& match : near.empty() ? far : near) m.lit.insert(prefix + match);
+      return true;
+    }
+    return false;
+  };
   if (hover.rfind("y:", 0) == 0) {
-    auto it = wired.find(hover.substr(2));
     m.lit.insert(hover);
-    if (it != wired.end() && !it->second.empty()) m.lit.insert("t:" + it->second);
+    if (!sameAction(hover.substr(2), yourRows, theirRows, "t:")) {
+      auto it = wired.find(hover.substr(2));
+      if (it != wired.end() && !it->second.empty()) m.lit.insert("t:" + it->second);
+    }
   } else if (hover.rfind("t:", 0) == 0) {
     m.lit.insert(hover);
-    for (const auto& [mine, their] : wired)
-      if (their == hover.substr(2)) m.lit.insert("y:" + mine);
+    if (!sameAction(hover.substr(2), theirRows, yourRows, "y:"))
+      for (const auto& [mine, their] : wired)
+        if (their == hover.substr(2)) m.lit.insert("y:" + mine);
   }
 
   const bool changesAnything = ref_.type != yours_.type || m.wiringChanged;
