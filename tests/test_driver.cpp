@@ -242,11 +242,12 @@ int main() {
   if (!provider) return 1;
 
   FakeHost host;
-  vr::IVRServerDriverHost* api = &host;
-  void** vtable = *reinterpret_cast<void***>(&host);
+  // volatile: the compiler knows a vtable never changes, and would skip it for these. The hook is exactly that change.
+  vr::IVRServerDriverHost* volatile api = &host;
+  void* volatile* vtable = *reinterpret_cast<void* volatile**>(&host);
   void* originalSlot = vtable[1];
 #ifndef _WIN32
-  const std::string protectionBefore = protectionOf(&vtable[1]);
+  const std::string protectionBefore = protectionOf(const_cast<void**>(&vtable[1]));
   CHECK(protectionBefore.size() > 1 && protectionBefore[1] == '-', "the test needs a read-only vtable to mean anything (got '%s')", protectionBefore.c_str());
 #endif
   FakeContext ctx;
@@ -254,7 +255,7 @@ int main() {
   CHECK(provider->Init(&ctx) == vr::VRInitError_None, "Init");
   CHECK(vtable[1] != originalSlot, "the pose call must be hooked");
 #ifndef _WIN32
-  CHECK(protectionOf(&vtable[1]) == protectionBefore, "the vtable's memory must go back to how it was (now '%s')", protectionOf(&vtable[1]).c_str());
+  CHECK(protectionOf(const_cast<void**>(&vtable[1])) == protectionBefore, "the vtable's memory must go back to how it was");
 #endif
 
   fhlive::Shared* shm = openShared(home);

@@ -42,6 +42,8 @@ for f in "$STAGE/utmtftm" "$STAGE/driver/bin/linuxarm64/driver_utmtftm.so"; do
   echo "$(basename "$f") newest glibc: $(objdump -T "$f" | sed -n 's/.*(GLIBC_\([0-9.]*\)).*/\1/p' | sort -Vu | tail -1)"
 done
 
+echo "libopenvr_api.so needs: $(readelf -d "$STAGE/libopenvr_api.so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | tr '\n' ' ')"
+
 tar --owner=0 --group=0 -C "$OUT" -czf "$OUT/$NAME" UTMTFTM
 sed "s/@VERSION@/$VERSION/g" "$HERE/install-frame.sh" > "$OUT/install-frame.sh"
 (cd "$OUT" && sha256sum "$NAME" > "$NAME.sha256")

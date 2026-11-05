@@ -22,7 +22,7 @@ jobs:
       - name: Install libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ libcairo2-dev libfreetype-dev libvulkan-dev
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ file libcairo2-dev libfreetype-dev libvulkan-dev mesa-vulkan-drivers
 
       - name: Build and run the offline tests
         run: sh build.sh
@@ -34,6 +34,9 @@ jobs:
           sh packaging/linux/make-release.sh "$v"
         shell: bash
 
+      - name: Install it and run it against a simulated SteamVR
+        run: sh tests/test_frame_run.sh build/release-frame/UTMTFTM-*-linux-arm64.tar.gz build/frame-run
+
       - uses: actions/upload-artifact@v4
         with:
           name: utmtftm-frame
@@ -43,9 +46,12 @@ jobs:
             build/release-frame/install-frame.sh
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: frame-screens
-          path: build/ui/*.png
+          path: |
+            build/ui/*.png
+            build/frame-run/
 
   windows:
     needs: frame
