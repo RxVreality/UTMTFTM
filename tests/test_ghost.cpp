@@ -1,9 +1,13 @@
 // Regression tests: rotation freedom, drag accuracy, pull-back, open-palm anchoring,
 // and that the ghost never clips out of its drawing plane. Run: make test
+#include <chrono>
 #include <cstdio>
+#include <map>
 #include <random>
+#include <utility>
 
 #include "ghost3d.h"
+#include "handskin.h"
 #include "placement.h"
 #include "xform.h"
 
@@ -33,7 +37,58 @@ static M randPose(float spread = 1.0f) {
   return m;
 }
 
+// The hand drawn when SteamVR has no glove to read, as on a Steam Frame.
+static void testHandSkin() {
+  V3 j[31];
+  gripHandJoints(false, j);
+  const auto t0 = std::chrono::steady_clock::now();
+  const Mesh m = handSkin(j);
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  const size_t tris = m.idx.size() / 3;
+  printf("hand skin: %zu triangles, %zu vertices, built in %.0f ms\n", tris, m.p.size(), ms);
+  CHECK(tris > 5000 && tris < 60000, "the hand should be detailed but affordable (%zu triangles)", tris);
+  CHECK(m.p.size() == m.n.size(), "one normal per vertex");
+  CHECK(ms < 3000, "built once at startup, so it mustn't be slow (%.0f ms)", ms);
+
+  int badPoint = 0;
+  for (size_t i = 0; i < m.p.size(); ++i) {
+    const float nl = len(m.n[i]);
+    if (!std::isfinite(m.p[i].x + m.p[i].y + m.p[i].z) || !(std::fabs(nl - 1) < 1e-3f)) ++badPoint;
+  }
+  CHECK(badPoint == 0, "%d vertices are broken", badPoint);
+
+  // Closed: no holes to see through. Every edge belongs to an even number of triangles.
+  std::map<std::pair<uint32_t, uint32_t>, int> edges;
+  int facingOut = 0;
+  for (size_t t = 0; t + 2 < m.idx.size(); t += 3) {
+    const uint32_t v[3] = {m.idx[t], m.idx[t + 1], m.idx[t + 2]};
+    for (int e = 0; e < 3; ++e) {
+      const uint32_t a = v[e], b = v[(e + 1) % 3];
+      ++edges[{std::min(a, b), std::max(a, b)}];
+    }
+    const V3 face = cross(m.p[v[1]] - m.p[v[0]], m.p[v[2]] - m.p[v[0]]);
+    if (dot(face, m.n[v[0]] + m.n[v[1]] + m.n[v[2]]) > 0) ++facingOut;
+  }
+  int open = 0;
+  for (const auto& e : edges) if (e.second % 2) ++open;
+  CHECK(open == 0, "%d edges are open, so the hand has holes", open);
+  CHECK(facingOut >= tris * 0.98, "triangles should face outward (%d of %zu do)", facingOut, tris);
+
+  const HandField f = handField(j);
+  for (int i = 1; i <= 25; ++i) CHECK(f(j[i]) < 0, "bone %d should be inside the skin", i);
+  CHECK(f(j[1] + V3{0.5f, 0, 0}) > 0.3f, "far away is outside");
+  // Each surface point really is on the surface.
+  float worst = 0;
+  for (const V3& p : m.p) worst = std::max(worst, std::fabs(f(p)));
+  CHECK(worst < 0.002f, "vertices should sit on the surface (worst %.2f mm)", worst * 1000);
+  // Fingers stay apart: halfway between two fingertips that aren't touching is outside the hand.
+  const float gap = len(j[10] - j[15]);
+  if (gap > 0.022f) CHECK(f((j[10] + j[15]) * 0.5f) > 0, "fingers must not melt together (tips %.1f mm apart)", gap * 1000);
+}
+
 int main() {
+  testHandSkin();
+
   // 1. Any orientation survives the offset round trip (incl. gimbal-ish pitch near +-90).
   for (int i = 0; i < 5000; ++i) {
     M r = randRot();

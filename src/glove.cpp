@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 
+#include "handskin.h"
 #include "platform.h"
 
 namespace fs = std::filesystem;
@@ -53,7 +54,7 @@ bool readGlb(const std::string& path, Glb& g) {
       g.bin = std::move(data);
     }
   }
-  return !g.j.isNull() && !g.bin.empty();
+  return !g.j.isNull();  // the skeleton file has only bones and an empty data block; accessor() checks anything read from it
 }
 
 struct View {
@@ -130,9 +131,11 @@ int fingerOf(const std::string& name) {
   return kFingerCount;
 }
 
+// The glove with its bones if this SteamVR has it. The Steam Frame's has only the bones, and then there's no mesh here.
 bool loadModel(const std::string& dir, Model& m) {
   Glb g;
-  if (!readGlb(dir + "/resources/rendermodels/vr_glove/vr_glove_right_model_slim.glb", g)) return false;
+  const bool glove = readGlb(dir + "/resources/rendermodels/vr_glove/vr_glove_right_model_slim.glb", g);
+  if (!glove && !readGlb(dir + "/resources/skeletons/vr_glove_right_skeleton.glb", g)) return false;
   const Json::Value& nodes = g.j["nodes"];
   m.nodes.resize(nodes.size());
   std::map<std::string, int> byName;
@@ -141,38 +144,41 @@ bool loadModel(const std::string& dir, Model& m) {
     n.name = nodes[i].get("name", "").asString();
     byName[n.name] = (int)i;
     n.finger = fingerOf(n.name);
-    if (nodes[i].isMember("translation")) for (int k = 0; k < 3; ++k) n.t[k] = nodes[i]["translation"][k].asFloat();
+    // The skeleton file stores its bone positions at a hundredth of the glove's scale.
+    if (nodes[i].isMember("translation")) for (int k = 0; k < 3; ++k) n.t[k] = nodes[i]["translation"][k].asFloat() * (glove ? 1.f : 100.f);
     if (nodes[i].isMember("rotation")) for (int k = 0; k < 4; ++k) n.r[k] = nodes[i]["rotation"][k].asFloat();
     for (const auto& c : nodes[i]["children"]) m.nodes[c.asInt()].parent = (int)i;
   }
-  const Json::Value& skin = g.j["skins"][0];
-  for (const auto& j : skin["joints"]) m.skin.push_back(j.asInt());
-  View ib;
-  if (m.skin.empty() || !accessor(g, skin["inverseBindMatrices"].asInt(), 16, ib)) return false;
-  for (size_t i = 0; i < m.skin.size(); ++i) {
-    M a{};
-    for (int c = 0; c < 4; ++c)
-      for (int r = 0; r < 3; ++r) a.m[r][c] = readF(ib, i, c * 4 + r);  // glTF is column-major
-    m.ibm.push_back(a);
+  if (glove) {
+    const Json::Value& skin = g.j["skins"][0];
+    for (const auto& j : skin["joints"]) m.skin.push_back(j.asInt());
+    View ib;
+    if (m.skin.empty() || !accessor(g, skin["inverseBindMatrices"].asInt(), 16, ib)) return false;
+    for (size_t i = 0; i < m.skin.size(); ++i) {
+      M a{};
+      for (int c = 0; c < 4; ++c)
+        for (int r = 0; r < 3; ++r) a.m[r][c] = readF(ib, i, c * 4 + r);  // glTF is column-major
+      m.ibm.push_back(a);
+    }
+    const Json::Value& prim = g.j["meshes"][0]["primitives"][0];
+    const Json::Value& at = prim["attributes"];
+    View vp, vn, vj, vw, vi;
+    if (!accessor(g, at["POSITION"].asInt(), 3, vp) || !accessor(g, at["NORMAL"].asInt(), 3, vn) ||
+        !accessor(g, at["JOINTS_0"].asInt(), 4, vj) || !accessor(g, at["WEIGHTS_0"].asInt(), 4, vw) ||
+        !accessor(g, prim["indices"].asInt(), 1, vi))
+      return false;
+    m.p.resize(vp.count); m.n.resize(vp.count); m.joints.resize(vp.count); m.weights.resize(vp.count);
+    for (size_t i = 0; i < vp.count; ++i) {
+      m.p[i] = {readF(vp, i, 0), readF(vp, i, 1), readF(vp, i, 2)};
+      m.n[i] = {readF(vn, i, 0), readF(vn, i, 1), readF(vn, i, 2)};
+      // Valve's weights are stored with their squares summing to 1, so divide by the plain sum to blend them.
+      float sum = 0;
+      for (int k = 0; k < 4; ++k) { m.joints[i][k] = (uint16_t)readU(vj, i, k); m.weights[i][k] = readF(vw, i, k); sum += m.weights[i][k]; }
+      if (sum > 0) for (int k = 0; k < 4; ++k) m.weights[i][k] /= sum;
+    }
+    m.idx.resize(vi.count);
+    for (size_t i = 0; i < vi.count; ++i) m.idx[i] = readU(vi, i, 0);
   }
-  const Json::Value& prim = g.j["meshes"][0]["primitives"][0];
-  const Json::Value& at = prim["attributes"];
-  View vp, vn, vj, vw, vi;
-  if (!accessor(g, at["POSITION"].asInt(), 3, vp) || !accessor(g, at["NORMAL"].asInt(), 3, vn) ||
-      !accessor(g, at["JOINTS_0"].asInt(), 4, vj) || !accessor(g, at["WEIGHTS_0"].asInt(), 4, vw) ||
-      !accessor(g, prim["indices"].asInt(), 1, vi))
-    return false;
-  m.p.resize(vp.count); m.n.resize(vp.count); m.joints.resize(vp.count); m.weights.resize(vp.count);
-  for (size_t i = 0; i < vp.count; ++i) {
-    m.p[i] = {readF(vp, i, 0), readF(vp, i, 1), readF(vp, i, 2)};
-    m.n[i] = {readF(vn, i, 0), readF(vn, i, 1), readF(vn, i, 2)};
-    // Valve's weights are stored with their squares summing to 1, so divide by the plain sum to blend them.
-    float sum = 0;
-    for (int k = 0; k < 4; ++k) { m.joints[i][k] = (uint16_t)readU(vj, i, k); m.weights[i][k] = readF(vw, i, k); sum += m.weights[i][k]; }
-    if (sum > 0) for (int k = 0; k < 4; ++k) m.weights[i][k] /= sum;
-  }
-  m.idx.resize(vi.count);
-  for (size_t i = 0; i < vi.count; ++i) m.idx[i] = readU(vi, i, 0);
 
   // SteamVR's skeleton order, so `slots[i]` lines up with the 31-bone hand everywhere else.
   static const char* const kBones[26] = {
@@ -247,13 +253,17 @@ BuiltHand buildGripHand(bool left) {
   std::string dir = platform::steamvrDir();
   M seat;
   if (posedRightGlove(dir, kGripCurl, h.mesh, h.joints) && handInGrip(dir, left, seat)) {
+    if (h.mesh.p.empty()) {  // bones but no glove: the same pose, with a skin of our own
+      static const Mesh skin = handSkin(h.joints);
+      h.mesh = skin;
+    }
     if (left) mirrorHand(h.mesh, h.joints);
     for (auto& p : h.mesh.p) p = xfP(seat, p);
     for (auto& n : h.mesh.n) n = norm(xfN(seat, n));
     for (auto& j : h.joints) j = xfP(seat, j);
     return h;
   }
-  // No glove to read. The Steam Frame's SteamVR doesn't ship one. So it's our own hand, closed around the handle.
+  // SteamVR's hand files can't be read at all.
   gripHandJoints(left, h.joints);
   h.mesh = buildHand(left);
   return h;
@@ -291,7 +301,7 @@ bool posedRightGlove(const std::string& dir, const Curl& c, Mesh& out, V3 joints
     return world[i];
   };
   std::vector<M> finals(m.skin.size());
-  for (size_t j = 0; j < m.skin.size(); ++j) finals[j] = mul(eval(eval, m.skin[j]), m.ibm[j]);
+  for (size_t j = 0; j < m.skin.size(); ++j) finals[j] = mul(eval(eval, m.skin[j]), m.ibm[j]);  // none without a glove
 
   out = Mesh{};
   out.p.resize(m.p.size());
