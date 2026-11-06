@@ -82,7 +82,11 @@ vr::EVROverlayError OverlayUploader::upload(vr::VROverlayHandle_t o, const uint8
   p->ctx->UpdateSubresource(tex, 0, nullptr, rgba, w * 4, 0);
   p->ctx->Flush();  // the texture must hold the new pixels before SteamVR copies it
   vr::Texture_t vt{tex, vr::TextureType_DirectX, vr::ColorSpace_Auto};
-  return vr::VROverlay()->SetOverlayTexture(o, &vt);
+  const vr::EVROverlayError e = vr::VROverlay()->SetOverlayTexture(o, &vt);
+  // SteamVR's copy goes on this device's queue. With nothing else to draw, D3D11 is happy to sit on it until the next image,
+  // which is why a tap on the panel used to show nothing until the laser moved.
+  p->ctx->Flush();
+  return e;
 }
 
 void OverlayUploader::shutdown() {

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "ghost3d.h"
+#include "macro.h"
 #include "ui.h"
 
 namespace fh {
@@ -191,6 +192,23 @@ class Page {
   void comboClick(const std::string& id);
   void comboClickGreyed(const std::string& id);
 
+  // Recorded combos. The driver does the playing, and main.cpp carries things between the two.
+  RecordedModel recordedModel(const std::string& hover, const std::string& down);
+  void recordedClick(const std::string& id);
+  void recordedClickGreyed(const std::string& id);
+  bool recordedListening() const;  // what the controllers report is wanted, and the dashboard shouldn't get it
+  void recordedReport(const macro::Raw& r);
+  void recordedTick(uint32_t clockMs, uint32_t driverMs);
+  // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. Either false says why on the page.
+  void setHookState(bool hookOk, bool heard) { hookOk_ = hookOk; hookHeard_ = heard; }
+  // Everything for the driver about the game that's running: recorded combos, plus whatever's changed since it launched that
+  // can work now. Empty with no game.
+  void fillInputTable(fhlive::InputTable& t);
+  bool recordedWantsName(std::string* current) const;  // Rename was tapped: show a keyboard
+  void recordedSetName(const std::string& name);
+
+  std::map<std::string, std::vector<macro::Recorded>> recorded;  // "<game>|<your controller_type>"
+
   std::string status;
   int statusKind = 0;  // 0 info, 1 good, 2 warning
   uint32_t statusSerial = 0;  // goes up each time status is set, so the caller can time it out
@@ -229,6 +247,16 @@ class Page {
   std::string comboBase();   // the controller's binding to add combos to, when this game isn't on a layout. Empty: there's none
   Found activeBinding();     // what this game runs on now, or would on its next launch, before any combos
   const std::vector<Combo>& combosHere() const;
+  // What the running game loaded when it started. A change since then can work right away if it only means sending one
+  // button's press as another's. Anything else waits for the next launch, as it always has.
+  void noteLaunch();
+  struct LiveRoute { std::string from, to; };  // "right/input/a", "right/input/b". to empty: as nothing
+  std::vector<LiveRoute> liveRoutes(bool* allOfIt) const;
+  std::vector<Combo> liveCombos(bool* allOfIt);
+  std::string afterChange();  // how to finish "It takes effect...": right now, or the next launch
+  std::string controlName(int hand, const std::string& path) const;
+  std::string playsOn(const macro::Recorded& m) const;
+  std::vector<RecordedTile> tilesFor(const std::vector<macro::Step>& steps, bool select) const;
   struct ComboIdeaOf { std::string name; std::vector<ComboInput> inputs; };
   std::vector<ComboIdeaOf> comboIdeas(const Profile& p) const;
   void bake(const std::string& model);
@@ -248,6 +276,22 @@ class Page {
   std::string group_;  // which of the game's sets of controls is showing
   int comboStep_ = 0;  // 0 what's saved, 1 what you do, 2 what it does
   std::map<std::string, std::string> picked_;  // the combo being made: "right/input/a" -> "touch" or "click"
+  bool launchKnown_ = false;
+  std::string launchFrom_;
+  Wiring launchWiring_;
+  std::vector<Combo> launchCombos_;
+  int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button
+  uint32_t recPhaseStart_ = 0;
+  bool recPhaseStarted_ = false;
+  int recCountdown_ = 3;
+  macro::Recorder recorder_;
+  macro::TriggerPicker picker_;
+  macro::Recorded editing_;
+  int editingAt_ = -1;  // which saved one it replaces. -1: it's new
+  int recSelected_ = -1;
+  bool recWantsName_ = false;
+  bool hookOk_ = false, hookHeard_ = false;
+  int recCount_ = 0;  // what number the next unnamed one gets
   std::string comboGroup_;
   int comboPage_ = 0;
   std::map<std::string, Found> found_;

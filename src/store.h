@@ -27,6 +27,7 @@ struct AppProfile {
 struct Store {
   float max_pos = 0.15f;   // metres (SteamVR hard cap 0.30)
   float max_rot = 180.f;   // rotation is never limited (any orientation is valid); only distance is
+  bool seeThrough = true;  // your real hands show through while you place one, on a headset that can do it
   HandPair global;
   std::map<std::string, AppProfile> apps;
 
@@ -70,6 +71,21 @@ struct Store {
   static M appliedDeviceOffset(int hand);  // what the driver has put in the poses being reported now
   static void askTruePoses(bool on);  // while placing, have the driver report where the controllers really are
   static bool driverTruePose(int hand, M* out);  // that report, in SteamVR's raw tracking space. False until there is one
+
+  // The driver's button hook: recorded combos, and rewired buttons working with no game restart.
+  static bool inputReady();        // the driver that's loaded has it. If not, SteamVR needs a restart
+  static uint64_t inputReports();  // how many button reports it's recognised. Still at 0 with a controller on: this controller goes some other way
+  static uint64_t inputUnknown();  // reports from buttons it never saw set up
+  static uint32_t inputNowMs();    // the driver's clock, which recorded events are timed on
+  static uint64_t inputTicks();    // how many times SteamVR has called it. Nothing can play without that
+  static uint64_t inputPlayed();   // how many recorded combos it's played
+  static void publishInput(const fhlive::InputTable& t);  // what to do, and only if that's changed
+  static void inputEnabled(bool on);
+  static void keepRecording();     // call it every pass of the loop while recording. Stop calling and it ends by itself
+  static void stopRecording();
+  static void recordingFromHere(uint32_t& cursor);      // what's already in the list doesn't count
+  static size_t readRecording(uint32_t& cursor, std::vector<fhlive::InputEvent*>& out);  // what's arrived since last time
+  static bool pressRoomViewShortcut();  // the Steam button, twice. False if the driver can't
 
   // The controller type in use ("frame_controller", "oculus_touch", "knuckles"), empty until one is seen: binding files and
   // SteamVR's per-game keys are named after it.

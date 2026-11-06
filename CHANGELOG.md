@@ -1,5 +1,17 @@
 # Changelog
 
+## Not released yet
+
+Recorded combos, under Advanced on the Combos tab: one button plays back a sequence you did with your own hands, the way a Logitech mouse macro does. Press Record, do it, then pick the button. You can move steps around and delete them, and it works with no game restart. Thanks to u/MMeNDtal, who asked for this.
+
+Rewiring a button now works straight away in the game you're playing, when it only means sending one button's press as another's. So does a new combo, when what it sets off is already on a button. Anything else, like switching to another controller's layout, still waits for the next launch, and the page says which you got.
+
+On the Steam Frame, placing a hand turns on Room View in its translucent style by itself and dims everything outside the globes, so you can line your in-game hand up with your real one. It goes back how it was when you finish. There's a See-through button on the Hands tab if you'd rather not.
+
+Fixed: tapping something on the page often showed nothing until the laser moved or you tapped again, and pointing at a button could light up the one you'd been on before.
+
+The driver add-on has to be there from the moment SteamVR starts to hear your buttons, so this version needs one SteamVR restart after installing.
+
 ## 0.4.0
 
 A Combos tab: pick controls on a picture of your controllers, tap once for touch or twice for press, then pick what they set off in the game you're in. It's what SteamVR's own binding screen makes, without the binding screen. Touching doesn't press, so a combo of touches won't set off what's already on those buttons. New combos start working the next time the game launches. This is the newest part and it hasn't had much testing, so please tell me how it goes.

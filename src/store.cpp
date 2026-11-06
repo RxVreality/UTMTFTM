@@ -69,6 +69,7 @@ bool Store::load() {
   Json::Value v;
   if (!readJson(dir() + "/profiles.json", v)) return false;
   max_pos = std::clamp(v["limits"].get("max_pos_m", 0.15).asFloat(), 0.01f, 0.30f);
+  seeThrough = v.get("see_through", true).asBool();
   max_rot = 180.f;  // never limit rotation (older profiles stored 60)
   global = pairFrom(v["global"]);
   // Version 1 profiles matched the ghost to the old hand mesh, so those matches no longer line up.
@@ -99,6 +100,7 @@ bool Store::save() const {
   Json::Value v;
   v["version"] = 2;
   v["limits"]["max_pos_m"] = max_pos;
+  v["see_through"] = seeThrough;
   v["global"] = pairJ(global);
   for (int h = 0; h < 2; ++h) {
     const char* k = h ? "right" : "left";
@@ -332,6 +334,90 @@ M Store::appliedDeviceOffset(int hand) {
 void Store::askTruePoses(bool on) {
   fhlive::Shared* m = platform::mapLive();
   if (m) m->driver.wantTrue.store(on ? 1 : 0, std::memory_order_relaxed);
+}
+
+bool Store::inputReady() {
+  fhlive::Shared* m = platform::mapLive();
+  return m && m->input.magic.load(std::memory_order_acquire) == fhlive::kInputMagic;
+}
+
+uint64_t Store::inputReports() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->input.reports.load(std::memory_order_relaxed) : 0;
+}
+
+uint64_t Store::inputUnknown() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->input.unknownReports.load(std::memory_order_relaxed) : 0;
+}
+
+uint32_t Store::inputNowMs() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->input.nowMs.load(std::memory_order_relaxed) : 0;
+}
+
+uint64_t Store::inputTicks() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->input.ticks.load(std::memory_order_relaxed) : 0;
+}
+
+uint64_t Store::inputPlayed() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->input.macrosPlayed.load(std::memory_order_relaxed) : 0;
+}
+
+void Store::publishInput(const fhlive::InputTable& t) {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m) return;
+  if (!memcmp(&m->input.table, &t, sizeof t)) return;
+  fhlive::seqWriteBegin(m->input.tableSeq);
+  memcpy(&m->input.table, &t, sizeof t);
+  fhlive::seqWriteEnd(m->input.tableSeq);
+}
+
+void Store::inputEnabled(bool on) {
+  fhlive::Shared* m = platform::mapLive();
+  if (m) m->input.enabled.store(on ? 1 : 0, std::memory_order_relaxed);
+}
+
+void Store::keepRecording() {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m) return;
+  // Never 0, which means off. A second is plenty: this comes round every 11 ms.
+  const uint32_t until = m->input.nowMs.load(std::memory_order_relaxed) + 1000;
+  m->input.recordUntilMs.store(until ? until : 1, std::memory_order_relaxed);
+}
+
+void Store::stopRecording() {
+  fhlive::Shared* m = platform::mapLive();
+  if (m) m->input.recordUntilMs.store(0, std::memory_order_relaxed);
+}
+
+void Store::recordingFromHere(uint32_t& cursor) {
+  fhlive::Shared* m = platform::mapLive();
+  cursor = m ? m->input.evWrite.load(std::memory_order_acquire) : 0;
+}
+
+size_t Store::readRecording(uint32_t& cursor, std::vector<fhlive::InputEvent*>& out) {
+  out.clear();
+  fhlive::Shared* m = platform::mapLive();
+  if (!m) return 0;
+  const uint32_t end = m->input.evWrite.load(std::memory_order_acquire);
+  if (end - cursor > fhlive::kEventRing) cursor = end - fhlive::kEventRing;
+  while (cursor != end) {
+    fhlive::InputEvent& e = m->input.events[cursor % fhlive::kEventRing];
+    if (e.seq.load(std::memory_order_acquire) != cursor + 1) break;  // still being written: next time
+    out.push_back(&e);
+    ++cursor;
+  }
+  return out.size();
+}
+
+bool Store::pressRoomViewShortcut() {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m || m->input.magic.load(std::memory_order_acquire) != fhlive::kInputMagic) return false;
+  m->input.roomToggle.fetch_add(1, std::memory_order_relaxed);
+  return true;
 }
 
 bool Store::driverTruePose(int hand, M* out) {

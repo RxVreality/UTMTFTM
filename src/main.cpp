@@ -21,6 +21,7 @@
 #include "overlay_upload.h"
 #include "placement.h"
 #include "platform.h"
+#include "spot.h"
 #include "store.h"
 #include "ui.h"
 #include "xform.h"
@@ -127,6 +128,18 @@ static constexpr float kGhostS = 0.36f;    // metres covered by the stereo ghost
 static constexpr float kGrabReach = 0.16f; // how close your hand must be to grab the hand being placed
 static constexpr float kLostHand = 1.0f;   // an offset this far out is a fault, not a placement: keep the last good one
 
+// The see-through globes, on the Frame itself. SteamVR's Room View can only be switched on the headset that's running it: a
+// PC streaming to a Frame doesn't own those cameras, so on Windows the page just says how.
+#ifdef _WIN32
+static constexpr bool kSeeThroughHere = false;
+#else
+static constexpr bool kSeeThroughHere = true;
+#endif
+static constexpr float kSpotS = 3.0f;      // metres covered by the dim around the globes: more than you can see at arm's length
+static constexpr float kSpotDim = 0.8f;
+static constexpr float kOtherHandGlobe = 0.13f;  // the hand doing the grabbing gets a window too
+static constexpr int kTranslucentStyle = 3;      // SteamVR's "Translucent Pass-Through"
+
 struct App {
   Store store;
   Input in;
@@ -149,6 +162,27 @@ struct App {
   ModelLoader bindLoader;
   std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
   uint32_t bindStatusSeen = 0;
+  // Recorded combos and anything else the driver's button hook does.
+  bool inputOn = false, recOn = false;
+  uint32_t recCursor = 0;
+  std::vector<fhlive::InputEvent*> recEvents;
+  uint64_t hookReports = 0, hookTicksSeen = 0, hookUnknown = 0;
+  bool hookLogged = false;
+  Clock::time_point clockStart = Clock::now();
+  // The see-through globes.
+  vr::VROverlayHandle_t spot = 0;
+  std::vector<uint8_t> spotPx;
+  GhostRenderer::Plane spotPlane{};
+  bool spotPlaneValid = false, spotShowing = false;
+  M spotXf = ident();
+  Clock::time_point spotDrawn{};
+  bool roomViewGuess = false;       // whether Room View's on. SteamVR doesn't say, so it's worked out from its change events
+  bool weTurnedRoomOn = false;
+  int styleBefore = -1;
+  Clock::time_point ignoreCameraEventsUntil{};
+  bool canSeeThrough = false;
+  Clock::time_point dashSettleAt{};
+  std::string keyboardFor;
   bool driverOn = false;   // the driver add-on is loaded in SteamVR and can move the hands
   bool driverCounted = false;
   bool driverAlive = false, handsHeard = false;
@@ -259,9 +293,134 @@ struct App {
     O->CreateOverlay("utmtftm.hint", "UTMTFTM panel", &hint);
     O->SetOverlayWidthInMeters(hint, 0.36f);
     O->SetOverlaySortOrder(hint, 11);
+    O->CreateOverlay("utmtftm.spot", "UTMTFTM see-through", &spot);
+    O->SetOverlayWidthInMeters(spot, kSpotS);
+    O->SetOverlayFlag(spot, vr::VROverlayFlags_SideBySide_Parallel, true);
+    O->SetOverlaySortOrder(spot, 9);
     drawIcon(thumbCv);
     upload(thumb, thumbCv);
+    vr::ETrackedPropertyError pe = vr::TrackedProp_Success;
+    canSeeThrough = kSeeThroughHere && vr::VRSystem()->GetBoolTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_HasCamera_Bool, &pe);
+    logf("see-through: %s here (headset has a camera: %s)", canSeeThrough ? "available" : "not available", pe == vr::TrackedProp_Success ? "said so" : "didn't say");
+    Store::inputEnabled(false);
+    Store::stopRecording();
     return true;
+  }
+
+  // ---------------- the driver's button hook
+  void syncInput() {
+    if (!bindings.loaded()) return;
+    guarded([&] {
+      static fhlive::InputTable table;
+      bindings.fillInputTable(table);
+      Store::publishInput(table);
+    });
+  }
+
+  // Once a second: is it there, and has it heard anything? Worth having in the log, because it's the first thing to check.
+  void checkHook() {
+    const bool ready = Store::inputReady();
+    const uint64_t reports = Store::inputReports(), ticks = Store::inputTicks(), unknown = Store::inputUnknown();
+    bindings.setHookState(ready, reports > 0);
+    if (!hookLogged && (reports > 0 || unknown > 0)) {
+      hookLogged = true;
+      logf("button hook: %s, %llu reports recognised, %llu unknown, driver called %llu times", ready ? "ready" : "not the driver this needs",
+           (unsigned long long)reports, (unsigned long long)unknown, (unsigned long long)ticks);
+    }
+    hookReports = reports;
+    hookTicksSeen = ticks;
+    hookUnknown = unknown;
+  }
+
+  void pumpRecording(bool panelUp) {
+    const uint32_t clockMs = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - clockStart).count());
+    guarded([&] {
+      // If the dashboard shuts while it's listening, the game mustn't lose its buttons.
+      if (recOn && !panelUp) bindings.recordedClick("macro_abort");
+      const bool listen = bindings.recordedListening();
+      if (listen && !recOn) {
+        Store::recordingFromHere(recCursor);
+        recOn = true;
+        logf("recorded combos: listening");
+      }
+      if (!listen && recOn) {
+        Store::stopRecording();
+        recOn = false;
+        dashForce = true;
+        logf("recorded combos: stopped listening");
+      }
+      if (listen) {
+        Store::keepRecording();
+        Store::readRecording(recCursor, recEvents);
+        for (const fhlive::InputEvent* e : recEvents) {
+          macro::Raw r;
+          r.ms = e->ms;
+          r.hand = e->hand;
+          r.name = e->name;
+          r.value = e->value;
+          bindings.recordedReport(r);
+        }
+        if (!recEvents.empty()) dashPoke = true;
+      }
+      bindings.recordedTick(clockMs, Store::inputNowMs());
+    });
+  }
+
+  // ---------------- the see-through globes
+  // While a hand's being placed, Room View goes on in its translucent style, and everything outside the globes goes dark.
+  bool seeThroughWanted() const { return canSeeThrough && store.seeThrough; }
+
+  void seeThroughOn() {
+    if (spotShowing || !seeThroughWanted()) return;
+    vr::EVRSettingsError e = vr::VRSettingsError_None;
+    styleBefore = vr::VRSettings()->GetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, &e);
+    if (e != vr::VRSettingsError_None) styleBefore = -1;
+    if (styleBefore != kTranslucentStyle) vr::VRSettings()->SetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, kTranslucentStyle, &e);
+    weTurnedRoomOn = !roomViewGuess && Store::pressRoomViewShortcut();
+    ignoreCameraEventsUntil = Clock::now() + std::chrono::milliseconds(1500);
+    spotPlaneValid = false;
+    spotShowing = true;
+    vr::VROverlay()->ShowOverlay(spot);
+    logf("see-through: on (style was %d, %s)", styleBefore, weTurnedRoomOn ? "asked for Room View" : "Room View looked on already");
+  }
+
+  void seeThroughOff() {
+    if (!spotShowing) return;
+    spotShowing = false;
+    vr::VROverlay()->HideOverlay(spot);
+    vr::EVRSettingsError e = vr::VRSettingsError_None;
+    if (styleBefore >= 0 && styleBefore != kTranslucentStyle) vr::VRSettings()->SetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, styleBefore, &e);
+    if (weTurnedRoomOn) Store::pressRoomViewShortcut();
+    weTurnedRoomOn = false;
+    ignoreCameraEventsUntil = Clock::now() + std::chrono::milliseconds(1500);
+    logf("see-through: off");
+  }
+
+  void renderSpot(int fitHand) {
+    if (!spotShowing) return;
+    const auto now = Clock::now();
+    if (now - spotDrawn < std::chrono::milliseconds(33)) return;
+    spotDrawn = now;
+    V3 eyes[2];
+    if (!eyePositions(eyes)) return;
+    const SpotHole holes[2] = {{pos(in.h[fitHand].grip), std::max(store.max_pos, kOtherHandGlobe)}, {pos(in.h[1 - fitHand].grip), kOtherHandGlobe}};
+    const V3 centre = (holes[0].c + holes[1].c) * 0.5f, head = (eyes[0] + eyes[1]) * 0.5f, toHead = norm(head - centre);
+    if (!spotPlaneValid || len(centre - spotPlane.c) > 0.3f || dot(toHead, spotPlane.N) < std::cos(25.f * kDeg)) {
+      V3 up{0, 1, 0};
+      if (std::fabs(dot(up, toHead)) > 0.95f) up = {0, 0, -1};
+      const V3 X = norm(cross(up, toHead)), Y = cross(toHead, X);
+      spotPlane = {centre, X, Y, toHead, kSpotS};
+      spotPlaneValid = true;
+      M q = ident();
+      q.m[0][0] = X.x; q.m[1][0] = X.y; q.m[2][0] = X.z;
+      q.m[0][1] = Y.x; q.m[1][1] = Y.y; q.m[2][1] = Y.z;
+      q.m[0][2] = toHead.x; q.m[1][2] = toHead.y; q.m[2][2] = toHead.z;
+      q.m[0][3] = centre.x; q.m[1][3] = centre.y; q.m[2][3] = centre.z;
+      spotXf = q;
+    }
+    drawSpot(spotPx, 256, 256, spotPlane, eyes, holes, 2, kSpotDim);
+    put(spot, spotPx.data(), 512, 256, true);
+    vr::VROverlay()->SetOverlayTransformAbsolute(spot, vr::TrackingUniverseStanding, &spotXf);
   }
 
   // ---------------- the bindings page's way to SteamVR
@@ -348,6 +507,7 @@ struct App {
     bindChecked = sceneKey;
     bindCheckedRaw = sceneRaw;
     bindCheckedName = sceneName;
+    syncInput();
   }
 
   // The bindings page reads files that belong to games and to SteamVR. If one of them isn't what it should be, that shouldn't
@@ -495,6 +655,7 @@ struct App {
     refreshControllers();
     refreshDriver();
     checkBindings();
+    checkHook();
     if (pid != lastPid) {
       logf("scene pid %u key '%s' -> '%s'", pid, key, k.c_str());
       lastPid = pid;
@@ -567,6 +728,9 @@ struct App {
     m.fine = fineAdjust && mode == Mode::Idle;
     m.fineBig = fineBig;
     m.hint = nudgeHint(fx.hover, fineBig);
+    if (fx.hover == "see_through") m.hint = store.seeThrough ? "While you place a hand, your real hands show through and everything else goes dim." : "Your real hands won't show through while you place one.";
+    m.canSeeThrough = canSeeThrough;
+    m.seeThrough = store.seeThrough;
     return m;
   }
 
@@ -578,6 +742,12 @@ struct App {
   void refreshDashboard() {
     bool first = dashDrawn.empty();
     if (!first && !dashPoke && !panelShowing()) { dashForce = true; return; }
+    // SteamVR can take a new image without showing it until the one after, so a change that stops there gets sent twice.
+    // Without this, a tap showed nothing until the laser moved.
+    if (dashSettleAt != Clock::time_point{} && Clock::now() >= dashSettleAt) {
+      dashSettleAt = {};
+      upload(dash, dashCv);
+    }
     if (!dashForce && !dashPoke && Clock::now() - lastDashCheck < std::chrono::milliseconds(200)) return;
     lastDashCheck = Clock::now();
     dashPoke = false;
@@ -611,6 +781,20 @@ struct App {
         drawCombos(dashCv, m, buttons);
         drawn = true;
       });
+    else if (page == DashPage::Recorded)
+      guarded([&] {
+        syncBindings();
+        RecordedModel m = bindings.recordedModel(fx.hover, fx.down);
+        m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::Live;
+        m.confirmClose = Clock::now() < confirmUntil;
+        m.status.clear();
+        m.statusWarn = m.statusGood = false;
+        if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+        key = recordedKey(m);
+        if (!dashForce && key == dashDrawn) { drawn = true; return; }
+        drawRecorded(dashCv, m, buttons);
+        drawn = true;
+      });
     if (drawn && key == dashDrawn && !dashForce) return;
     if (!drawn) {
       DashModel m = dashModel();
@@ -622,6 +806,7 @@ struct App {
     if (first) logf("panel image ready");
     dashDrawn = key;
     dashForce = false;
+    dashSettleAt = Clock::now() + std::chrono::milliseconds(70);
   }
 
   // A greyed button was tapped: say why instead of doing nothing.
@@ -638,10 +823,17 @@ struct App {
     if (const Button* hb = hitButton(buttons, x, y)) {
       const std::string id = hb->id;  // copy: buttons are rebuilt on the next draw
       logf("click %s%s", id.c_str(), hb->enabled ? "" : " (greyed)");
+      if (id == "macro_back") {
+        page = DashPage::Combos;
+        statusUntil = {};
+        dashForce = true;
+        return;
+      }
       if (page != DashPage::Hands && id != "close" && id.rfind("page_", 0) != 0) {
-        const bool combos = page == DashPage::Combos;
+        const bool combos = page == DashPage::Combos, rec = page == DashPage::Recorded;
         guarded([&] {
-          if (combos) { if (hb->enabled) bindings.comboClick(id); else bindings.comboClickGreyed(id); }
+          if (rec) { if (hb->enabled) bindings.recordedClick(id); else bindings.recordedClickGreyed(id); }
+          else if (combos) { if (hb->enabled) bindings.comboClick(id); else bindings.comboClickGreyed(id); }
           else if (hb->enabled) bindings.click(id);
           else bindings.clickGreyed(id);
         });
@@ -649,6 +841,14 @@ struct App {
           bindStatusSeen = bindings.statusSerial;
           setStatus(bindings.status, bindings.statusKind);
         }
+        std::string name;
+        if (rec && bindings.recordedWantsName(&name)) {
+          bindings.recordedSetName("");
+          keyboardFor = name;
+          vr::EVROverlayError ke = vr::VROverlay()->ShowKeyboardForOverlay(dash, vr::k_EGamepadTextInputModeNormal, vr::k_EGamepadTextInputLineModeSingleLine, 0, "Name this combo", 40, name.c_str(), 0);
+          if (ke != vr::VROverlayError_None) logf("keyboard: %s", vr::VROverlay()->GetOverlayErrorNameFromEnum(ke));
+        }
+        syncInput();
         confirmUntil = {};
         dashForce = true;
         return;
@@ -658,9 +858,11 @@ struct App {
         if (Clock::now() < confirmUntil) { quit = true; logf("closed from the dashboard"); }
         else confirmUntil = Clock::now() + std::chrono::seconds(4);
       }
-      else if (id == "page_hands") { page = DashPage::Hands; statusUntil = {}; }
-      else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); }); }
-      else if (id == "page_combos") { page = DashPage::Combos; statusUntil = {}; guarded([&] { syncBindings(); }); }
+      else if (id == "page_hands") { page = DashPage::Hands; statusUntil = {}; guarded([&] { if (bindings.loaded()) bindings.recordedClick("macro_leave"); }); }
+      else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
+      else if (id == "page_combos") { page = DashPage::Combos; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
+      else if (id == "page_recorded") { page = DashPage::Recorded; statusUntil = {}; guarded([&] { syncBindings(); }); }
+      else if (id == "see_through") { store.seeThrough = !store.seeThrough; store.save(); statusUntil = {}; }
       else if (id == "fine_toggle") { fineAdjust = !fineAdjust; statusUntil = {}; }
       else if (id == "fine_small") fineBig = false;
       else if (id == "fine_big") fineBig = true;
@@ -793,6 +995,7 @@ struct App {
 
   void finishSession(bool save) {
     vr::VROverlay()->HideOverlay(ghost);
+    seeThroughOff();
     mode = Mode::Idle;
     dashForce = true;
     in.release();
@@ -833,6 +1036,7 @@ struct App {
     if (mode == Mode::Armed) {
       if (panelShowing()) return;
       mode = Mode::Placing;
+      seeThroughOn();
       startStep();
     }
     if (mode != Mode::Placing) return;
@@ -915,6 +1119,7 @@ struct App {
     }
 
     if (live) store.publishLive(&work);  // the in-game hand follows right now
+    renderSpot(f);
 
     // Bubble / ghost colour: off-white resting, yellow while held, red past the limit.
     if (over) vr::VROverlay()->SetOverlayColor(ghost, 1.0f, 0.33f, 0.20f);
@@ -975,6 +1180,8 @@ struct App {
                     : std::string("Grab the ghost with your ") + side[o] + " hand";
       p.status = live ? "It can move anywhere inside the bubble" : readout;
       if (live && !cur().zero()) p.status = readout;
+      // Worth saying where it can't be done for you, and where SteamVR couldn't tell whether it worked.
+      if (cur().zero() && Store::controllerType == "frame_controller" && (seeThroughWanted() || !kSeeThroughHere)) p.status = "Can't see your real hands? Double-press the Steam button";
       p.keys = {{resetKey(), "No offset"}, {cancelKey(), "Cancel"}};
     }
     return p;
@@ -1084,6 +1291,11 @@ struct App {
     while (vr::VRSystem()->PollNextEvent(&ev, sizeof ev)) {
       if (ev.eventType == vr::VREvent_Quit) { vr::VRSystem()->AcknowledgeQuit_Exiting(); return false; }
       if (ev.eventType == vr::VREvent_DashboardActivated) dashForce = true;
+      // SteamVR says nothing about whether Room View is on, but this goes off whenever someone switches it.
+      if (ev.eventType == vr::VREvent_CameraSettingsHaveChanged && Clock::now() >= ignoreCameraEventsUntil) {
+        roomViewGuess = !roomViewGuess;
+        logf("see-through: Room View looks %s now", roomViewGuess ? "on" : "off");
+      }
     }
     while (vr::VROverlay()->PollNextOverlayEvent(dash, &ev, sizeof ev)) {
       double x = ev.data.mouse.x, y = dashCv.h - ev.data.mouse.y;
@@ -1101,6 +1313,13 @@ struct App {
         case vr::VREvent_MouseButtonUp: onClick(x, y); break;
         case vr::VREvent_FocusLeave: fx.leave(); dashPoke = true; break;
         case vr::VREvent_OverlayShown: dashForce = true; break;
+        case vr::VREvent_KeyboardDone: {
+          char typed[64] = {0};
+          vr::VROverlay()->GetKeyboardText(typed, sizeof typed);
+          guarded([&] { bindings.recordedSetName(typed); });
+          dashForce = true;
+          break;
+        }
         default: break;
       }
     }
@@ -1127,6 +1346,13 @@ struct App {
         store.dashLiveHand = liveHand;
         if (mode != Mode::Placing) store.publishLive();
       }
+      // Recorded combos and rewired buttons are for games, not for the dashboard's laser, and not while a hand's being placed.
+      const bool wantInput = !sceneKey.empty() && !dashUp && mode == Mode::Idle;
+      if (wantInput != inputOn) {
+        inputOn = wantInput;
+        Store::inputEnabled(wantInput);
+      }
+      if (bindings.loaded()) pumpRecording(dashUp);
       bool wantTrue = mode != Mode::Idle && store.useDriver;
       if (wantTrue != askedTrue) { Store::askTruePoses(wantTrue); askedTrue = wantTrue; }
       if (mode != Mode::Idle) { in.poll(mode == Mode::Placing); truePoses(); }  // controllers only matter while placing
@@ -1144,12 +1370,16 @@ struct App {
     // closing: leave the game exactly as saved
     vr::VROverlay()->HideOverlay(ghost);
     vr::VROverlay()->HideOverlay(hint);
+    seeThroughOff();
+    Store::stopRecording();
+    Store::inputEnabled(false);  // nobody's left to say the dashboard's opened
     Store::askTruePoses(false);
     store.dashboardUp = false;
     store.dashLiveHand = -1;
     store.publishLive();
     store.save();
     vr::VROverlay()->DestroyOverlay(ghost);
+    vr::VROverlay()->DestroyOverlay(spot);
     vr::VROverlay()->DestroyOverlay(hint);
     vr::VROverlay()->DestroyOverlay(dash);
   }

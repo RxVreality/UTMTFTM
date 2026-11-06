@@ -125,6 +125,19 @@ expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
 expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
 rm -f "$DATA/bindings.json"
 
+echo "--- recorded combos"
+: > "$FAKE_STEAMVR_LOG"
+mkdir -p "$OUT/recorded"
+FAKE_STEAMVR_SHOTS="$OUT/recorded" FAKE_STEAMVR_SCENARIO=recorded timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-recorded.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/recorded.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+expect "the combo was saved" "grep -q '\"recorded\"' '$DATA/bindings.json' && grep -q '/input/b' '$DATA/bindings.json'"
+expect "the driver took the button hook" "grep -q 'IVRDriverInput_005: hooked' '$DATA/driver.log'"
+rm -f "$DATA/bindings.json"
+
 echo "--- updating over the top"
 : > "$FAKE_STEAMVR_LOG"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null

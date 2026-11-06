@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ghost3d.h"
+#include "spot.h"
 #include "handskin.h"
 #include "placement.h"
 #include "xform.h"
@@ -192,6 +193,42 @@ int main() {
         if (ok && dot(sph.n[k], norm(eyes[e] - (c + sph.p[k]))) < -0.05f) continue;  // far side, hidden by the near side's outline
         CHECK(ok && u > 0.005f && u < 0.995f && v > 0.005f && v < 0.995f, "bubble clipped (r %.2f, u %.3f v %.3f)", r, u, v);
       }
+  }
+
+  // The dim around the globes: clear on the hands from each eye, dark everywhere else, and each eye's hole in the right place.
+  {
+    const V3 eyes[2] = {{-0.032f, 1.6f, 0.f}, {0.032f, 1.6f, 0.f}};
+    const SpotHole holes[2] = {{{0.2f, 1.1f, -0.4f}, 0.15f}, {{-0.3f, 1.2f, -0.45f}, 0.13f}};
+    V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm((eyes[0] + eyes[1]) * 0.5f - centre);
+    V3 X = norm(cross(V3{0, 1, 0}, toHead)), Y = cross(toHead, X);
+    GhostRenderer::Plane pl{centre, X, Y, toHead, 3.f};
+    std::vector<uint8_t> px;
+    drawSpot(px, 256, 256, pl, eyes, holes, 2, 0.8f);
+    CHECK(px.size() == 512u * 256u * 4u, "two eyes side by side (%zu bytes)", px.size());
+    auto alphaAt = [&](int eye, V3 world) {
+      float u = 0, v = 0, w = 0;
+      if (!GhostRenderer::proj(pl, eyes[eye], world, u, v, w) || u < 0 || u >= 1 || v < 0 || v >= 1) return -1;
+      const int x = int(u * 256), y = int(v * 256);
+      return int(px[(size_t(y) * 512 + size_t(eye) * 256 + x) * 4 + 3]);
+    };
+    for (int e = 0; e < 2; ++e) {
+      for (const SpotHole& h : holes) CHECK(alphaAt(e, h.c) == 0, "eye %d can see straight through to a hand (alpha %d)", e, alphaAt(e, h.c));
+      CHECK(alphaAt(e, {1.1f, 1.1f, -0.4f}) == int(0.8f * 255), "eye %d: well away from the hands it's dim (alpha %d)", e, alphaAt(e, {1.1f, 1.1f, -0.4f}));
+      // A point just inside and just outside the globe's edge as this eye sees it.
+      const V3 sideways = norm(cross(norm(holes[0].c - eyes[e]), {0, 1, 0}));
+      CHECK(alphaAt(e, holes[0].c + sideways * 0.12f) == 0, "eye %d: inside the globe it's clear (alpha %d)", e, alphaAt(e, holes[0].c + sideways * 0.12f));
+      CHECK(alphaAt(e, holes[0].c + sideways * 0.22f) > 150, "eye %d: past it, it's dim (alpha %d)", e, alphaAt(e, holes[0].c + sideways * 0.22f));
+    }
+    // Black all the way, so the dim darkens rather than tints, and there's no point adding light on the premultiplied path.
+    bool black = true;
+    for (size_t i = 0; i < px.size(); i += 4) black = black && px[i] == 0 && px[i + 1] == 0 && px[i + 2] == 0;
+    CHECK(black, "only the alpha changes");
+    using C = std::chrono::steady_clock;
+    const auto t0 = C::now();
+    for (int i = 0; i < 20; ++i) drawSpot(px, 256, 256, pl, eyes, holes, 2, 0.8f);
+    const double ms = std::chrono::duration<double, std::milli>(C::now() - t0).count() / 20;
+    printf("drawing the dim for both eyes: %.2f ms, while a hand's being placed\n", ms);
+    CHECK(ms < 12, "the dim is too slow (%.1f ms)", ms);
   }
 
   printf("%s: %d checks, %d failures\n", fails ? "FAILED" : "PASSED", checks, fails);

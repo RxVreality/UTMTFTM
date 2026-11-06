@@ -6,6 +6,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 [ "${1:-}" = notest ] && exit 0
 dist/test_ghost
+dist/test_macro
 dist/test_session
 dist/test_driver
 dist/test_controllers

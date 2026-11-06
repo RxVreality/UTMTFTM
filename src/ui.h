@@ -58,13 +58,15 @@ struct DashModel {
   bool fine = false;          // fine adjust: arrows either side of each number
   bool fineBig = false;       // and they go 1 cm and 5 degrees a tap, rather than 1 mm and 1 degree
   std::string hint;           // what's under the laser would do, when it isn't obvious
+  bool canSeeThrough = false; // the headset has cameras
+  bool seeThrough = false;    // your real hands show through while you place one
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;
 };
 
 // The pages share the dashboard panel. This says which one's showing.
-enum class DashPage { Hands, Bindings, Combos };
+enum class DashPage { Hands, Bindings, Combos, Recorded };
 
 // A fine adjust arrow: "nudge_<hand>_<axis>_<p or m>". axis as in nudged(), in placement.h.
 bool parseNudge(const std::string& id, int& hand, int& axis, int& dir);
@@ -174,6 +176,40 @@ struct ComboModel {
 };
 std::string comboKey(const ComboModel& m);
 void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- recorded combos page
+// One step of a sequence, as a tile: which control, and whether it went down or came back up. Going by G HUB, which shows
+// its steps as a strip with a little arrow on each.
+struct RecordedTile {
+  std::string id, name, hand;  // "macro_tile_2", "Trigger", "R"
+  int kind = 0;                // macro::Kind
+  int x = 0, y = 0;            // a stick's direction
+};
+struct RecordedRow {
+  std::string name, plays;     // "Reload", "Plays on B, once"
+  std::vector<RecordedTile> tiles;
+};
+struct RecordedModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  int step = 0;          // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button
+  bool canRecord = false;
+  std::string why;       // why not, when it can't
+  std::vector<RecordedRow> saved;
+  int countdown = 0;
+  std::vector<RecordedTile> tiles;
+  int selected = -1;
+  std::string name;
+  std::string plays;     // "Right B", empty until there is one
+  std::string note;      // what it takes over from
+  bool onTouch = false, repeat = false, asRecorded = false, withTouches = false, hasBareTouches = false;
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string recordedKey(const RecordedModel& m);
+void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- in-headset instruction panel
 struct PanelModel {

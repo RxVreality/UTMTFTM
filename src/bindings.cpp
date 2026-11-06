@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -1172,6 +1173,30 @@ void Page::loadPrefs() {
         if (pair.isArray() && pair.size() == 2 && pair[0].isString() && pair[1].isString()) c.inputs.push_back({pair[0].asString(), pair[1].asString()});
       if (!c.output.empty() && !c.inputs.empty()) combos[k].push_back(c);
     }
+  recorded.clear();
+  for (const auto& k : v["recorded"].getMemberNames())
+    for (const auto& e : v["recorded"][k]) {
+      macro::Recorded m;
+      m.name = e.get("name", "").asString();
+      m.hand = e.get("hand", -1).asInt();
+      m.path = e.get("path", "").asString();
+      m.onTouch = e.get("on_touch", false).asBool();
+      m.repeat = e.get("repeat", false).asBool();
+      m.asRecorded = e.get("as_recorded", false).asBool();
+      m.withTouches = e.get("with_touches", false).asBool();
+      for (const auto& s : e["steps"]) {
+        if (!s.isArray() || s.size() != 6 || !s[1].isString()) continue;
+        macro::Step step;
+        step.hand = s[0].asInt();
+        step.path = s[1].asString();
+        step.kind = s[2].asInt();
+        step.x = s[3].asInt();
+        step.y = s[4].asInt();
+        step.delayMs = s[5].asInt();
+        m.steps.push_back(step);
+      }
+      if (!m.steps.empty()) recorded[k].push_back(m);
+    }
 }
 
 void Page::savePrefs() const {
@@ -1211,6 +1236,33 @@ void Page::savePrefs() const {
         e["inputs"].append(pair);
       }
       v["combos"][k].append(e);
+    }
+  }
+  v["recorded"] = Json::objectValue;
+  for (const auto& [k, list] : recorded) {
+    if (list.empty()) continue;
+    v["recorded"][k] = Json::arrayValue;
+    for (const macro::Recorded& m : list) {
+      Json::Value e;
+      e["name"] = m.name;
+      e["hand"] = m.hand;
+      e["path"] = m.path;
+      e["on_touch"] = m.onTouch;
+      e["repeat"] = m.repeat;
+      e["as_recorded"] = m.asRecorded;
+      e["with_touches"] = m.withTouches;
+      e["steps"] = Json::arrayValue;
+      for (const macro::Step& s : m.steps) {
+        Json::Value step(Json::arrayValue);
+        step.append(s.hand);
+        step.append(s.path);
+        step.append(s.kind);
+        step.append(s.x);
+        step.append(s.y);
+        step.append(s.delayMs);
+        e["steps"].append(step);
+      }
+      v["recorded"][k].append(e);
     }
   }
   writeJson(pathText(fs::u8path(d_.data) / "bindings.json"), v);
@@ -1272,6 +1324,9 @@ void Page::setGame(const std::string& key, const std::string& alt, const std::st
   picked_.clear();
   comboGroup_.clear();
   comboPage_ = 0;
+  recStep_ = 0;
+  editing_ = macro::Recorded{};
+  launchKnown_ = false;
 }
 
 const Found& Page::binding(const std::string& type) {
@@ -1403,6 +1458,7 @@ void Page::gameStarted() {
   if (gameKey_.empty() || yours_.type.empty()) return;
   reapply();
   savePrefs();
+  noteLaunch();
 }
 
 std::vector<std::string> Page::modelsWanted() const {
@@ -1748,8 +1804,9 @@ void Page::clickGreyed(const std::string& id) {
 }
 
 void Page::click(const std::string& id) {
+  if (!gameKey_.empty() && !launchKnown_) noteLaunch();
   auto saved = [&](const std::string& what) {
-    say(what + (gameKey_.empty() ? "" : " It takes effect the next time " + gameName_ + " launches."), 1);
+    say(what + afterChange(), 1);
     savePrefs();
   };
   if (id.rfind("ref_", 0) == 0) {
@@ -2014,6 +2071,7 @@ void Page::comboClickGreyed(const std::string& id) {
 }
 
 void Page::comboClick(const std::string& id) {
+  if (!gameKey_.empty() && !launchKnown_) noteLaunch();
   const Profile* mine = lib_.profile(yours_.type);
   if (!mine) return;
   if (id == "combo_new") {
@@ -2068,7 +2126,7 @@ void Page::comboClick(const std::string& id) {
     return;
   }
   auto saved = [&](const std::string& what, bool ok) {
-    if (ok) say(what + " It takes effect the next time " + gameName_ + " launches.", 1);
+    if (ok) say(what + afterChange(), 1);
     else say("Couldn't write " + gameName_ + "'s binding file. It's in the log.", 2);
     savePrefs();
   };
@@ -2103,6 +2161,427 @@ void Page::comboClick(const std::string& id) {
     saved("Removed.", reapply());
     return;
   }
+}
+
+// ---------------------------------------------------------------- changes that can work right away
+void Page::noteLaunch() {
+  launchKnown_ = true;
+  launchFrom_ = effectiveFrom();
+  launchWiring_ = launchFrom_.empty() ? Wiring{} : wiring(launchFrom_, yours_.type);
+  launchCombos_ = combosHere();
+}
+
+// The game still has the bindings it launched with. If your A should now do what its B does, the driver can send your A's
+// press as B's. If nothing on the controller does that action right now, there's no press to send, so that waits.
+std::vector<Page::LiveRoute> Page::liveRoutes(bool* allOfIt) const {
+  std::vector<LiveRoute> out;
+  if (allOfIt) *allOfIt = true;
+  if (gameKey_.empty() || !launchKnown_ || !lib_.profile(yours_.type)) return out;
+  const std::string from = effectiveFrom();
+  Wiring before;
+  if (from == launchFrom_) {
+    if (from.empty()) return out;  // on the developer's bindings, and nothing's been rewired
+    before = launchWiring_;
+  } else if (launchFrom_.empty() && from == yours_.type) {
+    before = defaultWiring(lib_, from, yours_.type);  // the developer's bindings have every button doing its own job
+  } else {
+    if (allOfIt) *allOfIt = false;  // a whole other layout
+    return out;
+  }
+  for (const auto& [input, their] : wiring(from, yours_.type)) {
+    auto was = before.find(input);
+    if (was != before.end() && was->second == their) continue;
+    if (their.empty()) { out.push_back({input, ""}); continue; }
+    std::string carrier;
+    for (const auto& [other, itsJob] : before) {
+      if (itsJob == their) { carrier = other; break; }
+    }
+    if (carrier.empty()) {
+      if (allOfIt) *allOfIt = false;
+      continue;
+    }
+    if (carrier != input) out.push_back({input, carrier});
+  }
+  return out;
+}
+
+// A combo made since the game launched, whose action is on a button: hold the controls and that button gets pressed.
+std::vector<Combo> Page::liveCombos(bool* allOfIt) {
+  std::vector<Combo> out;
+  if (allOfIt) *allOfIt = true;
+  const Profile* mine = lib_.profile(yours_.type);
+  if (gameKey_.empty() || !launchKnown_ || !mine) return out;
+  std::vector<GameAction> actions;
+  bool haveActions = false;
+  for (const Combo& c : combosHere()) {
+    const bool old = std::any_of(launchCombos_.begin(), launchCombos_.end(), [&](const Combo& o) {
+      if (o.output != c.output || o.inputs.size() != c.inputs.size()) return false;
+      for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
+      return true;
+    });
+    if (old) continue;
+    if (!haveActions) {
+      bool routesAll = true;
+      const bool sameLayout = effectiveFrom() == launchFrom_ && liveRoutes(&routesAll).empty() && routesAll;
+      if (sameLayout) actions = comboActions(activeBinding(), *mine);
+      haveActions = true;
+    }
+    auto it = std::find_if(actions.begin(), actions.end(), [&](const GameAction& a) { return lowered(a.output) == lowered(c.output) && !a.row.empty(); });
+    if (it == actions.end() || c.inputs.size() > fhlive::kMaxChordInputs) {
+      if (allOfIt) *allOfIt = false;
+      continue;
+    }
+    Combo live = c;
+    live.output = it->row;
+    out.push_back(live);
+  }
+  return out;
+}
+
+std::string Page::afterChange() {
+  if (gameKey_.empty()) return "";
+  bool routes = true, chords = true;
+  liveRoutes(&routes);
+  liveCombos(&chords);
+  if (hookOk_ && hookHeard_ && routes && chords) return " Live in the game now.";
+  return " It takes effect the next time " + gameName_ + " launches.";
+}
+
+static bool wireHand(const std::string& path, int& hand, std::string& rest) {
+  const size_t slash = path.find('/');
+  if (slash == std::string::npos) return false;
+  const std::string side = path.substr(0, slash);
+  if (side != "left" && side != "right") return false;
+  hand = side == "right" ? 1 : 0;
+  rest = path.substr(slash);
+  return true;
+}
+
+void Page::fillInputTable(fhlive::InputTable& t) {
+  std::memset(&t, 0, sizeof t);
+  if (gameKey_.empty() || yours_.type.empty()) return;
+  auto mine = recorded.find(choiceKey());
+  if (mine != recorded.end())
+    for (const macro::Recorded& m : mine->second) {
+      if (m.hand < 0 || m.path.empty() || t.macros >= fhlive::kMaxMacros) continue;
+      macro::toWire(m, t.macro[t.macros++]);
+    }
+  if (!launchKnown_) return;  // nothing's changed since it launched, then
+  for (const LiveRoute& r : liveRoutes(nullptr)) {
+    if (t.routes >= fhlive::kMaxRoutes) break;
+    fhlive::WireRoute& w = t.route[t.routes];
+    int hand = 0;
+    std::string path;
+    if (!wireHand(r.from, hand, path)) continue;
+    w.fromHand = uint8_t(hand);
+    macro::copyName(w.from, sizeof w.from, path);
+    w.toHand = fhlive::kNoHand;
+    if (!r.to.empty() && wireHand(r.to, hand, path)) {
+      w.toHand = uint8_t(hand);
+      macro::copyName(w.to, sizeof w.to, path);
+    }
+    ++t.routes;
+  }
+  for (const Combo& c : liveCombos(nullptr)) {
+    if (t.chords >= fhlive::kMaxChords) break;
+    fhlive::WireChord& w = t.chord[t.chords];
+    int hand = 0;
+    std::string path;
+    if (!wireHand(c.output, hand, path)) continue;
+    w.targetHand = uint8_t(hand);
+    macro::copyName(w.target, sizeof w.target, path);
+    uint8_t n = 0;
+    for (const ComboInput& in : c.inputs) {
+      if (!wireHand(in.path, hand, path)) continue;
+      w.in[n].hand = uint8_t(hand);
+      w.in[n].onTouch = in.state == "touch" ? 1 : 0;
+      macro::copyName(w.in[n].path, sizeof w.in[n].path, path);
+      ++n;
+    }
+    w.count = n;
+    if (n) ++t.chords;
+  }
+}
+
+// ---------------------------------------------------------------- recorded combos
+std::string Page::controlName(int hand, const std::string& path) const {
+  const Profile* p = lib_.profile(yours_.type);
+  const Input* i = p ? p->find(hand ? "right" : "left", path) : nullptr;
+  return i ? i->name : titleCase(path.substr(path.rfind('/') + 1));
+}
+
+std::string Page::playsOn(const macro::Recorded& m) const {
+  if (m.hand < 0) return "";
+  const Profile* p = lib_.profile(yours_.type);
+  const Input* i = p ? p->find(m.hand ? "right" : "left", m.path) : nullptr;
+  std::string out = m.onTouch ? "Touch " : "";
+  if (!i || i->side.empty()) out += m.hand ? "right " : "left ";
+  return out + controlName(m.hand, m.path);
+}
+
+std::vector<RecordedTile> Page::tilesFor(const std::vector<macro::Step>& steps, bool select) const {
+  std::vector<RecordedTile> out;
+  const Profile* p = lib_.profile(yours_.type);
+  for (size_t i = 0; i < steps.size(); ++i) {
+    const macro::Step& s = steps[i];
+    RecordedTile t;
+    if (select) t.id = "macro_tile_" + std::to_string(i);
+    t.name = controlName(s.hand, s.path);
+    const Input* in = p ? p->find(s.hand ? "right" : "left", s.path) : nullptr;
+    if (!in || in->side.empty()) t.hand = s.hand ? "R" : "L";
+    t.kind = s.kind;
+    t.x = s.x;
+    t.y = s.y;
+    out.push_back(t);
+  }
+  return out;
+}
+
+static std::string defaultRecordedName(const std::vector<macro::Step>& steps, const std::function<std::string(int, const std::string&)>& nameOf) {
+  std::vector<std::string> names;
+  for (const macro::Step& s : steps) {
+    if (s.kind != macro::Press && s.kind != macro::Push) continue;
+    const std::string n = nameOf(s.hand, s.path);
+    if (std::find(names.begin(), names.end(), n) == names.end()) names.push_back(n);
+  }
+  std::string out;
+  for (size_t i = 0; i < names.size() && i < 3; ++i) out += (i ? " + " : "") + names[i];
+  if (names.size() > 3) out += " + more";
+  return out.empty() ? "Touches" : out;
+}
+
+RecordedModel Page::recordedModel(const std::string& hover, const std::string& down) {
+  RecordedModel m;
+  m.hover = hover;
+  m.down = down;
+  m.game = gameName_;
+  m.status = status;
+  m.statusWarn = statusKind == 2;
+  m.statusGood = statusKind == 1;
+  const Profile* mine = lib_.profile(yours_.type);
+  if (!hookOk_) m.why = "Restart SteamVR once to turn this on. The add-on has to be there from the start to hear your buttons.";
+  else if (gameKey_.empty()) m.why = "A recorded combo belongs to one game, because what a button does is different in each.";
+  else if (!mine) m.why = yours_.type.empty() ? "Turn your controllers on." : "SteamVR has no description of this controller.";
+  else if (!hookHeard_) m.why = "UTMTFTM hasn't heard a button from this controller yet. Press one. If this stays, restart SteamVR.";
+  m.canRecord = m.why.empty();
+  if (!m.canRecord && recStep_ != 0) { recStep_ = 0; editing_ = macro::Recorded{}; }
+  m.step = recStep_;
+  m.countdown = recCountdown_;
+
+  auto saved = recorded.find(choiceKey());
+  if (saved != recorded.end())
+    for (const macro::Recorded& r : saved->second) {
+      RecordedRow row;
+      row.name = r.name;
+      const std::string on = playsOn(r);
+      row.plays = on.empty() ? "No button yet" : "Plays on " + on + (r.repeat ? ", repeats while held" : "");
+      row.tiles = tilesFor(macro::played(r), false);
+      m.saved.push_back(row);
+    }
+
+  if (recStep_ == 2) {
+    const std::vector<macro::Step>& soFar = recorder_.soFar();
+    const bool anyPress = std::any_of(soFar.begin(), soFar.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    m.tiles = tilesFor(macro::shown(soFar, !anyPress), false);
+  }
+  if (recStep_ == 3 || recStep_ == 4) {
+    const std::vector<macro::Step> steps = macro::shown(editing_.steps, editing_.withTouches);
+    m.tiles = tilesFor(steps, recStep_ == 3);
+    m.selected = recSelected_ < int(steps.size()) ? recSelected_ : -1;
+    m.name = editing_.name;
+    m.plays = playsOn(editing_);
+    m.onTouch = editing_.onTouch;
+    m.repeat = editing_.repeat;
+    m.asRecorded = editing_.asRecorded;
+    m.withTouches = editing_.withTouches;
+    m.hasBareTouches = macro::hasBareTouches(editing_.steps) && std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    if (editing_.hand >= 0) {
+      const std::string name = controlName(editing_.hand, editing_.path), row = std::string(editing_.hand ? "right" : "left") + editing_.path;
+      std::string job;
+      if (mine)
+        for (const GameAction& a : comboActions(activeBinding(), *mine))
+          if (a.row == row) { job = a.label; break; }
+      m.note = (job.empty() ? name + " stops doing its usual job" : name + " stops being " + job) + " in " + gameName_ + " while this is saved.";
+      if (editing_.onTouch) m.note = "Resting on " + name + " plays this. Pressing it still does what it did.";
+    }
+  }
+  return m;
+}
+
+void Page::recordedClickGreyed(const std::string& id) {
+  if (id == "macro_record") {
+    if (!hookOk_) say("Restart SteamVR once to turn this on.");
+    else if (gameKey_.empty()) say("Start a game first. A recorded combo belongs to one game.");
+    else say("Turn your controllers on first.");
+  } else if (id == "macro_save") say("Choose which button plays it first.");
+  else say("That isn't available right now.");
+}
+
+void Page::recordedClick(const std::string& id) {
+  const std::vector<macro::Step> showing = macro::shown(editing_.steps, editing_.withTouches);
+  const auto startRecording = [&] {
+    recStep_ = 1;
+    recPhaseStarted_ = false;
+    recCountdown_ = 3;
+    recSelected_ = -1;
+  };
+  if (id == "macro_record") {
+    auto it = recorded.find(choiceKey());
+    if (it != recorded.end() && it->second.size() >= 5) { say("Five per game for now, because that's what fits. Remove one first."); return; }
+    editing_ = macro::Recorded{};
+    editingAt_ = -1;
+    startRecording();
+    return;
+  }
+  if (id == "macro_again") { editing_.steps.clear(); startRecording(); return; }
+  if (id == "macro_leave") { if (recStep_ == 1) recStep_ = editing_.steps.empty() ? 0 : 3; return; }  // tapped another page during the countdown
+  if (id == "macro_abort") {  // the dashboard shut while it was listening
+    if (recordedListening()) recStep_ = editing_.steps.empty() ? 0 : 3;
+    return;
+  }
+  if (id == "macro_cancel") { recStep_ = 0; editing_ = macro::Recorded{}; return; }
+  if (id.rfind("macro_edit_", 0) == 0) {
+    auto it = recorded.find(choiceKey());
+    const size_t at = size_t(std::atoi(id.c_str() + 11));
+    if (it == recorded.end() || at >= it->second.size()) return;
+    editing_ = it->second[at];
+    editingAt_ = int(at);
+    recStep_ = 3;
+    recSelected_ = -1;
+    return;
+  }
+  if (id.rfind("macro_del_", 0) == 0) {
+    auto it = recorded.find(choiceKey());
+    const size_t at = size_t(std::atoi(id.c_str() + 10));
+    if (it == recorded.end() || at >= it->second.size()) return;
+    const std::string name = it->second[at].name;
+    it->second.erase(it->second.begin() + std::ptrdiff_t(at));
+    if (it->second.empty()) recorded.erase(it);
+    savePrefs();
+    say("Removed " + name + ". That button's back to its usual job.", 1);
+    return;
+  }
+  if (id.rfind("macro_tile_", 0) == 0) {
+    const int at = std::atoi(id.c_str() + 11);
+    recSelected_ = recSelected_ == at ? -1 : at;
+    return;
+  }
+  if (id == "macro_left" || id == "macro_right" || id == "macro_remove_step") {
+    // These work on what's showing, so whatever's hidden is gone from here on.
+    if (recSelected_ < 0 || recSelected_ >= int(showing.size())) return;
+    editing_.steps = showing;
+    if (id == "macro_remove_step") {
+      editing_.steps.erase(editing_.steps.begin() + recSelected_);
+      if (!editing_.steps.empty()) editing_.steps[0].delayMs = 0;
+      recSelected_ = -1;
+      if (editing_.steps.empty()) { recStep_ = 0; editing_ = macro::Recorded{}; say("That was the last step, so there's nothing left to save."); }
+      return;
+    }
+    const int to = recSelected_ + (id == "macro_left" ? -1 : 1);
+    if (to < 0 || to >= int(editing_.steps.size())) return;
+    // The steps swap, and the gaps between them stay where they were.
+    std::swap(editing_.steps[recSelected_], editing_.steps[to]);
+    std::swap(editing_.steps[recSelected_].delayMs, editing_.steps[to].delayMs);
+    recSelected_ = to;
+    return;
+  }
+  if (id == "macro_pick") {
+    picker_ = macro::TriggerPicker{};
+    recStep_ = 4;
+    recPhaseStarted_ = false;
+    return;
+  }
+  if (id == "macro_once") { editing_.repeat = false; return; }
+  if (id == "macro_repeat") { editing_.repeat = true; return; }
+  if (id == "macro_quick") { editing_.asRecorded = false; return; }
+  if (id == "macro_mine") { editing_.asRecorded = true; return; }
+  if (id == "macro_press_only") { editing_.withTouches = false; return; }
+  if (id == "macro_touches") { editing_.withTouches = true; return; }
+  if (id == "macro_rename") { recWantsName_ = true; return; }
+  if (id == "macro_save") {
+    if (editing_.hand < 0) { recordedClickGreyed(id); return; }
+    std::vector<macro::Recorded>& list = recorded[choiceKey()];
+    macro::Recorded done = editing_;
+    if (editingAt_ >= 0 && editingAt_ < int(list.size())) list.erase(list.begin() + editingAt_);
+    // A button can only play one thing.
+    const size_t before = list.size();
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const macro::Recorded& o) { return o.hand == done.hand && o.path == done.path && o.onTouch == done.onTouch; }), list.end());
+    const bool replaced = list.size() != before;
+    list.push_back(done);
+    savePrefs();
+    recStep_ = 0;
+    editing_ = macro::Recorded{};
+    say(done.name + " is on " + playsOn(done) + (replaced ? ", in place of what was there." : ".") + " Works as soon as you close the dashboard.", 1);
+    return;
+  }
+}
+
+bool Page::recordedListening() const { return recStep_ == 2 || recStep_ == 4; }
+
+void Page::recordedReport(const macro::Raw& r) {
+  if (recStep_ == 2) { recorder_.feed(r); return; }
+  if (recStep_ != 4) return;
+  const bool was = picker_.done();
+  picker_.feed(r);
+  if (picker_.done() && !was) {
+    editing_.hand = picker_.hand();
+    editing_.path = picker_.path();
+    editing_.onTouch = picker_.onTouch();
+    if (picker_.onTouch()) { recStep_ = 3; recPhaseStarted_ = false; }
+    return;
+  }
+  // The press stays with us until it's let go of, so the dashboard doesn't get half of it and click something.
+  std::string path, part;
+  if (picker_.done() && !picker_.onTouch() && macro::splitName(r.name, path, part) && r.hand == picker_.hand() && path == picker_.path() && (part == "click" || part == "value") && r.value < 0.4f) {
+    recStep_ = 3;
+    recPhaseStarted_ = false;
+  }
+}
+
+void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
+  if (recStep_ != 1 && recStep_ != 2 && recStep_ != 4) return;
+  if (!recPhaseStarted_) { recPhaseStarted_ = true; recPhaseStart_ = clockMs; }
+  const uint32_t elapsed = clockMs - recPhaseStart_;
+  if (recStep_ == 1) {
+    recCountdown_ = 3 - int(elapsed / 1000);
+    if (elapsed >= 3000) {
+      recStep_ = 2;
+      recPhaseStart_ = clockMs;
+      recorder_ = macro::Recorder{};
+    }
+    return;
+  }
+  if (recStep_ == 2) {
+    const bool someDone = recorder_.finished(driverMs) || recorder_.full() || elapsed >= 60000;
+    if (recorder_.empty() && elapsed >= 20000) {
+      recStep_ = editing_.hand >= 0 ? 3 : 0;
+      say("Nothing was pressed, so nothing's been recorded.", 2);
+      return;
+    }
+    if (recorder_.empty() || !someDone) return;
+    editing_.steps = recorder_.steps();
+    const bool anyPress = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    editing_.withTouches = !anyPress;
+    if (editing_.name.empty()) editing_.name = defaultRecordedName(editing_.steps, [this](int h, const std::string& p) { return controlName(h, p); });
+    recStep_ = 3;
+    recSelected_ = -1;
+    return;
+  }
+  // Choosing the button. Fifteen seconds, or a second and a half more to let go of what was chosen.
+  if (picker_.done() ? elapsed >= 16500 : elapsed >= 15000) {
+    recStep_ = 3;
+    if (!picker_.done()) say("Nothing was pressed, so no button's been chosen.");
+  }
+}
+
+bool Page::recordedWantsName(std::string* current) const {
+  if (recWantsName_ && current) *current = editing_.name;
+  return recWantsName_;
+}
+
+void Page::recordedSetName(const std::string& name) {
+  recWantsName_ = false;
+  if (!name.empty()) editing_.name = name.size() > 40 ? name.substr(0, 40) : name;
 }
 
 }  // namespace bind

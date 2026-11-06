@@ -23,6 +23,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <mutex>
 #include <random>
 #include <string>
 #include <thread>
@@ -62,12 +64,46 @@ struct FakeHost : vr::IVRServerDriverHost {
   const vr::DriverPose_t& pose() const { return *reinterpret_cast<const vr::DriverPose_t*>(last); }
 };
 
+// Where SteamVR would hear about buttons. It remembers what it was told, in order.
+struct FakeInput : vr::IVRDriverInput {
+  struct Heard { vr::VRInputComponentHandle_t h; float v; };
+  std::mutex m;
+  std::vector<Heard> heard;
+  vr::VRInputComponentHandle_t next = 100;
+  vr::EVRInputError CreateBooleanComponent(vr::PropertyContainerHandle_t, const char*, vr::VRInputComponentHandle_t* h) override { *h = next++; return vr::VRInputError_None; }
+  vr::EVRInputError UpdateBooleanComponent(vr::VRInputComponentHandle_t h, bool v, double) override {
+    std::lock_guard<std::mutex> lock(m);
+    heard.push_back({h, v ? 1.f : 0.f});
+    return vr::VRInputError_None;
+  }
+  vr::EVRInputError CreateScalarComponent(vr::PropertyContainerHandle_t, const char*, vr::VRInputComponentHandle_t* h, vr::EVRScalarType, vr::EVRScalarUnits) override { *h = next++; return vr::VRInputError_None; }
+  vr::EVRInputError UpdateScalarComponent(vr::VRInputComponentHandle_t h, float v, double) override {
+    std::lock_guard<std::mutex> lock(m);
+    heard.push_back({h, v});
+    return vr::VRInputError_None;
+  }
+  vr::EVRInputError CreateHapticComponent(vr::PropertyContainerHandle_t, const char*, vr::VRInputComponentHandle_t*) override { return vr::VRInputError_None; }
+  vr::EVRInputError CreateSkeletonComponent(vr::PropertyContainerHandle_t, const char*, const char*, const char*, vr::EVRSkeletalTrackingLevel, const vr::VRBoneTransform_t*, uint32_t, vr::VRInputComponentHandle_t*) override { return vr::VRInputError_None; }
+  vr::EVRInputError UpdateSkeletonComponent(vr::VRInputComponentHandle_t, vr::EVRSkeletalMotionRange, const vr::VRBoneTransform_t*, uint32_t) override { return vr::VRInputError_None; }
+};
+
+struct FakeProperties : vr::IVRProperties {
+  vr::ETrackedPropertyError ReadPropertyBatch(vr::PropertyContainerHandle_t, vr::PropertyRead_t*, uint32_t) override { return vr::TrackedProp_Success; }
+  vr::ETrackedPropertyError WritePropertyBatch(vr::PropertyContainerHandle_t, vr::PropertyWrite_t*, uint32_t) override { return vr::TrackedProp_Success; }
+  const char* GetPropErrorNameFromEnum(vr::ETrackedPropertyError) override { return ""; }
+  vr::PropertyContainerHandle_t TrackedDeviceToPropertyContainer(vr::TrackedDeviceIndex_t i) override { return 1000 + i; }
+};
+
 struct FakeContext : vr::IVRDriverContext {
   void* host = nullptr;
+  void* input = nullptr;
+  FakeProperties properties;
   void* GetGenericInterface(const char* v, vr::EVRInitError* e) override {
     if (e) *e = vr::VRInitError_None;
     if (!strcmp(v, "IVRServerDriverHost_006")) return host;
-    if (!strncmp(v, "IVRServerDriverHost_", 20)) {  // older versions, which this PC's drivers don't need here
+    if (!strcmp(v, "IVRDriverInput_005") && input) return input;
+    if (!strcmp(v, vr::IVRProperties_Version)) return &properties;
+    if (!strncmp(v, "IVRServerDriverHost_", 20) || !strncmp(v, "IVRDriverInput_", 15)) {  // older versions, which this PC's drivers don't need here
       if (e) *e = vr::VRInitError_Init_InvalidInterface;
       return nullptr;
     }
@@ -250,9 +286,15 @@ int main() {
   const std::string protectionBefore = protectionOf(const_cast<void**>(&vtable[1]));
   CHECK(protectionBefore.size() > 1 && protectionBefore[1] == '-', "the test needs a read-only vtable to mean anything (got '%s')", protectionBefore.c_str());
 #endif
+  FakeInput fakeInput;
   FakeContext ctx;
   ctx.host = &host;
+  ctx.input = &fakeInput;
+  vr::IVRDriverInput* volatile inputApi = &fakeInput;
+  void* volatile* inputVtable = *reinterpret_cast<void* volatile**>(&fakeInput);
+  void* const originalInputSlots[4] = {inputVtable[0], inputVtable[1], inputVtable[2], inputVtable[3]};
   CHECK(provider->Init(&ctx) == vr::VRInitError_None, "Init");
+  for (int i = 0; i < 4; ++i) CHECK(inputVtable[i] != originalInputSlots[i], "button call %d must be hooked", i);
   CHECK(vtable[1] != originalSlot, "the pose call must be hooked");
 #ifndef _WIN32
   CHECK(protectionOf(const_cast<void**>(&vtable[1])) == protectionBefore, "the vtable's memory must go back to how it was");
@@ -540,9 +582,412 @@ int main() {
     printf("at 500 updates/s for 2 hands and 3 other devices, that's %.4f%% of one CPU core\n", perSecond);
   }
 
+  // ---------------------------------------------------------------- buttons
+  {
+    fhlive::InputChannel& in = shm->input;
+    CHECK(in.magic.load() == fhlive::kInputMagic, "the overlay needs to be able to see the button hook is there");
+
+    // Two hands, as the Frame's controllers set themselves up. Their devices are 3 and 4, which the fake says are containers 1003 and 1004.
+    std::map<std::string, vr::VRInputComponentHandle_t> H;
+    auto makeBool = [&](vr::PropertyContainerHandle_t c, const char* hand, const char* name) {
+      vr::VRInputComponentHandle_t h = 0;
+      inputApi->CreateBooleanComponent(c, name, &h);
+      H[std::string(hand) + name] = h;
+    };
+    auto makeScalar = [&](vr::PropertyContainerHandle_t c, const char* hand, const char* name) {
+      vr::VRInputComponentHandle_t h = 0;
+      inputApi->CreateScalarComponent(c, name, &h, vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedOneSided);
+      H[std::string(hand) + name] = h;
+    };
+    for (auto [c, hand] : {std::pair<vr::PropertyContainerHandle_t, const char*>{1003, "L"}, {1004, "R"}}) {
+      for (const char* n : {"/input/a/click", "/input/a/touch", "/input/b/click", "/input/b/touch", "/input/trigger/click", "/input/trigger/touch", "/input/system/click", "/input/thumbstick/touch"}) makeBool(c, hand, n);
+      for (const char* n : {"/input/trigger/value", "/input/thumbstick/x", "/input/thumbstick/y"}) makeScalar(c, hand, n);
+    }
+    CHECK(H["R/input/b/click"] != 0, "the real SteamVR still gets to make its handles");
+    CHECK(in.components.load() == H.size(), "it hears about every control being set up (%u of %zu)", in.components.load(), H.size());
+    publish(ch, 3, 4, kNone, kNone);
+
+    using Clock = std::chrono::steady_clock;
+    const auto tick = [&] { provider->RunFrame(); };
+    // SteamVR's main loop, at about its usual rate.
+    const auto runFor = [&](int ms) {
+      const auto end = Clock::now() + std::chrono::milliseconds(ms);
+      while (Clock::now() < end) {
+        tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    };
+    const auto clearHeard = [&] { std::lock_guard<std::mutex> lock(fakeInput.m); fakeInput.heard.clear(); };
+    const auto heardNow = [&] { std::lock_guard<std::mutex> lock(fakeInput.m); return fakeInput.heard; };
+    const auto said = [&](const std::string& who, float v) {
+      for (const auto& e : heardNow()) if (e.h == H[who] && e.v == v) return true;
+      return false;
+    };
+    const auto indexOf = [&](const std::string& who, float v) {
+      const auto all = heardNow();
+      for (size_t i = 0; i < all.size(); ++i) if (all[i].h == H[who] && all[i].v == v) return int(i);
+      return -1;
+    };
+    const auto lastSaid = [&](const std::string& who) {
+      float v = -1;
+      for (const auto& e : heardNow()) if (e.h == H[who]) v = e.v;
+      return v;
+    };
+    const auto setTable = [&](const fhlive::InputTable& t) {
+      fhlive::seqWriteBegin(in.tableSeq);
+      memcpy(&in.table, &t, sizeof t);
+      fhlive::seqWriteEnd(in.tableSeq);
+    };
+    const auto step = [](fhlive::WireStep& s, int hand, const char* path, int kind, int delay) {
+      s = fhlive::WireStep{};
+      s.hand = uint8_t(hand);
+      s.kind = uint8_t(kind);
+      s.delayMs = uint16_t(delay);
+      snprintf(s.path, sizeof s.path, "%s", path);
+    };
+    tick();
+
+    // A report goes straight through while nothing's been asked for, and the count moves.
+    clearHeard();
+    const uint64_t reportsBefore = in.reports.load();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    inputApi->UpdateScalarComponent(H["R/input/trigger/value"], 0.5f, 0);
+    CHECK(said("R/input/a/click", 1.f) && said("R/input/trigger/value", 0.5f), "with nothing recorded, buttons reach SteamVR untouched");
+    CHECK(in.reports.load() == reportsBefore + 2, "the count of reports moves, so the page knows this controller's being heard");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    inputApi->UpdateScalarComponent(H["R/input/trigger/value"], 0.f, 0);
+    const uint64_t unknownBefore = in.unknownReports.load();
+    inputApi->UpdateBooleanComponent(99999, true, 0);
+    CHECK(in.unknownReports.load() == unknownBefore + 1 && !heardNow().empty() && heardNow().back().h == 99999, "something it never saw set up still reaches SteamVR, and gets counted");
+
+    // The asked-for example: B plays press A, press trigger, release trigger, release A.
+    static fhlive::InputTable table;
+    memset(&table, 0, sizeof table);
+    table.macros = 1;
+    {
+      fhlive::WireMacro& m = table.macro[0];
+      m.hand = 1;
+      snprintf(m.path, sizeof m.path, "/input/b");
+      m.count = 4;
+      step(m.steps[0], 1, "/input/a", fhlive::StepPress, 0);
+      step(m.steps[1], 1, "/input/trigger", fhlive::StepPress, 40);
+      step(m.steps[2], 1, "/input/trigger", fhlive::StepRelease, 40);
+      step(m.steps[3], 1, "/input/a", fhlive::StepRelease, 40);
+    }
+    setTable(table);
+    in.enabled.store(1);
+    tick();
+    clearHeard();
+
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    CHECK(!said("R/input/b/click", 1.f), "the button that plays it doesn't reach the game");
+    runFor(35);
+    CHECK(in.macrosPlayed.load() == 1, "pressing it starts it");
+    CHECK(said("R/input/a/click", 1.f), "A goes down straight away");
+    CHECK(said("R/input/a/touch", 1.f), "and a thumb's on it, like a real press");
+    CHECK(!said("R/input/trigger/click", 1.f), "the trigger waits its turn");
+    runFor(200);
+    const int aDown = indexOf("R/input/a/click", 1.f), trigDown = indexOf("R/input/trigger/click", 1.f), trigValue = indexOf("R/input/trigger/value", 1.f), trigUp = indexOf("R/input/trigger/click", 0.f), aUp = indexOf("R/input/a/click", 0.f);
+    CHECK(aDown >= 0 && trigDown > aDown && trigUp > trigDown && aUp > trigUp, "in the order recorded: %d %d %d %d", aDown, trigDown, trigUp, aUp);
+    CHECK(trigValue >= 0, "the trigger's pull goes all the way as well, for a game that reads that");
+    CHECK(lastSaid("R/input/a/click") == 0.f && lastSaid("R/input/trigger/click") == 0.f && lastSaid("R/input/trigger/value") == 0.f && lastSaid("R/input/a/touch") == 0.f, "nothing's left held down");
+    CHECK(!said("R/input/b/click", 1.f), "and the game never saw B");
+    const uint64_t playedOnce = in.macrosPlayed.load();
+    clearHeard();
+    runFor(120);
+    CHECK(in.macrosPlayed.load() == playedOnce && heardNow().empty(), "still holding B doesn't play it again");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(20);
+    CHECK(heardNow().empty(), "and letting go of it says nothing");
+
+    // Your own thumb on A while the combo's holding A: the game keeps seeing it held, then what your thumb's really doing.
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);  // physically on it from before
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(10);
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);  // let go mid-combo
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);   // and back on
+    CHECK(lastSaid("R/input/a/click") == 1.f, "while it's held by the combo, your own letting go doesn't reach the game");
+    runFor(200);
+    CHECK(lastSaid("R/input/a/click") == 1.f, "when the combo lets go, the game hears the truth: your thumb's still on it");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    CHECK(lastSaid("R/input/a/click") == 0.f, "and then that it's come off");
+    runFor(20);
+
+    // The dashboard opens mid-sequence: everything's let go of at once and buttons are yours again.
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(15);
+    CHECK(said("R/input/a/click", 1.f), "started");
+    in.enabled.store(0);
+    tick();
+    CHECK(lastSaid("R/input/a/click") == 0.f, "the dashboard opening lets go of what it's holding");
+    CHECK(lastSaid("R/input/b/click") == 1.f, "and tells SteamVR what your hand's really doing");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    CHECK(lastSaid("R/input/b/click") == 0.f, "with the dashboard open B is just B");
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(30);
+    CHECK(said("R/input/b/click", 1.f) && !said("R/input/a/click", 1.f), "and it doesn't play");
+    // Still holding it when the dashboard shuts: the game's told it's up, and it won't play until it's pressed again.
+    in.enabled.store(1);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 0.f, "shutting the dashboard with B held tells the game it isn't");
+    clearHeard();
+    runFor(30);
+    CHECK(!said("R/input/a/click", 1.f), "and doesn't set the combo off");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(10);
+
+    // Changing what's saved while it's playing lets go too.
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(15);
+    fhlive::InputTable none;
+    memset(&none, 0, sizeof none);
+    setTable(none);
+    tick();
+    CHECK(lastSaid("R/input/a/click") == 0.f && lastSaid("R/input/b/click") == 1.f, "a new table stands down from the old one");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    CHECK(lastSaid("R/input/b/click") == 0.f, "and B is B again");
+    setTable(table);
+    tick();
+
+    // Repeat while held.
+    table.macro[0].repeat = 1;
+    setTable(table);
+    tick();
+    const uint64_t startPlayed = in.macrosPlayed.load();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(600);
+    int downs = 0;
+    for (const auto& e : heardNow()) if (e.h == H["R/input/a/click"] && e.v == 1.f) ++downs;
+    CHECK(downs >= 2, "a repeating one goes round again while it's held (%d times)", downs);
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(250);
+    CHECK(lastSaid("R/input/a/click") == 0.f, "and stops, with nothing held");
+    clearHeard();
+    runFor(120);
+    CHECK(heardNow().empty(), "and stays stopped");
+    (void)startPlayed;
+    table.macro[0].repeat = 0;
+
+    // Resting on it plays it, and pressing it is left alone.
+    table.macro[0].onTouch = 1;
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    CHECK(said("R/input/b/click", 1.f), "with a touch playing it, the press still reaches the game");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    inputApi->UpdateBooleanComponent(H["R/input/b/touch"], true, 0);
+    runFor(20);
+    CHECK(!said("R/input/b/touch", 1.f) && said("R/input/a/click", 1.f), "and the touch plays it instead of reaching the game");
+    runFor(200);
+    inputApi->UpdateBooleanComponent(H["R/input/b/touch"], false, 0);
+    runFor(10);
+    table.macro[0].onTouch = 0;
+
+    // A stick pushed, and let go back to where your thumb really is.
+    memset(&table, 0, sizeof table);
+    table.macros = 1;
+    {
+      fhlive::WireMacro& m = table.macro[0];
+      m.hand = 0;
+      snprintf(m.path, sizeof m.path, "/input/a");
+      m.count = 2;
+      step(m.steps[0], 1, "/input/thumbstick", fhlive::StepPush, 0);
+      m.steps[0].y = 100;
+      step(m.steps[1], 1, "/input/thumbstick", fhlive::StepCentre, 40);
+    }
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.25f, 0);
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], true, 0);
+    runFor(15);
+    CHECK(said("R/input/thumbstick/y", 1.f), "a macro on one hand can play the other hand's stick");
+    runFor(120);
+    CHECK(lastSaid("R/input/thumbstick/y") == 0.f && lastSaid("R/input/thumbstick/x") == 0.25f, "and hands the stick back as your thumb has it");
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], false, 0);
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.f, 0);
+
+    // A rewired button: A's press reaches the game as B's, straight away.
+    memset(&table, 0, sizeof table);
+    table.routes = 2;
+    table.route[0].fromHand = 1; table.route[0].toHand = 1;
+    snprintf(table.route[0].from, sizeof table.route[0].from, "/input/a");
+    snprintf(table.route[0].to, sizeof table.route[0].to, "/input/b");
+    table.route[1].fromHand = 0; table.route[1].toHand = fhlive::kNoHand;
+    snprintf(table.route[1].from, sizeof table.route[1].from, "/input/b");
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    CHECK(said("R/input/b/click", 1.f) && !said("R/input/a/click", 1.f), "A's press arrives as B's");
+    inputApi->UpdateBooleanComponent(H["R/input/a/touch"], true, 0);
+    CHECK(said("R/input/b/touch", 1.f), "and so does its touch");
+    inputApi->UpdateBooleanComponent(H["L/input/b/click"], true, 0);
+    CHECK(!said("L/input/b/click", 1.f), "a button rewired to nothing does nothing");
+    inputApi->UpdateBooleanComponent(H["L/input/b/click"], false, 0);
+    in.enabled.store(0);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 0.f && lastSaid("R/input/a/click") == 1.f, "the dashboard opening puts A back as A and lifts B");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    inputApi->UpdateBooleanComponent(H["R/input/a/touch"], false, 0);
+    in.enabled.store(1);
+    tick();
+
+    // A combo made while the game's running: two touches press a button that already does the job.
+    memset(&table, 0, sizeof table);
+    table.chords = 1;
+    table.chord[0].count = 2;
+    table.chord[0].targetHand = 1;
+    snprintf(table.chord[0].target, sizeof table.chord[0].target, "/input/a");
+    table.chord[0].in[0].hand = 0; table.chord[0].in[0].onTouch = 1;
+    snprintf(table.chord[0].in[0].path, sizeof table.chord[0].in[0].path, "/input/a");
+    table.chord[0].in[1].hand = 0; table.chord[0].in[1].onTouch = 1;
+    snprintf(table.chord[0].in[1].path, sizeof table.chord[0].in[1].path, "/input/b");
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["L/input/a/touch"], true, 0);
+    tick();
+    CHECK(!said("R/input/a/click", 1.f), "one of two isn't the combo");
+    CHECK(said("L/input/a/touch", 1.f), "and the touch still reaches the game, as SteamVR's own chords let it");
+    inputApi->UpdateBooleanComponent(H["L/input/b/touch"], true, 0);
+    tick();
+    CHECK(said("R/input/a/click", 1.f), "both is");
+    inputApi->UpdateBooleanComponent(H["L/input/a/touch"], false, 0);
+    tick();
+    CHECK(lastSaid("R/input/a/click") == 0.f, "letting go of either ends it");
+    inputApi->UpdateBooleanComponent(H["L/input/b/touch"], false, 0);
+    tick();
+
+    // Recording: everything goes to the overlay and nothing to the dashboard, then SteamVR's told the truth afterwards.
+    memset(&none, 0, sizeof none);
+    setTable(none);
+    in.enabled.store(0);
+    tick();
+    clearHeard();
+    const uint32_t cursorStart = in.evWrite.load();
+    in.recordUntilMs.store(in.nowMs.load() + 1000);
+    tick();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    inputApi->UpdateScalarComponent(H["R/input/trigger/value"], 0.9f, 0);
+    inputApi->UpdateScalarComponent(H["R/input/trigger/value"], 0.905f, 0);
+    inputApi->UpdateBooleanComponent(H["R/input/system/click"], true, 0);
+    inputApi->UpdateBooleanComponent(H["R/input/system/click"], false, 0);
+    CHECK(!said("R/input/a/click", 1.f) && !said("R/input/trigger/value", 0.9f), "while recording, the dashboard doesn't get your presses");
+    CHECK(said("R/input/system/click", 1.f), "but the Steam button still works, so you can always get out");
+    const uint32_t written = in.evWrite.load() - cursorStart;
+    CHECK(written == 2, "it logged the A and one trigger move, not the tiny wobble or the Steam button (%u)", written);
+    const fhlive::InputEvent& first = in.events[cursorStart % fhlive::kEventRing];
+    CHECK(first.seq.load() == cursorStart + 1 && first.hand == 1 && first.value == 1.f && !strcmp(first.name, "/input/a/click"), "an event says who and what");
+    in.recordUntilMs.store(0);
+    tick();
+    CHECK(lastSaid("R/input/a/click") == 1.f && lastSaid("R/input/trigger/value") == 0.905f, "stopping tells SteamVR what your hands are doing now");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    inputApi->UpdateScalarComponent(H["R/input/trigger/value"], 0.f, 0);
+
+    // The overlay dies mid-recording: it isn't asking any more, so buttons come back by themselves.
+    in.recordUntilMs.store(in.nowMs.load() + 60);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    CHECK(!said("R/input/a/click", 1.f), "held back while it's recording");
+    runFor(100);
+    CHECK(said("R/input/a/click", 1.f), "and back without anyone asking, if the overlay stops asking");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    CHECK(lastSaid("R/input/a/click") == 0.f, "back to passing straight through");
+
+    // Room View's shortcut: the Steam button, twice, with a gap.
+    clearHeard();
+    in.roomToggle.fetch_add(1);
+    runFor(350);
+    int steamPresses = 0;
+    for (const auto& e : heardNow()) if (e.h == H["R/input/system/click"] && e.v == 1.f) ++steamPresses;
+    CHECK(steamPresses == 2 && lastSaid("R/input/system/click") == 0.f, "two presses, and let go of (%d)", steamPresses);
+    CHECK(in.roomToggleDone.load() == in.roomToggle.load(), "and the overlay can see it was done");
+
+    // A controller switched off and on again sets itself up with new handles, and what's saved still works.
+    memset(&table, 0, sizeof table);
+    table.macros = 1;
+    {
+      fhlive::WireMacro& m = table.macro[0];
+      m.hand = 1;
+      snprintf(m.path, sizeof m.path, "/input/b");
+      m.count = 1;
+      step(m.steps[0], 1, "/input/a", fhlive::StepPress, 0);
+    }
+    setTable(table);
+    in.enabled.store(1);
+    tick();
+    makeBool(1004, "R", "/input/b/click");
+    makeBool(1004, "R", "/input/a/click");
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    CHECK(!said("R/input/b/click", 1.f), "the new button's taken over");
+    runFor(15);
+    CHECK(said("R/input/a/click", 1.f), "and presses the new A");
+    runFor(60);
+    CHECK(lastSaid("R/input/a/click") == 0.f, "a step left held at the end gets let go of");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(10);
+
+    // Controllers that aren't the hands: a tracker or the headset are left alone.
+    memset(&none, 0, sizeof none);
+    vr::VRInputComponentHandle_t tracker = 0;
+    inputApi->CreateBooleanComponent(1009, "/input/system/click", &tracker);
+    setTable(none);
+    in.enabled.store(0);
+    tick();
+    in.recordUntilMs.store(in.nowMs.load() + 1000);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(tracker, true, 0);
+    bool trackerThrough = false;
+    for (const auto& e : heardNow()) trackerThrough = trackerThrough || e.h == tracker;
+    CHECK(trackerThrough, "recording only holds back the two hands");
+    in.recordUntilMs.store(0);
+    tick();
+
+    // What this adds to each button report.
+    {
+      using C = std::chrono::steady_clock;
+      const int N = 3000000;
+      const vr::VRInputComponentHandle_t h = H["R/input/thumbstick/x"];
+      // Qualified, this call skips the vtable, and so the hook: that's the fake's own lock and list, to take away.
+      clearHeard();
+      auto t0 = C::now();
+      for (int i = 0; i < N; ++i) fakeInput.FakeInput::UpdateScalarComponent(h, 0.5f, 0);
+      auto t1 = C::now();
+      clearHeard();
+      auto t2 = C::now();
+      for (int i = 0; i < N; ++i) inputApi->UpdateScalarComponent(h, 0.5f, 0);
+      auto t3 = C::now();
+      clearHeard();
+      const double bare = std::chrono::duration<double, std::nano>(t1 - t0).count() / N, hooked = std::chrono::duration<double, std::nano>(t3 - t2).count() / N;
+      printf("cost per button report: %.1f ns added (%.1f through the hook, %.1f without), with nothing recorded and no combo on that button\n", hooked - bare, hooked, bare);
+      printf("at 60000 reports/s, a guess at a ceiling, that's %.4f%% of one CPU core\n", (hooked - bare) * 60000 / 1e9 * 100);
+      CHECK(hooked - bare < 500, "the button hook has become expensive");
+    }
+    {
+      std::lock_guard<std::mutex> lock(fakeInput.m);
+      fakeInput.heard.clear();
+      fakeInput.heard.shrink_to_fit();
+    }
+    in.enabled.store(0);
+    tick();
+  }
+
   // M. Shutting down leaves SteamVR as it found it.
   provider->Cleanup();
   CHECK(vtable[1] == originalSlot, "the hook must come out on Cleanup");
+  for (int i = 0; i < 4; ++i) CHECK(inputVtable[i] == originalInputSlots[i], "button call %d must come out on Cleanup", i);
   p = randPose();
   api->TrackedDevicePoseUpdated(3, p, sizeof p);
   CHECK(!memcmp(host.last, &p, sizeof p), "after Cleanup poses are untouched");

@@ -108,6 +108,34 @@ Each arrow changes one of the six numbers and saves it, like anything else on th
 
 Normally both hands stand aside while the dashboard's open, so its pointers point true. While you're fine adjusting, the hand that isn't holding the laser stays moved, which is what lets you watch it. `GetPrimaryDashboardDevice` says which that is, and if it says neither, both stand aside as usual. Whether you can see the hand behind the dashboard is up to the game.
 
+## Buttons
+
+The driver also hooks `IVRDriverInput`, the call every controller driver reports its buttons through. Valve's own drivers use `IVRDriverInput_005`, which isn't in the public SDK, but its first four functions line up with the SDK's `_003`, and those are the only ones hooked. To see them being set up and learn their names, the add-on has to load before the controllers do, so its settings ask for a high `loadPriority`.
+
+This is what makes two things possible that SteamVR's bindings can't do:
+
+- **Recorded combos.** SteamVR's chords go many to one: hold these and that happens. A recorded combo goes one to many: press this and a whole sequence plays, with its own timing.
+- **Changes that work right away.** A running game keeps the bindings it launched with. If your A should now do what's on the game's B, the driver can send your A's press as B's, so it works without a restart. If nothing on the controller has that action right now, there's no press to send, so that waits for the next launch.
+
+A VR button isn't one thing the way a mouse button is: there's a thumb resting on it, the press itself, and how far a trigger is pulled, each reported separately. Recording folds those into one step, and playing that step sets all of them, so a game reading any of them sees a press.
+
+Since a bug here could stick a button in every game, it's kept simple. The hook itself only remembers what the controller said, and passes it on unless that button's been taken over. Everything else runs in `RunFrame`, SteamVR's own loop for drivers, so there's no new thread. It lets go of anything it's holding, and tells SteamVR what your hands are really doing, whenever the dashboard opens, a hand's being placed, the saved table changes, or SteamVR shuts down. While recording, buttons are held back from SteamVR so the dashboard doesn't get them, but the overlay has to keep asking every second, so if it dies they come straight back. The Steam button is never held back.
+
+In the tests the hook adds too little to measure against a fake's own lock and list, around a nanosecond either way, per button report, with nothing recorded on that button.
+
+## See-through
+
+The dream is a window around each hand showing the real room, with the game everywhere else. SteamVR doesn't allow it on the Frame:
+
+- Passthrough is drawn by SteamVR's compositor, across the whole view. Overlays can only be drawn on top of it, with ordinary alpha, so they can't cut a hole through to it.
+- `IVRTrackedCamera`, the public way to get the camera picture, gives nothing on the Frame, and asking for it can black out passthrough until it's toggled. That was measured by [frame-autopass](https://github.com/bod09/frame-autopass), and I haven't repeated it, because it would interrupt someone's view to find out.
+
+So on the Frame, while you place a hand, this does the next best thing with what's public. It sets `camera/roomViewStyle` to translucent and double-presses the Steam button through the button hook, which is Room View's shortcut. Then a big dark overlay, drawn per eye like the ghost, covers everything except circles around your hands. Inside them you can see your real hands and the in-game ones together, and that's where your eye goes. All of it goes back how it was when you finish.
+
+SteamVR doesn't say whether Room View is on, so that's a guess from `VREvent_CameraSettingsHaveChanged`, which fires when it's toggled. If it guesses wrong you get the opposite of what you wanted for one placement, and double-pressing the Steam button fixes it.
+
+On a PC streaming to a Frame, the headset's own compositor adds the passthrough after the PC's picture arrives, so a dark overlay from the PC couldn't do this. On Windows the panel just says how to turn it on.
+
 ## Tests
 
 None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh` on ARM64 Linux.

@@ -11,7 +11,9 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "fake_vrserver.h"
 
@@ -38,12 +40,49 @@ struct Host : vr::IVRServerDriverHost {
   void SetRecommendedRenderTargetSize(uint32_t, uint32_t, uint32_t) override {}
 };
 
+// Where SteamVR would hear about buttons.
+struct Input : vr::IVRDriverInput {
+  std::mutex m;
+  std::map<vr::VRInputComponentHandle_t, std::string> names;
+  std::vector<std::pair<std::string, float>> heard;
+  vr::VRInputComponentHandle_t next = 500;
+  vr::PropertyContainerHandle_t rightContainer = 0;
+  vr::VRInputComponentHandle_t make(vr::PropertyContainerHandle_t c, const char* name, vr::VRInputComponentHandle_t* h) {
+    std::lock_guard<std::mutex> lock(m);
+    *h = next++;
+    names[*h] = std::string(c == rightContainer ? "R" : "L") + name;
+    return *h;
+  }
+  void note(vr::VRInputComponentHandle_t h, float v) {
+    std::lock_guard<std::mutex> lock(m);
+    heard.push_back({names.count(h) ? names[h] : "?", v});
+  }
+  vr::EVRInputError CreateBooleanComponent(vr::PropertyContainerHandle_t c, const char* n, vr::VRInputComponentHandle_t* h) override { make(c, n, h); return vr::VRInputError_None; }
+  vr::EVRInputError UpdateBooleanComponent(vr::VRInputComponentHandle_t h, bool v, double) override { note(h, v ? 1.f : 0.f); return vr::VRInputError_None; }
+  vr::EVRInputError CreateScalarComponent(vr::PropertyContainerHandle_t c, const char* n, vr::VRInputComponentHandle_t* h, vr::EVRScalarType, vr::EVRScalarUnits) override { make(c, n, h); return vr::VRInputError_None; }
+  vr::EVRInputError UpdateScalarComponent(vr::VRInputComponentHandle_t h, float v, double) override { note(h, v); return vr::VRInputError_None; }
+  vr::EVRInputError CreateHapticComponent(vr::PropertyContainerHandle_t, const char*, vr::VRInputComponentHandle_t*) override { return vr::VRInputError_None; }
+  vr::EVRInputError CreateSkeletonComponent(vr::PropertyContainerHandle_t, const char*, const char*, const char*, vr::EVRSkeletalTrackingLevel, const vr::VRBoneTransform_t*, uint32_t, vr::VRInputComponentHandle_t*) override { return vr::VRInputError_None; }
+  vr::EVRInputError UpdateSkeletonComponent(vr::VRInputComponentHandle_t, vr::EVRSkeletalMotionRange, const vr::VRBoneTransform_t*, uint32_t) override { return vr::VRInputError_None; }
+};
+
+struct Properties : vr::IVRProperties {
+  vr::ETrackedPropertyError ReadPropertyBatch(vr::PropertyContainerHandle_t, vr::PropertyRead_t*, uint32_t) override { return vr::TrackedProp_Success; }
+  vr::ETrackedPropertyError WritePropertyBatch(vr::PropertyContainerHandle_t, vr::PropertyWrite_t*, uint32_t) override { return vr::TrackedProp_Success; }
+  const char* GetPropErrorNameFromEnum(vr::ETrackedPropertyError) override { return ""; }
+  vr::PropertyContainerHandle_t TrackedDeviceToPropertyContainer(vr::TrackedDeviceIndex_t i) override { return 1000 + i; }
+};
+
 struct Context : vr::IVRDriverContext {
   void* host = nullptr;
+  void* input = nullptr;
+  Properties properties;
   void* GetGenericInterface(const char* v, vr::EVRInitError* e) override {
     if (e) *e = vr::VRInitError_None;
     if (!strcmp(v, "IVRServerDriverHost_006")) return host;
-    if (!strncmp(v, "IVRServerDriverHost_", 20)) {
+    if (!strcmp(v, "IVRDriverInput_005")) return input;
+    if (!strcmp(v, vr::IVRProperties_Version)) return &properties;
+    if (!strncmp(v, "IVRServerDriverHost_", 20) || !strncmp(v, "IVRDriverInput_", 15)) {
       if (e) *e = vr::VRInitError_Init_InvalidInterface;
       return nullptr;
     }
@@ -116,7 +155,9 @@ vr::DriverPose_t reportFor(const Pose& p) {
 }
 
 Host g_host;
+Input g_input;
 Context g_ctx;
+std::map<std::string, vr::VRInputComponentHandle_t> g_buttons;  // "R/input/a/click"
 vr::IServerTrackedDeviceProvider* g_provider = nullptr;
 std::thread g_thread;
 std::atomic<bool> g_run{false};
@@ -139,13 +180,14 @@ void reportLoop() {
       if (device != 0 && !g_hooked) g_host.Host::TrackedDevicePoseUpdated(device, report, sizeof report);
       else api->TrackedDevicePoseUpdated(device, report, sizeof report);
     }
+    g_provider->RunFrame();
     std::this_thread::sleep_for(std::chrono::milliseconds(4));
   }
 }
 
 }  // namespace
 
-bool start(const char* driverPath, bool hooked) {
+bool start(const char* driverPath, bool hooked, uint32_t leftDevice, uint32_t rightDevice) {
   void* mod = dlopen(driverPath, RTLD_NOW | RTLD_LOCAL);
   if (!mod) { fprintf(stderr, "fake vrserver: couldn't load %s: %s\n", driverPath, dlerror()); return false; }
   using Factory = void* (*)(const char*, int*);
@@ -155,7 +197,27 @@ bool start(const char* driverPath, bool hooked) {
   g_provider = static_cast<vr::IServerTrackedDeviceProvider*>(factory(vr::IServerTrackedDeviceProvider_Version, &code));
   if (!g_provider) return false;
   g_ctx.host = static_cast<vr::IVRServerDriverHost*>(&g_host);
+  g_ctx.input = static_cast<vr::IVRDriverInput*>(&g_input);
+  g_input.rightContainer = 1000 + rightDevice;
   if (g_provider->Init(&g_ctx) != vr::VRInitError_None) return false;
+  // Each controller sets its buttons up after the add-on's loaded, through its hook.
+  if (leftDevice || rightDevice) {
+    vr::IVRDriverInput* volatile api = &g_input;
+    for (int hand = 0; hand < 2; ++hand) {
+      const vr::PropertyContainerHandle_t c = 1000 + (hand ? rightDevice : leftDevice);
+      const std::string who = hand ? "R" : "L";
+      for (const char* n : {"/input/a/click", "/input/a/touch", "/input/b/click", "/input/b/touch", "/input/x/click", "/input/x/touch", "/input/y/click", "/input/y/touch", "/input/trigger/click", "/input/trigger/touch", "/input/system/click", "/input/thumbstick/click", "/input/thumbstick/touch", "/input/grip/click", "/input/grip/touch", "/input/bumper/click", "/input/bumper/touch"}) {
+        vr::VRInputComponentHandle_t h = 0;
+        api->CreateBooleanComponent(c, n, &h);
+        g_buttons[who + n] = h;
+      }
+      for (const char* n : {"/input/trigger/value", "/input/grip/value", "/input/thumbstick/x", "/input/thumbstick/y"}) {
+        vr::VRInputComponentHandle_t h = 0;
+        api->CreateScalarComponent(c, n, &h, vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedOneSided);
+        g_buttons[who + n] = h;
+      }
+    }
+  }
   g_hooked = hooked;
   g_run = true;
   g_thread = std::thread(reportLoop);
@@ -166,6 +228,24 @@ void stop() {
   if (g_run.exchange(false)) g_thread.join();
   if (g_provider) g_provider->Cleanup();
   g_provider = nullptr;
+}
+
+void reportButton(int hand, const char* name, float value) {
+  vr::IVRDriverInput* volatile api = &g_input;
+  auto it = g_buttons.find(std::string(hand ? "R" : "L") + name);
+  if (it == g_buttons.end()) return;
+  if (strstr(name, "/value") || strstr(name, "/x") == name + strlen(name) - 2 || strstr(name, "/y") == name + strlen(name) - 2) api->UpdateScalarComponent(it->second, value, 0);
+  else api->UpdateBooleanComponent(it->second, value > 0.5f, 0);
+}
+
+std::vector<std::pair<std::string, float>> heardButtons() {
+  std::lock_guard<std::mutex> lock(g_input.m);
+  return g_input.heard;
+}
+
+void clearHeardButtons() {
+  std::lock_guard<std::mutex> lock(g_input.m);
+  g_input.heard.clear();
 }
 
 void setDevicePose(uint32_t device, const Pose& pose) {

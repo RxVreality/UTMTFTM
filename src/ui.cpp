@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include "macro.h"
+
 #include "glove.h"
 #include "platform.h"
 
@@ -441,7 +443,7 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   const struct { DashPage p; const char* id; const char* name; } tabs[3] = {{DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}};
   for (int i = 0; i < 3; ++i) {
     const double x = tabX + i * (tabW - tabD + 3);
-    const bool on = tabs[i].p == page;
+    const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos);
     if (on) slab(c, x, tabY, tabW, tabH, PAPER);
     else frame(c, x, tabY, tabW, tabH, PAPER, 0.45, 2);
     fxOver(c, x, tabY, tabW, tabH, tabs[i].id, true, on);
@@ -480,7 +482,7 @@ std::string dashKey(const DashModel& m) {
     }
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
-  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint;
+  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint + std::to_string(m.canSeeThrough) + std::to_string(m.seeThrough);
   return k;
 }
 
@@ -697,7 +699,10 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(lims[i]) + " cm", on ? INK : PAPER, 1, 1, 1);
     btn.push_back({bx + rd / 2, fy, rw, fh, id});
   }
-  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
+  // Whether your real hands show through while you place one, beside the only other thing that sometimes lives down here.
+  const double seeW = m.canSeeThrough ? 214 : 0, seeGap = m.canSeeThrough ? 10 : 0;
+  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx - seeW - seeGap, fh, "use_global", "Use all-games default", Outline);
+  if (m.canSeeThrough) button(c, btn, R - seeW, fy, seeW, fh, "see_through", m.seeThrough ? "See-through: on" : "See-through: off", m.seeThrough ? Solid : Outline);
 
   // one line of status along the bottom edge
   hline(c, L, R, 700);
@@ -1037,9 +1042,10 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
   };
 
   if (m.step == 0) {
-    text(c, L, headY, 27, m.canMake ? "Your combos for " + m.game : "Start a game to make a combo", true, PAPER, 1, 0, R - L - 250);
-    text(c, L, subY, 18, m.canMake ? "Hold two or more controls together to do one thing. Touching counts, and it doesn't press." : m.why, false, DIM, 1, 0, R - L - 250);
+    text(c, L, headY, 27, m.canMake ? "Your combos for " + m.game : "Start a game to make a combo", true, PAPER, 1, 0, R - L - 410);
+    text(c, L, subY, 18, m.canMake ? "Hold two or more controls together to do one thing. Touching counts, and it doesn't press." : m.why, false, DIM, 1, 0, R - L - 410);
     button(c, btn, R - 230, 116, 230, 48, "combo_new", "New combo", Primary, m.canMake);
+    button(c, btn, R - 390, 116, 150, 48, "page_recorded", "Advanced", Outline);
     pictures();
     const double rowH = 44;
     if (m.saved.empty()) {
@@ -1135,6 +1141,159 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
     text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
   } else if (m.canMake) {
     text(c, L, baseY, 19, "New combos start working the next time the game launches.", false, DIM, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- recorded combos page
+std::string recordedKey(const RecordedModel& m) {
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canRecord) + "|" + m.why + "|" + std::to_string(m.countdown) + "|" + std::to_string(m.selected) + "|" + m.name + "|" + m.plays + "|" + m.note + "|" + std::to_string(m.onTouch) + std::to_string(m.repeat) + std::to_string(m.asRecorded) + std::to_string(m.withTouches) + std::to_string(m.hasBareTouches) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|";
+  for (const RecordedTile& t : m.tiles) k += t.id + t.name + t.hand + std::to_string(t.kind) + ";";
+  for (const RecordedRow& r : m.saved) {
+    k += r.name + ">" + r.plays + ">";
+    for (const RecordedTile& t : r.tiles) k += t.name + t.hand + std::to_string(t.kind) + ";";
+  }
+  return k;
+}
+
+// A step: the control's name, with an arrow for which way it went, the way G HUB draws its steps. A touch is the same with
+// the arrow hollow-looking, in the quieter colour, because nothing got pressed.
+static void recordedTile(cairo_t* c, std::vector<Button>& btn, const RecordedTile& t, double x, double y, double w, double h, bool selected) {
+  const bool down = t.kind == macro::Press || t.kind == macro::Push || t.kind == macro::Touch;
+  const bool touch = t.kind == macro::Touch || t.kind == macro::Untouch;
+  if (selected) slab(c, x, y, w, h, SIGNAL);
+  else if (t.kind == macro::Press || t.kind == macro::Push) slab(c, x, y, w, h, RAISED);
+  frame(c, x, y, w, h, selected ? INK : PAPER, selected ? 1 : touch ? 0.35 : 0.7, 2);
+  if (!t.id.empty()) fxOver(c, x, y, w, h, t.id, true, selected);
+  const RGB ink = selected ? INK : PAPER;
+  const double d = h * kLean, size = std::min(h * 0.26, 17.0);
+  if (!t.hand.empty()) label(c, x + d + 5, y + size * 0.95, size * 0.72, t.hand, selected ? INK : DIM);
+  const double nameY = y + h * 0.56;
+  caps(c, x + w / 2, nameY, size, t.name, ink, 1, 1, 0.6, w - d - 12);
+  const double ay = y + h * 0.78, as = h * 0.085;
+  if (t.kind == macro::Push) {
+    const Glyph g = t.x > 0 ? Glyph::Right : t.x < 0 ? Glyph::Left : t.y > 0 ? Glyph::Up : Glyph::Down;
+    glyph(c, x + w / 2 - d * 0.1, ay, as, g, selected ? INK : SIGNAL);
+  } else if (t.kind == macro::Centre) {
+    label(c, x + w / 2, ay + as, size * 0.7, "Back", selected ? INK : DIM, 1);
+  } else {
+    glyph(c, x + w / 2 - d * 0.1, ay, as, down ? Glyph::Down : Glyph::Up, selected ? INK : touch ? DIM : down ? SIGNAL : PAPER);
+    if (touch) label(c, x + w - d - 5, y + size * 0.95, size * 0.62, "Touch", selected ? INK : DIM, 2);
+  }
+  if (!t.id.empty()) btn.push_back({x, y, w, h, t.id});
+}
+
+// The whole sequence, wrapping if it has to. Returns where it ended.
+static double recordedStrip(cairo_t* c, std::vector<Button>& btn, const std::vector<RecordedTile>& tiles, int selected, double x0, double x1, double y, double w, double h, double gapY) {
+  const double d = h * kLean, step = w - d + 6;
+  double x = x0;
+  for (size_t i = 0; i < tiles.size(); ++i) {
+    if (x + w > x1) { x = x0; y += h + gapY; }
+    recordedTile(c, btn, tiles[i], x, y, w, h, int(i) == selected);
+    x += step;
+  }
+  return y + h;
+}
+
+void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Recorded);
+  const double headY = 138, subY = 164;
+
+  if (m.step == 0) {
+    text(c, L, headY, 27, m.canRecord ? "Recorded combos for " + m.game : "Recorded combos", true, PAPER, 1, 0, R - L - 410);
+    text(c, L, subY, 18, m.canRecord ? "One button plays a whole sequence you recorded, like a mouse macro. No game restart." : m.why, false, DIM, 1, 0, R - L - 410);
+    button(c, btn, R - 230, 116, 230, 48, "macro_record", "Record new", Primary, m.canRecord);
+    button(c, btn, R - 390, 116, 150, 48, "macro_back", "Back", Outline);
+    const double top = 182, rowH = 100;
+    hline(c, L, R, top, LINE);
+    if (m.saved.empty()) {
+      text(c, L, top + 56, 23, "Nothing recorded yet.", true, m.canRecord ? PAPER : DIM);
+      const char* how[3] = {"Tap Record new and do what you'd like one button to do for you. Hold A, pull the trigger, let go of both.",
+                            "The steps show up as you go, and you can move them around or delete them afterwards.",
+                            "Then press the button that should play them. That's it. It works as soon as you close the dashboard."};
+      for (int i = 0; i < 3; ++i) text(c, L, top + 96 + i * 30, 20, how[i], false, DIM, 1, 0, R - L);
+    }
+    for (size_t i = 0; i < m.saved.size() && i < 5; ++i) {
+      const double y = top + i * rowH;
+      const std::string n = std::to_string(i);
+      text(c, L + 8, y + 34, 23, m.saved[i].name, true, PAPER, 1, 0, 340);
+      label(c, L + 8, y + 62, 15, m.saved[i].plays, m.saved[i].plays == "No button yet" ? ALERT : DIM);
+      std::vector<Button> none;
+      recordedStrip(c, none, m.saved[i].tiles, -1, L + 360, R - 240, y + 12, 66, 44, 4);
+      button(c, btn, R - 230, y + 22, 110, 50, "macro_edit_" + n, "Edit", Outline);
+      button(c, btn, R - 112, y + 22, 112, 50, "macro_del_" + n, "Remove", Outline);
+      hline(c, L, R, y + rowH, LINE, 0.6);
+    }
+  } else if (m.step == 1) {
+    slab(c, L, 112, R - L, 150, SIGNAL);
+    text(c, L + 48, 174, 36, "Let go of everything", true, INK, 1, 0, R - L - 260);
+    text(c, L + 34, 222, 21, "Your buttons stop reaching SteamVR while it records, so don't worry about the laser.", false, INK, 1, 0, R - L - 260);
+    caps(c, R - 120, 214, 76, std::to_string(std::max(1, m.countdown)), INK, 1, 1, 0);
+    button(c, btn, L, 640, 150, 48, "macro_cancel", "Cancel", Outline);
+  } else if (m.step == 2) {
+    slab(c, L, 112, R - L, 110, RAISED);
+    lamp(c, L + 40, 142, 26, ALERT);
+    text(c, L + 84, 164, 34, "Recording. Do your sequence.", true, PAPER, 1, 0, R - L - 120);
+    text(c, L + 60, 202, 20, "It stops by itself 2 seconds after you let go of everything.", false, DIM, 1, 0, R - L - 120);
+    if (m.tiles.empty()) text(c, L, 290, 22, "Nothing yet.", false, DIM);
+    recordedStrip(c, btn, m.tiles, -1, L, R, 244, 96, 96, 10);
+  } else if (m.step == 3) {
+    text(c, L, headY, 27, "Check the steps", true, PAPER);
+    text(c, L, subY, 18, "It plays them left to right. Tap one to move or delete it.", false, DIM, 1, 0, R - L);
+    double end = recordedStrip(c, btn, m.tiles, m.selected, L, R, 180, 96, 86, 8);
+    end = std::max(end, 266.0);
+    const double ctlY = end + 10, ctlH = 44;
+    if (m.selected >= 0) {
+      button(c, btn, L, ctlY, 170, ctlH, "macro_left", "Earlier", Outline, m.selected > 0);
+      button(c, btn, L + 180, ctlY, 170, ctlH, "macro_right", "Later", Outline, m.selected + 1 < int(m.tiles.size()));
+      button(c, btn, L + 360, ctlY, 170, ctlH, "macro_remove_step", "Delete", Outline);
+    }
+    const double rowY = std::max(ctlY + ctlH + 10, 390.0), segH = 50, gapY = 60, lw = 150;
+    hline(c, L, R, rowY - 6, LINE);
+    const double colW = mid - 12 - L, rx = mid + 12;
+    label(c, L, rowY + 32, 16, "Plays on");
+    if (m.plays.empty()) button(c, btn, L + lw, rowY, colW - lw, segH, "macro_pick", "Choose a button", Primary);
+    else button(c, btn, L + lw, rowY, colW - lw, segH, "macro_pick", m.plays, Solid);
+    label(c, rx, rowY + 32, 16, "When pressed");
+    segments(c, btn, rx + lw, rowY, R - rx - lw, segH, {{"macro_once", "Once", !m.repeat, true}, {"macro_repeat", "While held", m.repeat, true}});
+    const double row2 = rowY + gapY;
+    label(c, L, row2 + 32, 16, "Name");
+    text(c, L + lw + 8, row2 + 33, 21, m.name, true, PAPER, 1, 0, colW - lw - 160);
+    button(c, btn, L + colW - 140, row2, 140, segH, "macro_rename", "Rename", Outline);
+    label(c, rx, row2 + 32, 16, "Timing");
+    segments(c, btn, rx + lw, row2, R - rx - lw, segH, {{"macro_quick", "Quick", !m.asRecorded, true}, {"macro_mine", "As I did it", m.asRecorded, true}});
+    const double row3 = row2 + gapY;
+    if (m.hasBareTouches) {
+      label(c, rx, row3 + 32, 16, "Touches");
+      segments(c, btn, rx + lw, row3, R - rx - lw, segH, {{"macro_press_only", "Leave out", !m.withTouches, true}, {"macro_touches", "Keep", m.withTouches, true}});
+    }
+    if (rowY + 2 * gapY + segH + 8 <= 640 || !m.hasBareTouches) {
+      button(c, btn, L, 640, 140, 48, "macro_cancel", "Cancel", Outline);
+      button(c, btn, L + 150, 640, 190, 48, "macro_again", "Record again", Outline);
+    }
+    button(c, btn, R - 230, 640, 230, 48, "macro_save", "Save", Primary, !m.plays.empty());
+  } else {
+    slab(c, L, 112, R - L, 110, SIGNAL);
+    text(c, L + 44, 164, 34, "Press or touch what should play this", true, INK, 1, 0, R - L - 80);
+    text(c, L + 30, 202, 20, "Any button, on either controller. Touch it without pressing if you'd like a thumb resting there to set it off.", false, INK, 1, 0, R - L - 80);
+    recordedStrip(c, btn, m.tiles, -1, L, R, 244, 96, 86, 8);
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (m.step == 3 && !m.note.empty()) {
+    text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
+  } else if (m.step == 0 && m.canRecord) {
+    text(c, L, baseY, 19, "Close the dashboard and press the button. Recorded combos don't run while the dashboard's open.", false, DIM, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;
 }

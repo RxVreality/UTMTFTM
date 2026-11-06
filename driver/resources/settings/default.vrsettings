@@ -1,5 +1,6 @@
 {
   "driver_utmtftm": {
-    "enable": true
+    "enable": true,
+    "loadPriority": 1000
   }
 }

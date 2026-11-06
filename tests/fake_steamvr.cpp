@@ -141,6 +141,10 @@ vr::TrackedDevicePose_t toTracked(const Pose& p) {
 }
 
 // ---------------------------------------------------------------- IVRSystem
+bool sysBoolProp(void*, vr::TrackedDeviceIndex_t, vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* err) {
+  if (err) *err = vr::TrackedProp_Success;
+  return prop == vr::Prop_HasCamera_Bool;  // a Frame says it has one
+}
 uint32_t sysStringProp(void*, vr::TrackedDeviceIndex_t idx, vr::ETrackedDeviceProperty prop, char* out, uint32_t size, vr::ETrackedPropertyError* err) {
   std::string v;
   if (prop == vr::Prop_ControllerType_String) v = "frame_controller";
@@ -400,6 +404,7 @@ uint32_t appProperty(void*, const char*, vr::EVRApplicationProperty, char* out, 
 }
 
 // ---------------------------------------------------------------- IVRSettings
+std::atomic<int> g_roomViewStyle{4};  // whatever you had: opaque
 const char* setErrorName(void*, vr::EVRSettingsError) { return "a settings error"; }
 bool setGetBool(void*, const char* section, const char* key, vr::EVRSettingsError* err) {
   if (g_scenarioName == "addon_off" && !strcmp(section, "driver_utmtftm") && !strcmp(key, vr::k_pch_Driver_Enable_Bool)) {
@@ -410,6 +415,15 @@ bool setGetBool(void*, const char* section, const char* key, vr::EVRSettingsErro
   return false;
 }
 std::map<std::string, std::string> g_strings;
+int32_t setGetInt32(void*, const char* section, const char* key, vr::EVRSettingsError* err) {
+  if (err) *err = vr::VRSettingsError_None;
+  return !strcmp(section, "camera") && !strcmp(key, "roomViewStyle") ? g_roomViewStyle.load() : 0;
+}
+void setSetInt32(void*, const char* section, const char* key, int32_t value, vr::EVRSettingsError* err) {
+  if (!strcmp(section, "camera") && !strcmp(key, "roomViewStyle")) g_roomViewStyle = value;
+  say("SetInt32 %s %s %d", section, key, value);
+  if (err) *err = vr::VRSettingsError_None;
+}
 void setGetString(void*, const char* section, const char* key, char* out, uint32_t size, vr::EVRSettingsError* err) {
   std::lock_guard<std::mutex> lock(g.m);
   auto it = g_strings.find(std::string(section) + "/" + key);
@@ -492,6 +506,7 @@ void modelFree(void*, vr::RenderModel_t* rm) {
 
 void fillInterfaces() {
   FILL(g_system, IVRSystem, GetStringTrackedDeviceProperty, sysStringProp);
+  FILL(g_system, IVRSystem, GetBoolTrackedDeviceProperty, sysBoolProp);
   FILL(g_system, IVRSystem, GetTrackedDeviceIndexForControllerRole, sysRoleDevice);
   FILL(g_system, IVRSystem, GetRawZeroPoseToStandingAbsoluteTrackingPose, sysIdentity);
   FILL(g_system, IVRSystem, GetEyeToHeadTransform, sysEye);
@@ -527,6 +542,8 @@ void fillInterfaces() {
   FILL(g_settings, IVRSettings, GetBool, setGetBool);
   FILL(g_settings, IVRSettings, GetString, setGetString);
   FILL(g_settings, IVRSettings, SetString, setSetString);
+  FILL(g_settings, IVRSettings, GetInt32, setGetInt32);
+  FILL(g_settings, IVRSettings, SetInt32, setSetInt32);
   FILL(g_settings, IVRSettings, RemoveKeyInSection, setRemoveKey);
 
   FILL(g_models, IVRRenderModels, GetComponentCount, modelParts);
@@ -636,6 +653,27 @@ void clickCombos(const std::string& id) {
   check(false, ("there's no button called " + id + " on the combos page").c_str());
 }
 
+// And on the recorded combos page.
+void clickRecorded(const std::string& id) {
+  fh::bind::Page& page = *g_pageForClicks;
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::drawRecorded(cv, page.recordedModel("", ""), buttons);
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    page.recordedClick(id);
+    return;
+  }
+  check(false, ("there's no button called " + id + " on the recorded combos page").c_str());
+}
+
 void setDashboard(bool on) {
   std::lock_guard<std::mutex> lock(g.m);
   g.dashboardVisible = on;
@@ -664,7 +702,7 @@ void startServer(bool hooked) {
   fakeserver::setDevicePose(kHmd, kHmdPose);
   fakeserver::setDevicePose(kLeft, kLeftStart);
   fakeserver::setDevicePose(kRight, kRightStart);
-  check(fakeserver::start(driverPath().c_str(), hooked), "the real driver loads and takes the hook");
+  check(fakeserver::start(driverPath().c_str(), hooked, kLeft, kRight), "the real driver loads and takes the hook");
 }
 
 void scenarioPlace() {
@@ -678,6 +716,12 @@ void scenarioPlace() {
   wait(300);
   setDashboard(false);  // the player shuts the dashboard, which is what starts placing
   wait(600);
+  check(g_roomViewStyle == 3, "placing a hand puts Room View in its translucent style", g_roomViewStyle.load());
+  {
+    int presses = 0;
+    for (const auto& b : fakeserver::heardButtons()) if (b.first == "R/input/system/click" && b.second == 1.f) ++presses;
+    check(presses == 2, "and double-presses the Steam button, which is Room View's shortcut", presses);
+  }
 
   {
     std::lock_guard<std::mutex> lock(g.m);
@@ -878,6 +922,107 @@ void scenarioBindings() {
   finish();
 }
 
+// Recorded combos, through the real program and the real driver, from the Combos tab to a press in the game.
+void scenarioRecorded() {
+  const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
+  fh::fixture::writeSteamVR(steamvr, config, fh::platform::dataDir() + "/../fake-games");
+  fh::bind::Dirs dirs;
+  dirs.steamvr = steamvr;
+  dirs.steam = fh::platform::steamDir();
+  dirs.data = fh::platform::dataDir() + "/../fake-page-data";
+  dirs.config = fh::platform::configDirs();
+  fh::bind::Page page(dirs, fh::bind::Settings{[](const std::string&, const std::string&) { return std::string(); }, [](const std::string&, const std::string&, const std::string&) { return true; }, [](const std::string&, const std::string&) {}});
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  page.setGame("steam.app.12345", "steam.app.12345", "Simulated Game");
+  page.setHookState(true, true);
+  g_pageForClicks = &page;
+
+  startServer(true);
+  setScene(kGamePid);
+  wait(3500);
+  using fakeserver::reportButton;
+  const auto heard = [](const std::string& who, float v) {
+    for (const auto& b : fakeserver::heardButtons()) if (b.first == who && b.second == v) return true;
+    return false;
+  };
+  const auto where = [](const std::string& who, float v) {
+    const auto all = fakeserver::heardButtons();
+    for (size_t i = 0; i < all.size(); ++i) if (all[i].first == who && all[i].second == v) return int(i);
+    return -1;
+  };
+  // The program needs to have heard something to offer recording, as it would from any real controller.
+  reportButton(1, "/input/thumbstick/touch", 1);
+  reportButton(1, "/input/thumbstick/touch", 0);
+  wait(1200);
+  check(logHas("button hook: ready"), "the program knows the driver can hear the buttons");
+
+  click("page_combos");
+  wait(800);
+  clickCombos("page_recorded");
+  wait(800);
+
+  // Keep the page used for finding buttons in step with the real one.
+  uint32_t t = 0;
+  const auto copy = [&](int hand, const char* name, float v) { t += 60; fh::macro::Raw r; r.ms = t; r.hand = hand; r.name = name; r.value = v; page.recordedReport(r); };
+  clickRecorded("macro_record");
+  page.recordedTick(0, 0);
+  page.recordedTick(3000, 0);
+  wait(3400);
+  check(logHas("recorded combos: listening"), "after the countdown it's listening");
+  fakeserver::clearHeardButtons();
+  // Press A, press the trigger, let go of the trigger, let go of A.
+  reportButton(1, "/input/a/touch", 1);
+  reportButton(1, "/input/a/click", 1); copy(1, "/input/a/click", 1);
+  wait(150);
+  reportButton(1, "/input/trigger/value", 1);
+  reportButton(1, "/input/trigger/click", 1); copy(1, "/input/trigger/click", 1);
+  wait(150);
+  reportButton(1, "/input/trigger/click", 0); copy(1, "/input/trigger/click", 0);
+  reportButton(1, "/input/trigger/value", 0);
+  wait(150);
+  reportButton(1, "/input/a/click", 0); copy(1, "/input/a/click", 0);
+  reportButton(1, "/input/a/touch", 0);
+  check(!heard("R/input/a/click", 1.f), "while it's recording the dashboard doesn't get any of that");
+  wait(2600);
+  page.recordedTick(4000, t + 5000);
+  check(logHas("recorded combos: stopped listening"), "it stops by itself");
+
+  clickRecorded("macro_pick");
+  wait(500);
+  page.recordedTick(0, 0);
+  reportButton(1, "/input/b/click", 1); copy(1, "/input/b/click", 1);
+  wait(100);
+  reportButton(1, "/input/b/click", 0); copy(1, "/input/b/click", 0);
+  wait(500);
+  clickRecorded("macro_save");
+  wait(800);
+
+  // In the game: B plays it.
+  setDashboard(false);
+  wait(600);
+  fakeserver::clearHeardButtons();
+  reportButton(1, "/input/b/click", 1);
+  wait(500);
+  reportButton(1, "/input/b/click", 0);
+  wait(100);
+  check(!heard("R/input/b/click", 1.f), "the game doesn't see B");
+  const int aDown = where("R/input/a/click", 1.f), trigDown = where("R/input/trigger/click", 1.f), trigUp = where("R/input/trigger/click", 0.f), aUp = where("R/input/a/click", 0.f);
+  check(aDown >= 0 && trigDown > aDown && trigUp > trigDown && aUp > trigUp, "it sees A, then the trigger, then the trigger up, then A up", aDown);
+
+  // The dashboard's open: B's just B.
+  setDashboard(true);
+  wait(400);
+  fakeserver::clearHeardButtons();
+  reportButton(1, "/input/b/click", 1);
+  wait(200);
+  reportButton(1, "/input/b/click", 0);
+  check(heard("R/input/b/click", 1.f) && !heard("R/input/a/click", 1.f), "with the dashboard open, B's just B, for the laser");
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  g_pageForClicks = nullptr;
+  finish();
+}
+
 // Fine adjust with the dashboard open: every tap reaches the real driver, on the hand that isn't pointing.
 void scenarioFine() {
   startServer(true);
@@ -1030,6 +1175,7 @@ class ClientCore {
     if (type == vr::VRApplication_Overlay && g_scenarioName == "bindings") g_scenario = std::thread(scenarioBindings);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "fine") g_scenario = std::thread(scenarioFine);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "combos") g_scenario = std::thread(scenarioCombos);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "recorded") g_scenario = std::thread(scenarioRecorded);
     return vr::VRInitError_None;
   }
   virtual void Cleanup() {

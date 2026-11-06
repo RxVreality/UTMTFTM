@@ -10,7 +10,7 @@ My in-game hands don't line up with my real hands, and it's different in each ga
 
 It runs in the background as a SteamVR add-on, on Windows for PC VR and on the Steam Frame itself for games running on the headset. The page only draws while the dashboard is open or you're placing a hand. There are numbers in [docs/how-it-works.md](docs/how-it-works.md) if you want them.
 
-It's free, and I'm sharing it in case it's useful to someone else. Tip: Using this add-on in conjunction with translucent passthrough produces the best result. 
+It's free, and I'm sharing it in case it's useful to someone else.
 
 ## Install
 
@@ -111,6 +111,20 @@ A combo is a macro for your controller: hold two or more controls together and t
 
 **This is the newest part and it hasn't had much testing.** It writes combos the same way Steam's binding screen does, but it hasn't had much time in real games, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
 
+### Recorded combos
+
+Under **Advanced** on the Combos tab. It's the other way round from a combo: one button plays a whole sequence. Say you want B to hold A, pull the trigger, then let go of both.
+
+1. With a game running, open **Combos**, then **Advanced**, then **Record new**.
+2. Let go of everything, wait for the countdown, and do what you'd like the button to do. Your presses don't reach the dashboard while it's recording, so you don't have to aim the laser anywhere. It stops by itself 2 seconds after you let go.
+3. Check the steps. Tap one to move it or delete it.
+4. Tap **Choose a button** and press the one that should play it. That button stops doing its usual job in that game while this is saved.
+5. **Save**, and close the dashboard. There's no need to restart the game.
+
+Once by default, or over and over while you hold the button. Steps are 50 ms apart unless you pick **As I did it**. Resting a thumb on something doesn't count as a step unless that's all you did, or you ask for it.
+
+It doesn't run while the dashboard is open or while you're placing a hand.
+
 ## Controllers
 
 The picture on the page and the position of the grip come from SteamVR, so it should follow whatever controller you're holding. The buttons need a binding for each kind of controller, and these are the ones it has:
@@ -185,6 +199,8 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 ## Credits
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
+
+Recorded combos came from [u/MMeNDtal](https://www.reddit.com/user/MMeNDtal/) on Reddit, who explained what they should do, using a Logitech mouse's macros as the example, and also found the bug where tapping on the page didn't show until the laser moved.
 
 ## License
 

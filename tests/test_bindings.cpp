@@ -75,6 +75,14 @@ static void shotCombo(const ComboModel& m, const std::string& path) {
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
 }
 
+static void shotRecorded(const RecordedModel& m, const std::string& path) {
+  Canvas cv(1200, 760);
+  std::vector<Button> b;
+  drawRecorded(cv, m, b);
+  cv.savePNG(path);
+  for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+}
+
 static Json::Value readFile(const std::string& path) {
   Json::Value v;
   std::ifstream in(fs::u8path(path));
@@ -678,6 +686,255 @@ static std::string guideText(const BindSide& side, const std::string& id) {
   return r ? r->action : "(no such row)";
 }
 
+static macro::Raw rawOf(uint32_t ms, int hand, const char* name, float v) {
+  macro::Raw r;
+  r.ms = ms;
+  r.hand = hand;
+  r.name = name;
+  r.value = v;
+  return r;
+}
+
+static void testRecorded(const std::string& work, const std::string& out) {
+  const std::string steamvr = work + "/rec-steamvr", config = work + "/rec-config", data = work + "/rec-data";
+  fixture::writeSteamVR(steamvr, config, work + "/rec-games");
+  Dirs d;
+  d.steamvr = steamvr;
+  d.steam = work + "/rec-steam";
+  d.data = data;
+  d.config = {config};
+  FakeSettings fake;
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+  page.setGame("steam.app.777", "", "Named Game");
+  giveModels(page, steamvr);
+
+  // Without the driver that can do it, the page says so.
+  RecordedModel m = page.recordedModel("", "");
+  check(!m.canRecord && m.why.find("Restart SteamVR") != std::string::npos, "an old driver still loaded means restart SteamVR: " + m.why);
+  shotRecorded(m, out + "/recorded_needs_restart.png");
+  page.setHookState(true, false);
+  m = page.recordedModel("", "");
+  check(!m.canRecord && m.why.find("hasn't heard") != std::string::npos, "and a controller it can't hear says that: " + m.why);
+  page.setHookState(true, true);
+  m = page.recordedModel("", "");
+  check(m.canRecord && m.step == 0 && m.saved.empty(), "otherwise it's ready, with nothing saved");
+  shotRecorded(m, out + "/recorded_empty.png");
+  fhlive::InputTable t;
+  page.fillInputTable(t);
+  check(t.macros == 0 && t.routes == 0 && t.chords == 0, "nothing goes to the driver until there's something to do");
+
+  // Record the example.
+  page.recordedClick("macro_record");
+  page.recordedTick(1000, 0);
+  m = page.recordedModel("", "");
+  check(m.step == 1 && m.countdown == 3, "first it counts down");
+  check(!page.recordedListening(), "and nothing's held back from SteamVR yet");
+  shotRecorded(m, out + "/recorded_countdown.png");
+  page.recordedTick(2500, 0);
+  check(page.recordedModel("", "").countdown == 2, "a second at a time");
+  page.recordedTick(4000, 0);
+  m = page.recordedModel("", "");
+  check(m.step == 2 && page.recordedListening(), "then it's recording");
+  check(m.tiles.empty(), "with nothing to show yet");
+  page.recordedReport(rawOf(5000, 1, "/input/a/touch", 1));
+  page.recordedReport(rawOf(5050, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(5300, 1, "/input/trigger/value", 0.9f));
+  page.recordedReport(rawOf(5310, 1, "/input/trigger/click", 1));
+  m = page.recordedModel("", "");
+  check(m.tiles.size() == 2 && m.tiles[0].name == "A" && m.tiles[1].name == "Trigger", "the steps show up as you go");
+  shotRecorded(m, out + "/recorded_recording.png");
+  page.recordedReport(rawOf(5500, 1, "/input/trigger/click", 0));
+  page.recordedReport(rawOf(5700, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(5750, 1, "/input/a/touch", 0));
+  page.recordedTick(6000, 6500);
+  check(page.recordedModel("", "").step == 2, "it waits for you to be sure you've finished");
+  page.recordedTick(8000, 7800);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && !page.recordedListening(), "and stops by itself");
+  check(m.tiles.size() == 4 && m.tiles[0].kind == macro::Press && m.tiles[3].kind == macro::Release, "four steps");
+  check(m.name == "A + Trigger", "with a name to start with: " + m.name);
+  check(m.tiles[1].id == "macro_tile_1", "and they can be tapped");
+  check(m.plays.empty(), "no button yet");
+  shotRecorded(m, out + "/recorded_check.png");
+
+  // Can't save without a button.
+  page.recordedClick("macro_save");
+  check(page.recordedModel("", "").step == 3 && page.status.find("button") != std::string::npos, "saving without a button says what's missing");
+  page.status.clear();
+
+  // Moving and deleting.
+  page.recordedClick("macro_tile_1");
+  m = page.recordedModel("", "");
+  check(m.selected == 1, "tapping a step picks it");
+  shotRecorded(m, out + "/recorded_selected.png");
+  page.recordedClick("macro_left");
+  m = page.recordedModel("", "");
+  check(m.tiles[0].name == "Trigger" && m.selected == 0, "Earlier moves it, and it stays picked");
+  page.recordedClick("macro_right");
+  m = page.recordedModel("", "");
+  check(m.tiles[0].name == "A" && m.selected == 1, "and Later puts it back");
+
+  // Choosing the button: not done until it's let go of, so the dashboard never gets half a press.
+  page.recordedClick("macro_pick");
+  page.recordedTick(9000, 9000);
+  m = page.recordedModel("", "");
+  check(m.step == 4 && page.recordedListening(), "then it listens for the button");
+  shotRecorded(m, out + "/recorded_choose.png");
+  page.recordedReport(rawOf(9100, 1, "/input/b/touch", 1));
+  check(page.recordedModel("", "").step == 4, "a touch might be on its way to a press");
+  page.recordedReport(rawOf(9200, 1, "/input/b/click", 1));
+  check(page.recordedListening(), "pressed, and still listening until it's let go of");
+  page.recordedReport(rawOf(9400, 1, "/input/b/click", 0));
+  m = page.recordedModel("", "");
+  check(m.step == 3 && !page.recordedListening() && m.plays == "B", "let go, and B plays it: " + m.plays);
+  check(m.note.find("stops") != std::string::npos, "and it says B loses its usual job: " + m.note);
+  shotRecorded(m, out + "/recorded_ready.png");
+
+  page.recordedClick("macro_save");
+  m = page.recordedModel("", "");
+  check(m.step == 0 && m.saved.size() == 1 && m.saved[0].name == "A + Trigger" && m.saved[0].plays == "Plays on B", "saved: " + (m.saved.empty() ? "" : m.saved[0].plays));
+  check(m.saved[0].tiles.size() == 4, "and its steps are on the list");
+  shotRecorded(m, out + "/recorded_saved.png");
+
+  // What the driver gets.
+  page.fillInputTable(t);
+  check(t.macros == 1 && t.macro[0].hand == 1 && std::string(t.macro[0].path) == "/input/b" && t.macro[0].count == 4 && std::string(t.macro[0].steps[1].path) == "/input/trigger", "the driver gets it");
+  check(t.macro[0].steps[0].delayMs == 0 && t.macro[0].steps[1].delayMs == macro::kQuickMs, "with the same quick gap G HUB would use");
+
+  // It belongs to this game.
+  page.setGame("steam.app.888", "", "Other Game");
+  page.fillInputTable(t);
+  check(t.macros == 0, "another game doesn't get it");
+  page.setGame("", "", "");
+  page.fillInputTable(t);
+  check(t.macros == 0 && !page.recordedModel("", "").canRecord, "nor does no game");
+  page.setGame("steam.app.777", "", "Named Game");
+
+  // It comes back after a restart.
+  {
+    Page again(d, fake.make());
+    again.load();
+    again.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+    again.setGame("steam.app.777", "", "Named Game");
+    fhlive::InputTable t2;
+    again.fillInputTable(t2);
+    check(t2.macros == 1 && t2.macro[0].count == 4 && !memcmp(&t, &t, sizeof t), "saved combos are there next time");
+  }
+
+  // Editing it, repeat and timing.
+  page.setHookState(true, true);
+  page.recordedClick("macro_edit_0");
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.plays == "B" && m.tiles.size() == 4, "Edit brings it back");
+  page.recordedClick("macro_repeat");
+  page.recordedClick("macro_mine");
+  page.recordedSetName("Prone and fire");
+  page.recordedClick("macro_save");
+  m = page.recordedModel("", "");
+  check(m.saved.size() == 1 && m.saved[0].name == "Prone and fire" && m.saved[0].plays == "Plays on B, repeats while held", "edited in place: " + m.saved[0].plays);
+  page.fillInputTable(t);
+  check(t.macro[0].repeat == 1 && t.macro[0].steps[1].delayMs == 5300 - 5050, "and the driver gets your own timing");
+
+  // A button can only play one thing, and something recorded on top says so.
+  page.recordedClick("macro_record");
+  page.recordedTick(20000, 20000);
+  page.recordedTick(23000, 20000);
+  page.recordedReport(rawOf(23100, 0, "/input/thumbstick/y", 0.9f));
+  page.recordedReport(rawOf(23200, 0, "/input/thumbstick/y", 0.1f));
+  page.recordedTick(24000, 25300);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.tiles.size() == 2 && m.tiles[0].kind == macro::Push && m.tiles[0].y == 100, "a stick records as a direction");
+  shotRecorded(m, out + "/recorded_stick.png");
+  page.recordedClick("macro_pick");
+  page.recordedTick(24100, 25300);
+  page.recordedReport(rawOf(25400, 1, "/input/b/click", 1));
+  page.recordedReport(rawOf(25500, 1, "/input/b/click", 0));
+  page.recordedClick("macro_save");
+  m = page.recordedModel("", "");
+  check(m.saved.size() == 1 && m.status.find("in place of") != std::string::npos, "the same button replaces what was on it: " + m.status);
+
+  // Recording with nothing pressed doesn't leave you stuck, and neither does choosing a button.
+  page.recordedClick("macro_record");
+  page.recordedTick(30000, 30000);
+  page.recordedTick(33000, 30000);
+  check(page.recordedListening(), "listening");
+  page.recordedTick(53001, 30000);
+  check(!page.recordedListening() && page.recordedModel("", "").step == 0, "nothing for 20 seconds and it gives up");
+  page.recordedClick("macro_edit_0");
+  page.recordedClick("macro_pick");
+  page.recordedTick(60000, 0);
+  page.recordedTick(75001, 0);
+  check(!page.recordedListening() && page.recordedModel("", "").step == 3, "so does choosing a button");
+  page.recordedClick("macro_cancel");
+
+  // The dashboard shutting has to stop it listening, or the game loses its buttons.
+  page.recordedClick("macro_record");
+  page.recordedTick(80000, 0);
+  page.recordedTick(83000, 0);
+  check(page.recordedListening(), "listening again");
+  page.recordedClick("macro_abort");
+  check(!page.recordedListening(), "and the dashboard shutting ends it");
+
+  // Remove.
+  page.recordedClick("macro_del_0");
+  check(page.recordedModel("", "").saved.empty() && page.status.find("usual job") != std::string::npos, "Remove gives the button back");
+  page.fillInputTable(t);
+  check(t.macros == 0, "and the driver stops doing it");
+
+  // ---- A rewired button works straight away, when it only means sending one press as another.
+  page.setReference("Quest 3");
+  page.gameStarted();
+  page.setHookState(false, false);
+  page.click("bind_layout");
+  check(page.status.find("next time") != std::string::npos, "with no button hook a layout waits for the next launch: " + page.status);
+  // A new launch, on that layout.
+  page.gameStarted();
+  page.setHookState(true, true);
+  page.click("y:right/input/a");
+  page.click("t:right/input/b");
+  check(page.status.find("Live in the game now") != std::string::npos, "rewiring A to do what's already on a button is live: " + page.status);
+  page.fillInputTable(t);
+  check(t.routes == 1 && t.route[0].fromHand == 1 && std::string(t.route[0].from) == "/input/a" && t.route[0].toHand == 1, "and it goes to the driver as a swap");
+  const std::string carrier = t.routes ? t.route[0].to : "";
+  check(carrier == "/input/x" || carrier == "/input/y" || carrier == "/input/b", "to a button that's on Quest B's job: " + carrier);
+  // The next launch has it in the game's own binding, so the driver has to stop or the swap happens twice.
+  page.gameStarted();
+  page.fillInputTable(t);
+  check(t.routes == 0, "next launch the binding has it, and the swap stops");
+  // Nothing: a button rewired to do nothing.
+  page.click("y:right/input/x");
+  page.click("bind_nothing");
+  page.fillInputTable(t);
+  check(t.routes == 1 && t.route[0].toHand == fhlive::kNoHand && std::string(t.route[0].from) == "/input/x", "a button set to nothing does nothing right away");
+  page.click("bind_reset_wiring");
+  page.gameStarted();
+  page.fillInputTable(t);
+  check(t.routes == 0, "and undoing it undoes that");
+  // Switching to a whole other layout isn't one press for another.
+  page.click("bind_dev");
+  check(page.status.find("next time") != std::string::npos, "a different layout still waits: " + page.status);
+  page.gameStarted();
+
+  // ---- A combo made while the game's running works straight away if its action is on a button.
+  page.comboClick("combo_new");
+  page.comboClick("c:right/input/a");
+  page.comboClick("c:right/input/b");
+  page.comboClick("combo_next");
+  ComboModel cm = page.comboModel("", "");
+  check(!cm.choices.empty(), "the combo has actions to pick from");
+  if (!cm.choices.empty()) {
+    page.comboClick(cm.choices[0].id);
+    check(page.status.find("Live in the game now") != std::string::npos, "a combo for something on a button is live: " + page.status);
+    page.fillInputTable(t);
+    check(t.chords == 1 && t.chord[0].count == 2 && t.chord[0].in[0].onTouch == 1, "and goes to the driver as touches pressing that button");
+    page.gameStarted();
+    page.fillInputTable(t);
+    check(t.chords == 0, "next launch SteamVR does it itself, so the driver stops");
+  }
+}
+
 static void testGuides(const std::string& work) {
   const std::string steamvr = work + "/gsteamvr", config = work + "/gconfig", guides = work + "/guides.json";
   fixture::writeSteamVR(steamvr, config, work + "/ggames");
@@ -1160,6 +1417,7 @@ int main(int argc, char** argv) {
   fs::create_directories(tmp, ec);
   fs::create_directories(fs::u8path(out), ec);
   testFixture(tmp.generic_u8string(), out);
+  testRecorded(tmp.generic_u8string(), out);
   testGuides(tmp.generic_u8string());
   testGuideTable();
   testGuideShots(tmp.generic_u8string(), out);

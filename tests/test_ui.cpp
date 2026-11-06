@@ -1,5 +1,6 @@
 // Renders every UTMTFTM screen to PNG (for review) and checks the UI text logic.
 // Usage: build/test_ui <out-dir>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -85,8 +86,24 @@ int main(int argc, char** argv) {
     m.live = LiveState::Live;
     m.cards[0].applied = off(3.2f, -1.0f, 0.5f, 12, 3, -8); m.cards[0].badge = Badge::GameCustom;
     m.cards[1].applied = Offset{}; m.cards[1].badge = Badge::GameCustom;
-    m.fine = true;
     std::vector<Button> b;
+    m.canSeeThrough = true;
+    m.seeThrough = true;
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_seethrough_on.png");
+    CHECK(std::any_of(b.begin(), b.end(), [](const Button& x) { return x.id == "see_through"; }));
+    m.seeThrough = false;
+    m.gameHasCustom = true;
+    m.hover = "see_through";
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_seethrough_off.png");
+    CHECK(std::any_of(b.begin(), b.end(), [](const Button& x) { return x.id == "see_through"; }));
+    m.canSeeThrough = false;
+    m.gameHasCustom = false;
+    m.hover.clear();
+    drawDashboard(cv, m, b);
+    CHECK(std::none_of(b.begin(), b.end(), [](const Button& x) { return x.id == "see_through"; }));
+    m.fine = true;
     drawDashboard(cv, m, b);
     cv.savePNG(out + "/dash_fine.png");
     int arrows = 0;

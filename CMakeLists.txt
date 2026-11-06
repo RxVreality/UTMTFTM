@@ -110,6 +110,8 @@ add_dependencies(utmtftm driver_utmtftm)
 # Offline tests: no headset, no SteamVR.
 add_executable(test_ghost tests/test_ghost.cpp)
 
+add_executable(test_macro tests/test_macro.cpp)
+
 add_executable(test_ui tests/test_ui.cpp src/ui.cpp ${PLATFORM_SRC} src/glove.cpp)
 target_link_libraries(test_ui PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
 add_dependencies(test_ui utmtftm)
