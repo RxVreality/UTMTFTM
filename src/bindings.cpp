@@ -2205,27 +2205,30 @@ std::vector<Page::LiveRoute> Page::liveRoutes(bool* allOfIt) const {
   return out;
 }
 
-// A combo whose action is on a button: hold the controls and that button gets pressed. That's right away for a new one, and it
-// stays on after the next launch too, when SteamVR's own chord is in the binding as well. Touches in SteamVR's chords don't
-// always go off, and both of them only ever turn on the same action. A combo whose action isn't on a button is left to SteamVR.
+// A combo made since the game launched, whose action is on a button: hold the controls and that button gets pressed.
 std::vector<Combo> Page::liveCombos(bool* allOfIt) {
   std::vector<Combo> out;
   if (allOfIt) *allOfIt = true;
   const Profile* mine = lib_.profile(yours_.type);
-  if (gameKey_.empty() || !launchKnown_ || !mine || combosHere().empty()) return out;
+  if (gameKey_.empty() || !launchKnown_ || !mine) return out;
   std::vector<GameAction> actions;
-  bool routesAll = true;
-  const bool sameLayout = effectiveFrom() == launchFrom_ && liveRoutes(&routesAll).empty() && routesAll;
-  if (sameLayout) actions = comboActions(activeBinding(), *mine);
+  bool haveActions = false;
   for (const Combo& c : combosHere()) {
     const bool old = std::any_of(launchCombos_.begin(), launchCombos_.end(), [&](const Combo& o) {
       if (o.output != c.output || o.inputs.size() != c.inputs.size()) return false;
       for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
       return true;
     });
+    if (old) continue;
+    if (!haveActions) {
+      bool routesAll = true;
+      const bool sameLayout = effectiveFrom() == launchFrom_ && liveRoutes(&routesAll).empty() && routesAll;
+      if (sameLayout) actions = comboActions(activeBinding(), *mine);
+      haveActions = true;
+    }
     auto it = std::find_if(actions.begin(), actions.end(), [&](const GameAction& a) { return lowered(a.output) == lowered(c.output) && !a.row.empty(); });
     if (it == actions.end() || c.inputs.size() > fhlive::kMaxChordInputs) {
-      if (!old && allOfIt) *allOfIt = false;
+      if (allOfIt) *allOfIt = false;
       continue;
     }
     Combo live = c;
@@ -2263,7 +2266,7 @@ void Page::fillInputTable(fhlive::InputTable& t) {
       if (m.hand < 0 || m.path.empty() || t.macros >= fhlive::kMaxMacros) continue;
       macro::toWire(m, t.macro[t.macros++]);
     }
-  if (!launchKnown_) noteLaunch();  // nothing's changed since it launched, then
+  if (!launchKnown_) return;  // nothing's changed since it launched, then
   for (const LiveRoute& r : liveRoutes(nullptr)) {
     if (t.routes >= fhlive::kMaxRoutes) break;
     fhlive::WireRoute& w = t.route[t.routes];

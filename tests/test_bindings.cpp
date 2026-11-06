@@ -931,13 +931,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
     check(t.chords == 1 && t.chord[0].count == 2 && t.chord[0].in[0].onTouch == 1, "and goes to the driver as touches pressing that button");
     page.gameStarted();
     page.fillInputTable(t);
-    check(t.chords == 1, "and it stays after the next launch, because SteamVR's own chords don't always go off on a touch");
-    Page again(d, fake.make());
-    again.load();
-    again.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
-    again.setGame("steam.app.777", "", "Named Game");
-    again.fillInputTable(t);
-    check(t.chords == 1, "including after a restart, with nothing tapped yet");
+    check(t.chords == 0, "next launch SteamVR does it itself, so the driver stops");
   }
 }
 

@@ -6,8 +6,6 @@ Recorded combos, under Advanced on the Combos tab: one button plays back a seque
 
 Rewiring a button now works straight away in the game you're playing, when it only means sending one button's press as another's. So does a new combo, when what it sets off is already on a button. Anything else, like switching to another controller's layout, still waits for the next launch, and the page says which you got.
 
-Combos of touches should go off more reliably. If what a combo sets off is on a button, the add-on now watches for the touches itself instead of leaving it all to SteamVR.
-
 On the Steam Frame, placing a hand turns on Room View in its translucent style by itself and dims everything outside the globes, so you can line your in-game hand up with your real one. It goes back how it was when you finish. There's a See-through button on the Hands tab if you'd rather not.
 
 Fixed: tapping something on the page often showed nothing until the laser moved or you tapped again, and pointing at a button could light up the one you'd been on before.
