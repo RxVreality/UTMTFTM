@@ -154,6 +154,10 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 ## Not tested yet
 
+- Whether the Frame's own driver, `driver_cv`, sets its controllers up after the add-on loads. If it doesn't, the page says recorded combos can't tell which button is which.
+- A recorded combo in a real game, in a real headset. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up and a sequence reaches SteamVR. It can't show how a game takes it.
+- How the dim around the globes looks with Room View on, and whether the Steam button's double-press reaches Room View when the add-on sends it.
+
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.
 - Any layout from the bindings page in a real game. What's written matches SteamVR's own translation and uses the settings route that's worked for offsets, but only a game can show it's right.

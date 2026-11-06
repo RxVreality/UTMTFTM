@@ -321,7 +321,7 @@ struct App {
   void checkHook() {
     const bool ready = Store::inputReady();
     const uint64_t reports = Store::inputReports(), ticks = Store::inputTicks(), unknown = Store::inputUnknown();
-    bindings.setHookState(ready, reports > 0);
+    bindings.setHookState(ready, reports > 0, reports == 0 && unknown > 0);
     if (!hookLogged && (reports > 0 || unknown > 0)) {
       hookLogged = true;
       logf("button hook: %s, %llu reports recognised, %llu unknown, driver called %llu times", ready ? "ready" : "not the driver this needs",
@@ -1294,6 +1294,7 @@ struct App {
       // SteamVR says nothing about whether Room View is on, but this goes off whenever someone switches it.
       if (ev.eventType == vr::VREvent_CameraSettingsHaveChanged && Clock::now() >= ignoreCameraEventsUntil) {
         roomViewGuess = !roomViewGuess;
+        if (spotShowing) weTurnedRoomOn = false;  // you switched it yourself, so it stays how you left it
         logf("see-through: Room View looks %s now", roomViewGuess ? "on" : "off");
       }
     }

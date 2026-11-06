@@ -1140,7 +1140,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
   } else if (m.step == 2 && !m.note.empty()) {
     text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
   } else if (m.canMake) {
-    text(c, L, baseY, 19, "New combos start working the next time the game launches.", false, DIM, 1, 0, R - L);
+    text(c, L, baseY, 19, "A new combo works right away if what it sets off is already on a button. Otherwise, from the next launch.", false, DIM, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;
 }

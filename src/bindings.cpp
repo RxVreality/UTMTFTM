@@ -2362,6 +2362,7 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
   if (!hookOk_) m.why = "Restart SteamVR once to turn this on. The add-on has to be there from the start to hear your buttons.";
   else if (gameKey_.empty()) m.why = "A recorded combo belongs to one game, because what a button does is different in each.";
   else if (!mine) m.why = yours_.type.empty() ? "Turn your controllers on." : "SteamVR has no description of this controller.";
+  else if (hookLate_) m.why = "SteamVR set your controllers up before UTMTFTM loaded, so it can't tell which button is which. Try restarting SteamVR.";
   else if (!hookHeard_) m.why = "UTMTFTM hasn't heard a button from this controller yet. Press one. If this stays, restart SteamVR.";
   m.canRecord = m.why.empty();
   if (!m.canRecord && recStep_ != 0) { recStep_ = 0; editing_ = macro::Recorded{}; }

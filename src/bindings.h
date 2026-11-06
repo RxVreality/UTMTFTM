@@ -199,8 +199,9 @@ class Page {
   bool recordedListening() const;  // what the controllers report is wanted, and the dashboard shouldn't get it
   void recordedReport(const macro::Raw& r);
   void recordedTick(uint32_t clockMs, uint32_t driverMs);
-  // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. Either false says why on the page.
-  void setHookState(bool hookOk, bool heard) { hookOk_ = hookOk; hookHeard_ = heard; }
+  // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. late: it's hearing buttons it never
+  // saw being set up, so it can't tell which is which. Any of those says why on the page.
+  void setHookState(bool hookOk, bool heard, bool late = false) { hookOk_ = hookOk; hookHeard_ = heard; hookLate_ = late; }
   // Everything for the driver about the game that's running: recorded combos, plus whatever's changed since it launched that
   // can work now. Empty with no game.
   void fillInputTable(fhlive::InputTable& t);
@@ -290,7 +291,7 @@ class Page {
   int editingAt_ = -1;  // which saved one it replaces. -1: it's new
   int recSelected_ = -1;
   bool recWantsName_ = false;
-  bool hookOk_ = false, hookHeard_ = false;
+  bool hookOk_ = false, hookHeard_ = false, hookLate_ = false;
   int recCount_ = 0;  // what number the next unnamed one gets
   std::string comboGroup_;
   int comboPage_ = 0;

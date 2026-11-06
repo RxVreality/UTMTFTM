@@ -142,6 +142,16 @@ target_link_libraries(bind_sheet PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS})
 add_dependencies(bind_sheet utmtftm)
 
 if(WIN32)
+  # Tries the button hook against the real SteamVR, with its null headset and a pretend controller. See tests/real_steamvr/run.ps1.
+  add_library(driver_testctl SHARED tests/real_steamvr/driver_testctl.cpp)
+  set_target_properties(driver_testctl PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist/real_steamvr)
+  add_executable(real_hook_check tests/real_steamvr/real_hook_check.cpp)
+  target_link_libraries(real_hook_check PRIVATE openvr_api d3d11 dxgi)
+  set_target_properties(real_hook_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist/real_steamvr)
+  add_custom_command(TARGET real_hook_check POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/third_party/openvr/bin/openvr_api.dll ${CMAKE_SOURCE_DIR}/dist/real_steamvr/
+    VERBATIM)
+
   # Review tool for the hand on every controller SteamVR can draw. Needs SteamVR installed.
   add_executable(glove_sheet tests/glove_sheet.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
   target_link_libraries(glove_sheet PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS})

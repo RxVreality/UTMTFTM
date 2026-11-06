@@ -91,6 +91,7 @@ Tap the button on your own controller, and a yellow bar asks what it should do. 
 - You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
 - Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
+- Rewiring one button does work mid-game, when what you want it to do is already on another button. The add-on just sends that press as the other one until the next launch. The page says whether you got that or have to restart the game.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
 - I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
 
@@ -105,7 +106,7 @@ A combo is a macro for your controller: hold two or more controls together and t
 1. With a game running, open the **Combos** tab and tap **New combo**.
 2. Tap each control you want in it: once for touch, again for press, and again to clear it.
 3. Tap **Next** and pick what it should do.
-4. Restart the game. A new combo doesn't work until then.
+4. If what it sets off is already on a button, it works straight away. Otherwise restart the game.
 
 **Remove** takes one out again. Each game can have six.
 
