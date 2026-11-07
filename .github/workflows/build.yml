@@ -32,6 +32,7 @@ jobs:
           v=${GITHUB_SHA:0:7}
           if [ "$GITHUB_REF_TYPE" = tag ]; then v=${GITHUB_REF_NAME#v}; else v=0.0.0-$v; fi
           sh packaging/linux/make-release.sh "$v"
+          python3 packaging/linux/make-framedrop.py "$v" build/release-frame "$GITHUB_REPOSITORY"
         shell: bash
 
       - name: Install it and run it against a simulated SteamVR
@@ -43,6 +44,8 @@ jobs:
           path: |
             build/release-frame/*.tar.gz
             build/release-frame/*.sha256
+            build/release-frame/*-framedrop.zip
+            build/release-frame/utmtftm.framedrop.json
             build/release-frame/install-frame.sh
 
       - uses: actions/upload-artifact@v4
