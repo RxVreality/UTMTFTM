@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Packs the Steam Frame download for FrameDrop: a zip with the release's own tar.gz and the script Steam runs when
-you press Play, plus the manifest the Install with FrameDrop button points at.
+"""Packs the Steam Frame download for FrameDrop: a zip with the release's own tar.gz, the script that installs it, and
+install-utmtftm, the small ARM64 program Steam starts when you press Play (FrameDrop won't start a script). Also writes
+the manifest the Install with FrameDrop button points at.
 
-Usage: make-framedrop.py <version> <folder with UTMTFTM-<version>-linux-arm64.tar.gz> [repo]
+Usage: make-framedrop.py <version> <folder with UTMTFTM-<version>-linux-arm64.tar.gz and install-utmtftm> [repo]
+Build install-utmtftm first: cc -O2 -s -o <folder>/install-utmtftm packaging/linux/framedrop-launcher.c
 Writes UTMTFTM-<version>-framedrop.zip and utmtftm.framedrop.json into the same folder.
 """
 import hashlib
@@ -38,9 +40,14 @@ with open(os.path.join(folder, tar), "rb") as f:
     tar_bytes = f.read()
 with open(os.path.join(here, "install-utmtftm.sh"), "rb") as f:
     script = f.read()
+with open(os.path.join(folder, "install-utmtftm"), "rb") as f:
+    launcher = f.read()
+if launcher[:4] != b"\x7fELF" or launcher[18] != 183:  # e_machine 183 is AArch64
+    sys.exit("install-utmtftm isn't an ARM64 program")
 
 zip_path = os.path.join(folder, zip_name)
 with zipfile.ZipFile(zip_path, "w") as z:
+    add(z, "UTMTFTM/install-utmtftm", launcher, 0o755)
     add(z, "UTMTFTM/install-utmtftm.sh", script, 0o755)
     add(z, f"UTMTFTM/{tar}", tar_bytes, 0o644)
     add(z, f"UTMTFTM/{tar}.sha256", f"{hashlib.sha256(tar_bytes).hexdigest()}  {tar}\n".encode(), 0o644)
