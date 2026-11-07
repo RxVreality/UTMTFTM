@@ -60,6 +60,7 @@ struct DashModel {
   std::string hint;           // what's under the laser would do, when it isn't obvious
   bool canSeeThrough = false; // the headset has cameras
   bool seeThrough = false;    // your real hands show through while you place one
+  std::string seeThroughLook; // how, when there's more than one way: "window" or "stripes"
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;

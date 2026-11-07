@@ -482,7 +482,7 @@ std::string dashKey(const DashModel& m) {
     }
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
-  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint + std::to_string(m.canSeeThrough) + std::to_string(m.seeThrough);
+  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint + std::to_string(m.canSeeThrough) + std::to_string(m.seeThrough) + m.seeThroughLook;
   return k;
 }
 
@@ -702,7 +702,7 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   // Whether your real hands show through while you place one, beside the only other thing that sometimes lives down here.
   const double seeW = m.canSeeThrough ? 214 : 0, seeGap = m.canSeeThrough ? 10 : 0;
   if (m.gameHasCustom) button(c, btn, sx, fy, R - sx - seeW - seeGap, fh, "use_global", "Use all-games default", Outline);
-  if (m.canSeeThrough) button(c, btn, R - seeW, fy, seeW, fh, "see_through", m.seeThrough ? "See-through: on" : "See-through: off", m.seeThrough ? Solid : Outline);
+  if (m.canSeeThrough) button(c, btn, R - seeW, fy, seeW, fh, "see_through", "See-through: " + (m.seeThrough ? (m.seeThroughLook.empty() ? std::string("on") : m.seeThroughLook) : std::string("off")), m.seeThrough ? Solid : Outline);
 
   // one line of status along the bottom edge
   hline(c, L, R, 700);

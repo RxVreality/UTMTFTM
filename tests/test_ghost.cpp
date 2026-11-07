@@ -201,16 +201,45 @@ int main() {
     const SpotHole holes[2] = {{{0.2f, 1.1f, -0.4f}, 0.15f}, {{-0.3f, 1.2f, -0.45f}, 0.13f}};
     V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm((eyes[0] + eyes[1]) * 0.5f - centre);
     V3 X = norm(cross(V3{0, 1, 0}, toHead)), Y = cross(toHead, X);
-    GhostRenderer::Plane pl{centre, X, Y, toHead, 3.f};
+    constexpr int kPx = 512;
+    GhostRenderer::Plane pl{centre, X, Y, toHead, 3.6f};
     std::vector<uint8_t> px;
-    drawSpot(px, 256, 256, pl, eyes, holes, 2, 0.8f);
-    CHECK(px.size() == 512u * 256u * 4u, "two eyes side by side (%zu bytes)", px.size());
+    drawSpot(px, kPx, kPx, pl, eyes, holes, 2, 0.8f);
+    CHECK(px.size() == size_t(2 * kPx) * kPx * 4u, "two eyes side by side (%zu bytes)", px.size());
     auto alphaAt = [&](int eye, V3 world) {
       float u = 0, v = 0, w = 0;
       if (!GhostRenderer::proj(pl, eyes[eye], world, u, v, w) || u < 0 || u >= 1 || v < 0 || v >= 1) return -1;
-      const int x = int(u * 256), y = int(v * 256);
-      return int(px[(size_t(y) * 512 + size_t(eye) * 256 + x) * 4 + 3]);
+      const int x = int(u * kPx), y = int(v * kPx);
+      return int(px[(size_t(y) * 2 * kPx + size_t(eye) * kPx + x) * 4 + 3]);
     };
+    // No stairs: the edge takes several pixels to go from clear to dim, so the picture's filtering can make it smooth. On J4's first
+    // try (256 pixels, 3 m, a 2 cm edge) one pixel could jump 175 of the 204 steps, and they saw it straight away.
+    {
+      int worst = 0;
+      for (int e = 0; e < 2; ++e)
+        for (int y = 0; y < kPx; ++y) {
+          const uint8_t* row = px.data() + (size_t(y) * 2 * kPx + size_t(e) * kPx) * 4;
+          for (int x = 1; x < kPx; ++x) worst = std::max(worst, std::abs(int(row[x * 4 + 3]) - int(row[(x - 1) * 4 + 3])));
+        }
+      printf("the dim's biggest step between neighbouring pixels: %d of 204\n", worst);
+      CHECK(worst <= 80, "the edge has stairs (%d)", worst);
+    }
+    // Skipping the blocks away from any edge changes nothing. Filling in between corners passed a looser version of this at 32 of
+    // 204, and the circles came out as lumpy polygons you could see straight away, so this has to be the same to within rounding.
+    {
+      float worst = 0;
+      for (int e = 0; e < 2; ++e)
+        for (int y = 0; y < kPx; y += 3)
+          for (int x = 0; x < kPx; x += 3) {
+            const V3 P = pl.c + pl.Y * ((0.5f - (y + 0.5f) / kPx) * pl.S) + pl.X * (((x + 0.5f) / kPx - 0.5f) * pl.S);
+            const float t = std::clamp((spotMiss(eyes[e], P, holes, 2) + 0.015f) / 0.03f, 0.f, 1.f);
+            const float exact = 0.8f * 255.f * t * t * (3 - 2 * t);
+            const int got = px[(size_t(y) * 2 * kPx + size_t(e) * kPx + x) * 4 + 3];
+            worst = std::max(worst, std::fabs(exact - got));
+          }
+      printf("the dim against working out every pixel: at most %.1f of 204 out\n", worst);
+      CHECK(worst < 1.5f, "the blocks changed the picture (%.1f)", worst);
+    }
     for (int e = 0; e < 2; ++e) {
       for (const SpotHole& h : holes) CHECK(alphaAt(e, h.c) == 0, "eye %d can see straight through to a hand (alpha %d)", e, alphaAt(e, h.c));
       CHECK(alphaAt(e, {1.1f, 1.1f, -0.4f}) == int(0.8f * 255), "eye %d: well away from the hands it's dim (alpha %d)", e, alphaAt(e, {1.1f, 1.1f, -0.4f}));
@@ -225,10 +254,107 @@ int main() {
     CHECK(black, "only the alpha changes");
     using C = std::chrono::steady_clock;
     const auto t0 = C::now();
-    for (int i = 0; i < 20; ++i) drawSpot(px, 256, 256, pl, eyes, holes, 2, 0.8f);
+    for (int i = 0; i < 20; ++i) drawSpot(px, kPx, kPx, pl, eyes, holes, 2, 0.8f);
     const double ms = std::chrono::duration<double, std::milli>(C::now() - t0).count() / 20;
     printf("drawing the dim for both eyes: %.2f ms, while a hand's being placed\n", ms);
     CHECK(ms < 12, "the dim is too slow (%.1f ms)", ms);
+  }
+
+  // Virtual Desktop's window: the exact colour inside the globes and nothing outside, in the right place for each eye, whole, and fine-grained.
+  {
+    const V3 eyes[2] = {{-0.032f, 1.6f, 0.f}, {0.032f, 1.6f, 0.f}};
+    constexpr int kPx = 640;
+    struct Pose { SpotHole a, b; const char* what; };
+    const Pose poses[] = {
+        {{{0.2f, 1.1f, -0.4f}, 0.15f}, {{-0.3f, 1.2f, -0.45f}, 0.13f}, "hands in front"},
+        {{{0.05f, 1.2f, -0.5f}, 0.30f}, {{-0.02f, 1.15f, -0.45f}, 0.13f}, "hands together, the biggest globe"},
+        {{{0.65f, 1.3f, -0.4f}, 0.15f}, {{-0.65f, 1.3f, -0.4f}, 0.13f}, "arms apart"},
+        {{{0.3f, 1.5f, -0.25f}, 0.15f}, {{0.1f, 0.9f, -0.6f}, 0.13f}, "one near the face, one low and far"},
+    };
+    // Out either side of you there's nothing sensible to fit, so it only has to stop at the most, rather than run away.
+    {
+      const SpotHole holes[2] = {{{0.8f, 1.3f, -0.05f}, 0.15f}, {{-0.8f, 1.3f, -0.05f}, 0.13f}};
+      V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm((eyes[0] + eyes[1]) * 0.5f - centre);
+      V3 X = norm(cross(V3{0, 1, 0}, toHead)), Y = cross(toHead, X);
+      GhostRenderer::Plane pl{centre, X, Y, toHead, 1.f};
+      const float s = keyPlaneSize(pl, eyes, holes, 2);
+      CHECK(s > 0 && s <= 4.8f, "arms straight out: the window's plane stops at the most (%.2f m)", s);
+      // Nor with your head inside a globe.
+      const SpotHole inside[1] = {{{0.05f, 1.4f, -0.1f}, 0.30f}};
+      CHECK(keyPlaneSize(pl, eyes, inside, 1) == 4.8f, "head inside a globe: the most there is");
+    }
+    std::vector<uint8_t> px;
+    for (const Pose& p : poses) {
+      const SpotHole holes[2] = {p.a, p.b};
+      V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm((eyes[0] + eyes[1]) * 0.5f - centre);
+      V3 X = norm(cross(V3{0, 1, 0}, toHead)), Y = cross(toHead, X);
+      GhostRenderer::Plane pl{centre, X, Y, toHead, 1.f};
+      pl.S = std::ceil(keyPlaneSize(pl, eyes, holes, 2) / 0.4f) * 0.4f;
+      printf("%s: the window's plane is %.1f m, %.1f mm a pixel\n", p.what, pl.S, pl.S / kPx * 1000);
+      for (bool stripes : {false, true}) {
+        drawKeyWindows(px, kPx, kPx, pl, eyes, holes, 2, stripes);
+        CHECK(px.size() == size_t(2 * kPx) * kPx * 4u, "%s: two eyes side by side", p.what);
+        // Only the exact colour Virtual Desktop looks for, or its window has a tinted fringe.
+        bool exact = true;
+        for (size_t i = 0; i < px.size(); i += 4) exact = exact && px[i] == 255 && px[i + 1] == 0 && px[i + 2] == 255;
+        CHECK(exact, "%s: every pixel is the key colour", p.what);
+        // Nothing reaches the plane's edge, or a globe would show a straight side.
+        bool clearEdge = true;
+        for (int e = 0; e < 2; ++e)
+          for (int k = 0; k < kPx; ++k) {
+            const uint8_t* eye = px.data() + size_t(e) * kPx * 4;
+            clearEdge = clearEdge && eye[size_t(k) * 8 * kPx + 3] == 0 && eye[(size_t(k) * 2 * kPx + kPx - 1) * 4 + 3] == 0;
+            clearEdge = clearEdge && eye[size_t(k) * 4 + 3] == 0 && eye[(size_t(kPx - 1) * 2 * kPx + k) * 4 + 3] == 0;
+          }
+        CHECK(clearEdge, "%s: all of each globe is on the plane%s", p.what, stripes ? " (stripes)" : "");
+        // Each eye finds its own hole in the right place, and it's solid or striped, and clear well outside.
+        for (int e = 0; e < 2; ++e) {
+          for (const SpotHole& h : holes) {
+            float u = 0, v = 0, w = 0;
+            CHECK(GhostRenderer::proj(pl, eyes[e], h.c, u, v, w), "%s: the hand's on the plane", p.what);
+            int on = 0, off = 0;
+            for (int d = -12; d < 12; ++d) {
+              const int x = int(u * kPx), y = std::clamp(int(v * kPx) + d, 0, kPx - 1);
+              const int a = px[(size_t(y) * 2 * kPx + size_t(e) * kPx + x) * 4 + 3];
+              CHECK(a == 0 || a == 255, "%s: inside a globe is all or nothing (%d)", p.what, a);
+              (a ? on : off)++;
+            }
+            if (stripes) CHECK(on >= 8 && off >= 8, "%s: stripes show both (%d on, %d off)", p.what, on, off);
+            else CHECK(off == 0, "%s: a window is solid (%d gaps)", p.what, off);
+          }
+        }
+      }
+    }
+    // The edge is as sharp as the picture allows: one pixel from all to nothing, going across it.
+    {
+      const SpotHole holes[2] = {{{0.2f, 1.1f, -0.4f}, 0.15f}, {{-0.3f, 1.2f, -0.45f}, 0.13f}};
+      V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm((eyes[0] + eyes[1]) * 0.5f - centre);
+      V3 X = norm(cross(V3{0, 1, 0}, toHead)), Y = cross(toHead, X);
+      GhostRenderer::Plane pl{centre, X, Y, toHead, 1.f};
+      pl.S = std::ceil(keyPlaneSize(pl, eyes, holes, 2) / 0.4f) * 0.4f;
+      drawKeyWindows(px, kPx, kPx, pl, eyes, holes, 2, false);
+      int widest = 0;
+      for (const SpotHole& h : holes) {
+        // Out from the middle of the globe to where it stops, which crosses its edge square on. Going any further along the row
+        // could skim the other globe's edge, and that's a long stretch of edge rather than a wide one.
+        float u = 0, v = 0, w = 0;
+        GhostRenderer::proj(pl, eyes[0], h.c, u, v, w);
+        const uint8_t* row = px.data() + size_t(int(v * kPx)) * 2 * kPx * 4;
+        for (int dir : {-1, 1}) {
+          int partial = 0;
+          for (int x = int(u * kPx); x >= 0 && x < kPx && row[x * 4 + 3] != 0; x += dir) partial += row[x * 4 + 3] != 255;
+          widest = std::max(widest, partial);
+        }
+      }
+      printf("the window's edge is at most %d pixels wide\n", widest);
+      CHECK(widest <= 2, "the window's edge is too soft (%d pixels)", widest);
+      using C = std::chrono::steady_clock;
+      const auto t0 = C::now();
+      for (int i = 0; i < 20; ++i) drawKeyWindows(px, kPx, kPx, pl, eyes, holes, 2, false);
+      const double ms = std::chrono::duration<double, std::milli>(C::now() - t0).count() / 20;
+      printf("drawing the window for both eyes: %.2f ms, while a hand's being placed\n", ms);
+      CHECK(ms < 12, "the window is too slow (%.1f ms)", ms);
+    }
   }
 
   printf("%s: %d checks, %d failures\n", fails ? "FAILED" : "PASSED", checks, fails);

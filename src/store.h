@@ -28,6 +28,7 @@ struct Store {
   float max_pos = 0.15f;   // metres (SteamVR hard cap 0.30)
   float max_rot = 180.f;   // rotation is never limited (any orientation is valid); only distance is
   bool seeThrough = true;  // your real hands show through while you place one, on a headset that can do it
+  int seeThroughKey = 0;   // the same through Virtual Desktop's colour: 0 off, 1 a window, 2 stripes. Off until asked, or it's just pink circles
   HandPair global;
   std::map<std::string, AppProfile> apps;
 

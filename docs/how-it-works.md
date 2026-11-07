@@ -134,7 +134,11 @@ So on the Frame, while you place a hand, this does the next best thing with what
 
 SteamVR doesn't say whether Room View is on, so that's a guess from `VREvent_CameraSettingsHaveChanged`, which fires when it's toggled. If it guesses wrong you get the opposite of what you wanted for one placement, and double-pressing the Steam button fixes it.
 
-On a PC streaming to a Frame, the headset's own compositor adds the passthrough after the PC's picture arrives, so a dark overlay from the PC couldn't do this. On Windows the panel just says how to turn it on.
+On a PC streaming to a Frame, the headset's own compositor adds the passthrough after the PC's picture arrives, so a dark overlay from the PC couldn't do this. There the panel just says how to turn it on.
+
+Virtual Desktop is different, because it can turn one colour into the real room after the picture reaches the headset. Anything drawn in that exact colour is a real window, which is what the dream was. So when `VirtualDesktop.Server.exe` is running, the See-through button appears, off to begin with because without Virtual Desktop's own setting all you'd get is pink circles. Tapping it draws the globes in pure magenta, red 255, green 0, blue 255, on a plane just big enough to hold them, so the pixels stay fine and the edge can be hard. A soft edge would be neither the colour nor the game.
+
+The catch is that an overlay sits on top of the game, so a solid window hides the in-game hand at the moment you're trying to line it up. Tapping again draws stripes instead, whole rows of pixels on and off. They're level so they look the same from both eyes, and you get the room in one and the game in the next. Stripes rather than a see-through colour because a colour that's half magenta is at the mercy of how Virtual Desktop's slider happens to be set.
 
 ## Tests
 
@@ -156,7 +160,8 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 - Whether the Frame's own driver, `driver_cv`, sets its controllers up after the add-on loads. If it doesn't, the page says recorded combos can't tell which button is which.
 - A recorded combo in a real game, in a real headset. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up and a sequence reaches SteamVR. It can't show how a game takes it.
-- How the dim around the globes looks with Room View on, and whether the Steam button's double-press reaches Room View when the add-on sends it.
+- Room View on the Frame. In the first try the dim appeared and Room View didn't come on, and why isn't known yet. So how the dim looks with the room behind it hasn't been seen either.
+- Virtual Desktop's window in a headset: whether its colour setting takes the overlay as cleanly as `test_ghost`'s numbers suggest, what video compression does to the edge and the stripes, and whether stripes are any use.
 
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.

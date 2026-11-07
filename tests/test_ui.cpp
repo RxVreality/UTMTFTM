@@ -98,8 +98,20 @@ int main(int argc, char** argv) {
     drawDashboard(cv, m, b);
     cv.savePNG(out + "/dash_seethrough_off.png");
     CHECK(std::any_of(b.begin(), b.end(), [](const Button& x) { return x.id == "see_through"; }));
-    m.canSeeThrough = false;
+    // Virtual Desktop's two looks, and the longest thing the line along the bottom has to hold.
     m.gameHasCustom = false;
+    m.seeThrough = true;
+    m.seeThroughLook = "stripes";
+    m.hint = "Your real hands and the in-game hand between the stripes. Tap to turn it off.";
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_seethrough_stripes.png");
+    m.seeThrough = false;
+    m.hint = "Shows your real hands. Set Virtual Desktop's VR Passthrough colour to red 255, green 0, blue 255.";
+    drawDashboard(cv, m, b);
+    cv.savePNG(out + "/dash_seethrough_vd_off.png");
+    m.hint.clear();
+    m.seeThroughLook.clear();
+    m.canSeeThrough = false;
     m.hover.clear();
     drawDashboard(cv, m, b);
     CHECK(std::none_of(b.begin(), b.end(), [](const Button& x) { return x.id == "see_through"; }));

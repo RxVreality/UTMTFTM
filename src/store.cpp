@@ -70,6 +70,7 @@ bool Store::load() {
   if (!readJson(dir() + "/profiles.json", v)) return false;
   max_pos = std::clamp(v["limits"].get("max_pos_m", 0.15).asFloat(), 0.01f, 0.30f);
   seeThrough = v.get("see_through", true).asBool();
+  seeThroughKey = std::clamp(v.get("see_through_key", 0).asInt(), 0, 2);
   max_rot = 180.f;  // never limit rotation (older profiles stored 60)
   global = pairFrom(v["global"]);
   // Version 1 profiles matched the ghost to the old hand mesh, so those matches no longer line up.
@@ -101,6 +102,7 @@ bool Store::save() const {
   v["version"] = 2;
   v["limits"]["max_pos_m"] = max_pos;
   v["see_through"] = seeThrough;
+  v["see_through_key"] = seeThroughKey;
   v["global"] = pairJ(global);
   for (int h = 0; h < 2; ++h) {
     const char* k = h ? "right" : "left";

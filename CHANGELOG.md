@@ -6,7 +6,11 @@ Recorded combos, under Advanced on the Combos tab: one button plays back a seque
 
 Rewiring a button now works straight away in the game you're playing, when it only means sending one button's press as another's. So does a new combo, when what it sets off is already on a button. Anything else, like switching to another controller's layout, still waits for the next launch, and the page says which you got.
 
-On the Steam Frame, placing a hand turns on Room View in its translucent style by itself and dims everything outside the globes, so you can line your in-game hand up with your real one. It goes back how it was when you finish. There's a See-through button on the Hands tab if you'd rather not.
+See-through globes, so you can line your in-game hand up with your real one, with a See-through button on the Hands tab.
+
+With Virtual Desktop on a Quest 3 or a Pico 4 they're real windows onto the room. Turn on VR Passthrough in Virtual Desktop's Streaming tab, press Configure and set the colour to red 255, green 0, blue 255. Then tap See-through. A window hides the in-game hand while it's inside, so tapping again gives you stripes, with your real hand and the in-game hand showing between them.
+
+On the Steam Frame, placing a hand asks for Room View in its translucent style and dims everything outside the globes. In the first try on a real Frame the dim appeared and Room View didn't, so that part isn't finished.
 
 Fixed: tapping something on the page often showed nothing until the laser moved or you tapped again, and pointing at a button could light up the one you'd been on before.
 
