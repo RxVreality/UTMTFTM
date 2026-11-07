@@ -57,7 +57,10 @@ int main() {
     check(read(shown(m.steps, true)) == read(shown(m.steps, false)), "a touch on the way to a press isn't worth a step of its own");
     check(!hasBareTouches(m.steps), "so there's no choice to offer about touches");
 
+    // Your own timing is the normal setting. J4, 7 November: "Quick is too quick."
+    check(m.asRecorded, "a new one plays the way you did it");
     // G HUB's default: the same gap between all of them. Recorded timing has to carry over the touches that were dropped.
+    m.asRecorded = false;
     std::vector<Step> quick = played(m);
     check(quick.size() == 4 && quick[0].delayMs == 0 && quick[1].delayMs == kQuickMs && quick[3].delayMs == kQuickMs, "quick timing is the same gap every time");
     m.asRecorded = true;
@@ -164,6 +167,163 @@ int main() {
     TriggerPicker u;
     u.feed(R(0, 1, "/input/a/touch", 0));
     check(!u.done(), "letting go of something touched before it started picks nothing");
+  }
+
+  // The way you really hold it. A grip and a finger on the trigger from before it started aren't steps, and don't keep it open.
+  {
+    Recorder r;
+    r.begin(1000);
+    check(!r.feed(R(1020, 1, "/input/grip/value", 0.95f)), "a firm grip from before it started isn't a step");
+    check(!r.feed(R(1030, 1, "/input/grip/click", 1)), "nor is its click");
+    check(!r.feed(R(1040, 0, "/input/trigger/value", 0.9f)), "nor a trigger already pulled");
+    check(!r.feed(R(1050, 1, "/input/a/touch", 1)), "nor a thumb already resting");
+    r.feed(R(1500, 1, "/input/grip/value", 0.97f));
+    r.feed(R(1600, 1, "/input/grip/click", 1));
+    r.feed(R(2000, 1, "/input/a/click", 1));
+    r.feed(R(2100, 1, "/input/a/click", 0));
+    r.feed(R(2600, 1, "/input/y/click", 1));
+    r.feed(R(2700, 1, "/input/y/click", 0));
+    r.feed(R(3500, 1, "/input/grip/value", 0.92f));
+    check(read(shown(r.steps(), false)) == "R press a, R release a, R press y, R release y, ", "only the presses show: " + read(shown(r.steps(), false)));
+    check(!r.finished(4600), "it waits two seconds from the last press");
+    check(r.finished(4700), "and stops then, with the grip still held");
+    r.feed(R(5000, 1, "/input/grip/value", 0.1f));
+    r.feed(R(5000, 1, "/input/grip/click", 0));
+    check(read(shown(r.steps(), false)) == "R press a, R release a, R press y, R release y, ", "and letting go afterwards adds nothing");
+  }
+
+  // Squeezed past the line during the take: it shows, since you did it, but it doesn't hold the recording open.
+  {
+    Recorder r;
+    r.begin(0);
+    r.feed(R(500, 1, "/input/grip/value", 0.3f));
+    r.feed(R(600, 1, "/input/a/click", 1));
+    r.feed(R(700, 1, "/input/grip/value", 0.8f));
+    r.feed(R(800, 1, "/input/a/click", 0));
+    check(r.finished(2800), "a squeeze you never let go of doesn't stop it finishing");
+    r.feed(R(2800, 1, "/input/grip/value", 0.8f));
+    check(read(r.steps()) == "R press a, R press grip, R release a, R release grip, ", "and it's let go of at the end: " + read(r.steps()));
+    check(r.steps().back().delayMs == 2000, "after as long as it was really held (" + std::to_string(r.steps().back().delayMs) + ")");
+  }
+
+  // A button left down is different: nobody holds A by accident.
+  {
+    Recorder r;
+    r.begin(0);
+    r.feed(R(500, 1, "/input/a/click", 1));
+    check(!r.finished(5000), "a button still held keeps it open");
+  }
+
+  // A click reading up while the pull's still in, the way the driver reports every button each time, isn't a let-go.
+  {
+    Recorder r;
+    r.begin(0);
+    r.feed(R(500, 1, "/input/trigger/value", 0.5f));
+    r.feed(R(510, 1, "/input/trigger/value", 0.8f));
+    for (uint32_t t = 520; t < 700; t += 10) {
+      r.feed(R(t, 1, "/input/trigger/click", 0));
+      r.feed(R(t + 5, 1, "/input/trigger/value", 0.8f));
+    }
+    check(r.soFar().size() == 1, "no flood of tiles (" + std::to_string(r.soFar().size()) + ")");
+    r.feed(R(800, 1, "/input/trigger/value", 0.1f));
+    check(read(r.soFar()) == "R press trigger, R release trigger, ", "one press: " + read(r.soFar()));
+    // And an Index grip: the fingers read in while the squeeze reads nothing.
+    Recorder i;
+    i.begin(0);
+    i.feed(R(500, 0, "/input/grip/value", 0.5f));
+    i.feed(R(510, 0, "/input/grip/value", 0.9f));
+    i.feed(R(520, 0, "/input/grip/force", 0));
+    i.feed(R(530, 0, "/input/grip/value", 0.95f));
+    check(read(i.soFar()) == "L press grip, ", "the force reading nothing doesn't end it: " + read(i.soFar()));
+  }
+
+  // Thumb already resting when it started: lifting off isn't a step, and neither is a stick your thumb was already holding over.
+  {
+    Recorder r;
+    r.begin(0);
+    r.feed(R(30, 1, "/input/a/touch", 1));
+    r.feed(R(40, 1, "/input/thumbstick/x", 0.9f));
+    check(r.empty(), "nothing yet");
+    r.feed(R(800, 1, "/input/a/touch", 0));
+    r.feed(R(800, 1, "/input/thumbstick/x", 0.0f));
+    check(r.empty(), "and still nothing");
+    r.feed(R(900, 1, "/input/a/touch", 1));
+    check(!r.empty(), "but after that a new touch is new");
+  }
+
+  // One tile per press, split only when something else happens in between.
+  {
+    const auto step = [](int kind, const char* path, int delay = 100) {
+      Step s;
+      s.hand = 1;
+      s.path = path;
+      s.kind = kind;
+      s.delayMs = delay;
+      return s;
+    };
+    std::vector<Step> s = {step(Press, "/input/a", 0), step(Release, "/input/a", 50), step(Press, "/input/y", 300), step(Release, "/input/y", 60)};
+    std::vector<Tile> t = tilesOf(s);
+    check(t.size() == 2 && t[0].count == 2 && t[1].first == 2, "two presses are two tiles");
+    s = {step(Press, "/input/a", 0), step(Press, "/input/trigger", 250), step(Release, "/input/trigger", 190), step(Release, "/input/a", 210)};
+    t = tilesOf(s);
+    check(t.size() == 3 && t[0].count == 1 && t[1].count == 2 && t[2].count == 1, "holding A round a trigger pull splits A, and only A");
+    s = {step(Press, "/input/a", 0), step(Release, "/input/b", 50)};
+    check(tilesOf(s).size() == 2, "something else's let-go doesn't join up");
+    s = {step(Push, "/input/thumbstick", 0), step(Centre, "/input/thumbstick", 50), step(Touch, "/input/b", 90), step(Untouch, "/input/b", 40)};
+    t = tilesOf(s);
+    check(t.size() == 2 && t[0].count == 2 && t[1].count == 2, "a stick and a touch go the same way");
+
+    // Moving one: what's inside goes with it, and the gaps between tiles stay where they were.
+    s = {step(Press, "/input/a", 0), step(Release, "/input/a", 50), step(Press, "/input/y", 300), step(Release, "/input/y", 60), step(Press, "/input/b", 700), step(Release, "/input/b", 70)};
+    int now = moveTile(s, 2, -1);
+    check(now == 1 && read(s) == "R press a, R release a, R press b, R release b, R press y, R release y, ", "a tile moves whole: " + read(s));
+    check(s[2].delayMs == 300 && s[3].delayMs == 70 && s[4].delayMs == 700 && s[5].delayMs == 60, "and its press stays as long as it was");
+    now = moveTile(s, 1, 1);
+    check(now == 2 && read(s) == "R press a, R release a, R press y, R release y, R press b, R release b, ", "and comes back: " + read(s));
+    check(moveTile(s, 0, -1) == 0 && moveTile(s, 2, 1) == 2, "and it can't go off either end");
+    // Moving what was in the middle of a held press lets the press join back up.
+    s = {step(Press, "/input/a", 0), step(Press, "/input/trigger", 250), step(Release, "/input/trigger", 190), step(Release, "/input/a", 210)};
+    now = moveTile(s, 1, -1);
+    check(now == 0 && tilesOf(s).size() == 2 && s[0].path == "/input/trigger" && s[0].delayMs == 0 && s[2].delayMs == 250, "and a split press joins back up");
+    // Deleting takes the whole press.
+    s = {step(Press, "/input/a", 0), step(Release, "/input/a", 50), step(Press, "/input/y", 300), step(Release, "/input/y", 60)};
+    removeTile(s, 0);
+    check(read(s) == "R press y, R release y, " && s[0].delayMs == 0, "deleting takes the press and its let-go: " + read(s));
+    removeTile(s, 5);
+    check(s.size() == 2, "and one that isn't there does nothing");
+  }
+
+  // Sensors out of an old take: the time they took goes to the step after.
+  {
+    Step a; a.hand = 1; a.path = "/input/capsense"; a.kind = Push;
+    Step b; b.hand = 1; b.path = "/input/a"; b.kind = Press; b.delayMs = 400;
+    Step c; c.hand = 1; c.path = "/input/capsense"; c.kind = Centre; c.delayMs = 30;
+    Step d; d.hand = 1; d.path = "/input/a"; d.kind = Release; d.delayMs = 50;
+    const std::vector<Step> kept = onlyWhere(std::vector<Step>{a, b, c, d}, [](const Step& s) { return s.path == "/input/a"; });
+    check(read(kept) == "R press a, R release a, " && kept[0].delayMs == 0 && kept[1].delayMs == 80, "they come out and the timing holds");
+  }
+
+  // Choosing a button with your hand already on the controller.
+  {
+    TriggerPicker p;
+    p.begin(1000);
+    p.feed(R(1020, 1, "/input/grip/value", 0.95f));
+    p.feed(R(1030, 1, "/input/grip/click", 1));
+    p.feed(R(1040, 1, "/input/a/touch", 1));
+    check(!p.done(), "what's already held isn't what you're choosing");
+    p.feed(R(1500, 1, "/input/grip/value", 0.97f));
+    p.feed(R(1510, 1, "/input/grip/click", 1));
+    check(!p.done(), "and it stays that way while you go on holding it");
+    p.feed(R(1600, 1, "/input/a/touch", 0));
+    check(!p.done(), "lifting a thumb that was already resting picks nothing");
+    p.feed(R(1800, 1, "/input/b/click", 1));
+    check(p.done() && p.path() == "/input/b" && !p.onTouch(), "B does");
+    TriggerPicker q;
+    q.begin(0);
+    q.feed(R(20, 1, "/input/grip/value", 0.95f));
+    q.feed(R(500, 1, "/input/grip/value", 0.2f));
+    q.feed(R(800, 1, "/input/grip/value", 0.9f));
+    check(q.done() && q.path() == "/input/grip", "and once it's been let go of, squeezing it again is a choice");
   }
 
   // Names that aren't controls at all.

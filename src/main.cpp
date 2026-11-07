@@ -166,7 +166,7 @@ struct App {
   ModelLoader bindLoader;
   std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
   uint32_t bindStatusSeen = 0;
-  // Recorded combos and anything else the driver's button hook does.
+  // Macros and anything else the driver's button hook does.
   bool inputOn = false, recOn = false;
   uint32_t recCursor = 0;
   std::vector<fhlive::InputEvent*> recEvents;
@@ -347,13 +347,13 @@ struct App {
       if (listen && !recOn) {
         Store::recordingFromHere(recCursor);
         recOn = true;
-        logf("recorded combos: listening");
+        logf("macros: listening");
       }
       if (!listen && recOn) {
         Store::stopRecording();
         recOn = false;
         dashForce = true;
-        logf("recorded combos: stopped listening");
+        logf("macros: stopped listening");
       }
       if (listen) {
         Store::keepRecording();
@@ -896,7 +896,7 @@ struct App {
         if (rec && bindings.recordedWantsName(&name)) {
           bindings.recordedSetName("");
           keyboardFor = name;
-          vr::EVROverlayError ke = vr::VROverlay()->ShowKeyboardForOverlay(dash, vr::k_EGamepadTextInputModeNormal, vr::k_EGamepadTextInputLineModeSingleLine, 0, "Name this combo", 40, name.c_str(), 0);
+          vr::EVROverlayError ke = vr::VROverlay()->ShowKeyboardForOverlay(dash, vr::k_EGamepadTextInputModeNormal, vr::k_EGamepadTextInputLineModeSingleLine, 0, "Name this macro", 40, name.c_str(), 0);
           if (ke != vr::VROverlayError_None) logf("keyboard: %s", vr::VROverlay()->GetOverlayErrorNameFromEnum(ke));
         }
         syncInput();
@@ -1408,7 +1408,7 @@ struct App {
         store.dashLiveHand = liveHand;
         if (mode != Mode::Placing) store.publishLive();
       }
-      // Recorded combos and rewired buttons are for games, not for the dashboard's laser, and not while a hand's being placed.
+      // Macros and rewired buttons are for games, not for the dashboard's laser, and not while a hand's being placed.
       const bool wantInput = !sceneKey.empty() && !dashUp && mode == Mode::Idle;
       if (wantInput != inputOn) {
         inputOn = wantInput;

@@ -73,6 +73,12 @@ static void shotCombo(const ComboModel& m, const std::string& path) {
   drawCombos(cv, m, b);
   cv.savePNG(path);
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+  // J4, 7 November: Save landed on Keep. Shapes lean, so neighbours' boxes cross a little, but no more than that.
+  for (size_t i = 0; i < b.size(); ++i)
+    for (size_t j = i + 1; j < b.size(); ++j) {
+      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
+    }
 }
 
 static void shotRecorded(const RecordedModel& m, const std::string& path) {
@@ -81,6 +87,12 @@ static void shotRecorded(const RecordedModel& m, const std::string& path) {
   drawRecorded(cv, m, b);
   cv.savePNG(path);
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+  // J4, 7 November: Save landed on Keep. Shapes lean, so neighbours' boxes cross a little, but no more than that.
+  for (size_t i = 0; i < b.size(); ++i)
+    for (size_t j = i + 1; j < b.size(); ++j) {
+      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
+    }
 }
 
 static Json::Value readFile(const std::string& path) {
@@ -745,6 +757,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   m = page.recordedModel("", "");
   check(m.tiles.size() == 2 && m.tiles[0].name == "A" && m.tiles[1].name == "Trigger", "the steps show up as you go");
   shotRecorded(m, out + "/recorded_recording.png");
+  page.recordedReport(rawOf(5490, 1, "/input/trigger/value", 0.1f));
   page.recordedReport(rawOf(5500, 1, "/input/trigger/click", 0));
   page.recordedReport(rawOf(5700, 1, "/input/a/click", 0));
   page.recordedReport(rawOf(5750, 1, "/input/a/touch", 0));
@@ -753,7 +766,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   page.recordedTick(8000, 7800);
   m = page.recordedModel("", "");
   check(m.step == 3 && !page.recordedListening(), "and stops by itself");
-  check(m.tiles.size() == 4 && m.tiles[0].kind == macro::Press && m.tiles[3].kind == macro::Release, "four steps");
+  check(m.tiles.size() == 3 && m.tiles[0].kind == macro::Press && !m.tiles[0].both && m.tiles[1].both && m.tiles[2].kind == macro::Release, "A's held round the trigger, so A splits and the trigger's one tile");
   check(m.name == "A + Trigger", "with a name to start with: " + m.name);
   check(m.tiles[1].id == "macro_tile_1", "and they can be tapped");
   check(m.plays.empty(), "no button yet");
@@ -774,7 +787,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   check(m.tiles[0].name == "Trigger" && m.selected == 0, "Earlier moves it, and it stays picked");
   page.recordedClick("macro_right");
   m = page.recordedModel("", "");
-  check(m.tiles[0].name == "A" && m.selected == 1, "and Later puts it back");
+  check(m.tiles[0].name == "A" && m.selected == 1 && m.tiles.size() == 2 && m.tiles[0].both && m.tiles[1].both, "and Later moves it past A, which has joined up into one tile");
 
   // Choosing the button: not done until it's let go of, so the dashboard never gets half a press.
   page.recordedClick("macro_pick");
@@ -794,14 +807,14 @@ static void testRecorded(const std::string& work, const std::string& out) {
 
   page.recordedClick("macro_save");
   m = page.recordedModel("", "");
-  check(m.step == 0 && m.saved.size() == 1 && m.saved[0].name == "A + Trigger" && m.saved[0].plays == "Plays on B", "saved: " + (m.saved.empty() ? "" : m.saved[0].plays));
-  check(m.saved[0].tiles.size() == 4, "and its steps are on the list");
+  check(m.step == 0 && m.saved.size() == 1 && m.saved[0].name == "A + Trigger" && m.saved[0].plays == "Press B to play", "saved: " + (m.saved.empty() ? "" : m.saved[0].plays));
+  check(m.saved[0].tiles.size() == 2, "and its presses are on the list, one tile each");
   shotRecorded(m, out + "/recorded_saved.png");
 
   // What the driver gets.
   page.fillInputTable(t);
-  check(t.macros == 1 && t.macro[0].hand == 1 && std::string(t.macro[0].path) == "/input/b" && t.macro[0].count == 4 && std::string(t.macro[0].steps[1].path) == "/input/trigger", "the driver gets it");
-  check(t.macro[0].steps[0].delayMs == 0 && t.macro[0].steps[1].delayMs == macro::kQuickMs, "with the same quick gap G HUB would use");
+  check(t.macros == 1 && t.macro[0].hand == 1 && std::string(t.macro[0].path) == "/input/b" && t.macro[0].count == 4 && std::string(t.macro[0].steps[2].path) == "/input/trigger", "the driver gets it, every step of it");
+  check(t.macro[0].steps[0].delayMs == 0 && t.macro[0].steps[2].delayMs == 5300 - 5050, "the way you did it, which is the normal setting now");
 
   // It belongs to this game.
   page.setGame("steam.app.888", "", "Other Game");
@@ -827,15 +840,15 @@ static void testRecorded(const std::string& work, const std::string& out) {
   page.setHookState(true, true);
   page.recordedClick("macro_edit_0");
   m = page.recordedModel("", "");
-  check(m.step == 3 && m.plays == "B" && m.tiles.size() == 4, "Edit brings it back");
+  check(m.step == 3 && m.plays == "B" && m.tiles.size() == 2, "Edit brings it back");
   page.recordedClick("macro_repeat");
-  page.recordedClick("macro_mine");
+  page.recordedClick("macro_quick");
   page.recordedSetName("Prone and fire");
   page.recordedClick("macro_save");
   m = page.recordedModel("", "");
-  check(m.saved.size() == 1 && m.saved[0].name == "Prone and fire" && m.saved[0].plays == "Plays on B, repeats while held", "edited in place: " + m.saved[0].plays);
+  check(m.saved.size() == 1 && m.saved[0].name == "Prone and fire" && m.saved[0].plays == "Press B to play, repeats while held", "edited in place: " + m.saved[0].plays);
   page.fillInputTable(t);
-  check(t.macro[0].repeat == 1 && t.macro[0].steps[1].delayMs == 5300 - 5050, "and the driver gets your own timing");
+  check(t.macro[0].repeat == 1 && t.macro[0].steps[1].delayMs == macro::kQuickMs && t.macro[0].steps[2].delayMs == macro::kQuickMs, "and Quick is the same short gap each time");
 
   // A button can only play one thing, and something recorded on top says so.
   page.recordedClick("macro_record");
@@ -845,12 +858,12 @@ static void testRecorded(const std::string& work, const std::string& out) {
   page.recordedReport(rawOf(23200, 0, "/input/thumbstick/y", 0.1f));
   page.recordedTick(24000, 25300);
   m = page.recordedModel("", "");
-  check(m.step == 3 && m.tiles.size() == 2 && m.tiles[0].kind == macro::Push && m.tiles[0].y == 100, "a stick records as a direction");
+  check(m.step == 3 && m.tiles.size() == 1 && m.tiles[0].kind == macro::Push && m.tiles[0].both && m.tiles[0].y == 100, "a stick records as a direction, on one tile");
   shotRecorded(m, out + "/recorded_stick.png");
   page.recordedClick("macro_pick");
   page.recordedTick(24100, 25300);
-  page.recordedReport(rawOf(25400, 1, "/input/b/click", 1));
-  page.recordedReport(rawOf(25500, 1, "/input/b/click", 0));
+  page.recordedReport(rawOf(25600, 1, "/input/b/click", 1));
+  page.recordedReport(rawOf(25700, 1, "/input/b/click", 0));
   page.recordedClick("macro_save");
   m = page.recordedModel("", "");
   check(m.saved.size() == 1 && m.status.find("in place of") != std::string::npos, "the same button replaces what was on it: " + m.status);
@@ -882,6 +895,271 @@ static void testRecorded(const std::string& work, const std::string& out) {
   check(page.recordedModel("", "").saved.empty() && page.status.find("usual job") != std::string::npos, "Remove gives the button back");
   page.fillInputTable(t);
   check(t.macros == 0, "and the driver stops doing it");
+
+  // ---- What J4 found on a real Frame, 7 November.
+  // The Frame's raw hand sensor reports like a stick pushed for as long as you're holding on. It isn't a control, and no game can bind it.
+  // A firm grip from before it started isn't a step either, and neither of them stops it finishing.
+  page.recordedClick("macro_record");
+  page.recordedTick(100000, 100000);
+  page.recordedTick(103000, 100000);
+  page.recordedReport(rawOf(100020, 1, "/input/capsense/x", 0.9f));
+  page.recordedReport(rawOf(100020, 1, "/input/grip/value", 0.95f));
+  page.recordedReport(rawOf(100030, 1, "/input/grip/click", 1));
+  page.recordedReport(rawOf(100040, 1, "/input/grip/touch", 1));
+  page.recordedReport(rawOf(100040, 1, "/input/trigger/touch", 1));
+  page.recordedReport(rawOf(100500, 1, "/input/a/touch", 1));
+  page.recordedReport(rawOf(100550, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(100700, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(101000, 1, "/input/y/click", 1));
+  page.recordedReport(rawOf(101200, 1, "/input/y/click", 0));
+  page.recordedReport(rawOf(101900, 1, "/input/capsense/x", 0.85f));
+  m = page.recordedModel("", "");
+  check(m.tiles.size() == 2 && m.tiles[0].name == "A" && m.tiles[1].name == "Y" && m.tiles[0].both && m.tiles[1].both, "a real grip's take is A and Y, and nothing else");
+  shotRecorded(m, out + "/recorded_two_presses.png");
+  page.recordedTick(105100, 103100);
+  check(page.recordedListening(), "not quite two seconds after the last press, it's still listening");
+  page.recordedTick(105200, 103200);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.tiles.size() == 2 && !m.hasBareTouches, "and it stops by itself two seconds after, still gripping, with no touches to ask about");
+  check(m.asRecorded, "it plays the way you did it unless you say otherwise");
+  shotRecorded(m, out + "/recorded_check_grip.png");
+
+  // Choosing a button: with touches off, a thumb resting on one and lifting off doesn't pick it.
+  page.recordedClick("macro_pick");
+  page.recordedTick(106000, 106000);
+  m = page.recordedModel("", "");
+  check(!m.touchesOn, "touches are off to begin with");
+  shotRecorded(m, out + "/recorded_choose_presses.png");
+  page.recordedReport(rawOf(106020, 1, "/input/grip/value", 0.95f));
+  page.recordedReport(rawOf(106300, 1, "/input/grip/value", 0.96f));
+  page.recordedReport(rawOf(106400, 1, "/input/y/touch", 1));
+  page.recordedReport(rawOf(106500, 1, "/input/y/touch", 0));
+  page.recordedReport(rawOf(106520, 1, "/input/capsense/x", 0.95f));
+  check(page.recordedListening(), "the grip, a touch and the sensor don't choose anything");
+  page.recordedReport(rawOf(106700, 1, "/input/x/click", 1));
+  page.recordedReport(rawOf(106800, 1, "/input/x/click", 0));
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.plays == "X", "pressing X does: " + m.plays);
+
+  // On the page, the worst case for room: lots of touches kept, one picked, and every option showing.
+  page.recordedClick("macro_touch_on");
+  page.recordedClick("macro_cancel");
+  page.recordedClick("macro_record");
+  page.recordedTick(110000, 110000);
+  page.recordedTick(113000, 110000);
+  {
+    const char* const on[4] = {"/input/a/touch", "/input/b/touch", "/input/x/touch", "/input/y/touch"};
+    uint32_t at = 110500;
+    for (int i = 0; i < 26; ++i) {
+      page.recordedReport(rawOf(at, 1, on[i % 4], 1));
+      page.recordedReport(rawOf(at + 20, 1, on[i % 4], 0));
+      at += 60;
+    }
+    page.recordedReport(rawOf(at, 1, "/input/a/click", 1));
+    page.recordedReport(rawOf(at + 20, 1, "/input/a/click", 0));
+    page.recordedTick(120000, at + 2100);
+  }
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.tiles.size() == 1 && m.hasBareTouches && !m.withTouches, "touches left out to begin with, with Touches there to ask for them");
+  shotRecorded(m, out + "/recorded_touches_row.png");
+  page.recordedClick("macro_touches");
+  m = page.recordedModel("", "");
+  check(m.tiles.size() == 27 && m.tiles[0].kind == macro::Touch && m.tiles[0].both, "Keep brings one quiet tile for each brush");
+  shotRecorded(m, out + "/recorded_touches_kept.png");
+  page.recordedClick("macro_tile_3");
+  m = page.recordedModel("", "");
+  check(m.tileFirst == 0 && m.selected == 3, "and one can be picked");
+  shotRecorded(m, out + "/recorded_touches_picked.png");
+  page.recordedClick("macro_steps_next");
+  m = page.recordedModel("", "");
+  check(m.tileFirst == kRecordedTilesPerPage && m.selected == -1, "More shows the ones that don't fit");
+  shotRecorded(m, out + "/recorded_touches_more.png");
+  page.recordedClick("macro_tile_26");
+  m = page.recordedModel("", "");
+  check(m.selected == 26 && m.tileFirst == kRecordedTilesPerPage, "a tile on that page can be picked");
+  page.recordedClick("macro_left");
+  page.recordedClick("macro_left");
+  page.recordedClick("macro_left");
+  m = page.recordedModel("", "");
+  check(m.selected == 23 && m.tileFirst == 0, "and moving it back across the fold goes with it");
+  shotRecorded(m, out + "/recorded_touches_fold.png");
+  // Choosing a button with touches on: a resting thumb can choose.
+  page.recordedClick("macro_pick");
+  page.recordedTick(121000, 121000);
+  m = page.recordedModel("", "");
+  check(m.touchesOn, "with Use touches on it says so");
+  shotRecorded(m, out + "/recorded_choose_touches.png");
+  page.recordedReport(rawOf(121400, 1, "/input/y/touch", 1));
+  page.recordedReport(rawOf(121600, 1, "/input/y/touch", 0));
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.plays == "Touch Y" && m.onTouch, "and resting on Y chooses Touch Y: " + m.plays);
+  page.recordedClick("macro_press_only");
+  m = page.recordedModel("", "");
+  check(m.note.find("Resting on Y") != std::string::npos, "and says what that means: " + m.note);
+  page.recordedClick("macro_save");
+  m = page.recordedModel("", "");
+  check(m.step == 0 && !m.saved.empty() && m.saved.back().plays == "Touch Y to play", "saved: " + (m.saved.empty() ? "" : m.saved.back().plays));
+  shotRecorded(m, out + "/recorded_list_options.png");
+  page.recordedClick("macro_del_" + std::to_string(m.saved.size() - 1));
+  page.status.clear();
+
+  // Too many presses for the driver to play says so.
+  page.recordedClick("macro_record");
+  page.recordedTick(130000, 130000);
+  page.recordedTick(133000, 130000);
+  {
+    uint32_t at = 130500;
+    for (int i = 0; i < 20; ++i) {
+      page.recordedReport(rawOf(at, 1, i % 2 ? "/input/x/click" : "/input/y/click", 1));
+      page.recordedReport(rawOf(at + 20, 1, i % 2 ? "/input/x/click" : "/input/y/click", 0));
+      at += 60;
+    }
+    page.recordedTick(140000, at + 2100);
+  }
+  m = page.recordedModel("", "");
+  check(m.tiles.size() == 20, "twenty presses, twenty tiles");
+  page.recordedClick("macro_pick");
+  page.recordedTick(141000, 141000);
+  page.recordedReport(rawOf(141500, 1, "/input/b/click", 1));
+  page.recordedReport(rawOf(141600, 1, "/input/b/click", 0));
+  m = page.recordedModel("", "");
+  check(m.note.find("first 16 presses") != std::string::npos, "and it says only 16 will play: " + m.note);
+  shotRecorded(m, out + "/recorded_too_long.png");
+  page.recordedClick("macro_cancel");
+
+  // The interview: one question at a time, with nothing counted until you say so.
+  page.recordedClick("macro_touch_off");
+  page.recordedClick("macro_interview_on");
+  m = page.recordedModel("", "");
+  check(m.interviewOn, "Interview's a switch on the list");
+  page.recordedClick("macro_record");
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 0 && m.interview && !page.recordedListening(), "Record new starts by asking");
+  shotRecorded(m, out + "/recorded_ask_1_start.png");
+  page.recordedClick("macro_ask_start");
+  page.recordedTick(150000, 150000);
+  page.recordedTick(153000, 150000);
+  m = page.recordedModel("", "");
+  check(m.step == 2 && page.recordedListening(), "Start counts down and records as usual");
+  page.recordedReport(rawOf(150020, 1, "/input/grip/value", 0.95f));
+  page.recordedReport(rawOf(150040, 1, "/input/trigger/touch", 1));
+  page.recordedReport(rawOf(150050, 1, "/input/capsense/x", 0.95f));
+  page.recordedReport(rawOf(150500, 1, "/input/a/touch", 1));
+  m = page.recordedModel("", "");
+  check(m.feeling.find("Grip") != std::string::npos && m.feeling.find("Touch A") != std::string::npos && m.feeling.find("Touch Trigger") != std::string::npos && m.feeling.find("apsense") == std::string::npos, "it shows what it can feel: " + m.feeling);
+  check(m.tiles.empty(), "and none of that's counted");
+  shotRecorded(m, out + "/recorded_ask_feeling.png");
+  page.recordedReport(rawOf(150600, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(150700, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(151000, 1, "/input/a/touch", 0));
+  page.recordedTick(155000, 153100);
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 1 && m.tiles.size() == 1, "then it asks if that's what you did");
+  shotRecorded(m, out + "/recorded_ask_2_check.png");
+  page.recordedClick("macro_ask_back");
+  check(page.recordedModel("", "").ask == 0, "Back goes back");
+  page.recordedClick("macro_ask_start");
+  page.recordedTick(156000, 156000);
+  page.recordedTick(159000, 156000);
+  page.recordedReport(rawOf(156500, 1, "/input/y/click", 1));
+  page.recordedReport(rawOf(156600, 1, "/input/y/click", 0));
+  page.recordedTick(161000, 158700);
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 1 && m.tiles.size() == 1 && m.tiles[0].name == "Y" && m.name == "Y", "and doing it again replaces it, and the name it came up with: " + m.name);
+  page.recordedClick("macro_ask_next");
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 2 && m.plays.empty(), "next, which button");
+  shotRecorded(m, out + "/recorded_ask_3_button.png");
+  page.recordedClick("macro_ask_next");
+  check(page.recordedModel("", "").ask == 2 && page.status.find("button") != std::string::npos, "it won't go on without one");
+  page.status.clear();
+  page.recordedClick("macro_pick");
+  page.recordedTick(162000, 162000);
+  check(page.recordedListening(), "Choose a button listens");
+  page.recordedReport(rawOf(162400, 1, "/input/b/click", 1));
+  page.recordedReport(rawOf(162500, 1, "/input/b/click", 0));
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 2 && m.plays == "B" && !m.note.empty(), "and comes back to ask if that's the one");
+  shotRecorded(m, out + "/recorded_ask_3_chosen.png");
+  page.recordedClick("macro_ask_next");
+  m = page.recordedModel("", "");
+  check(m.ask == 3, "next, what holding it does");
+  shotRecorded(m, out + "/recorded_ask_4_hold.png");
+  page.recordedClick("macro_repeat");
+  m = page.recordedModel("", "");
+  check(m.ask == 4 && m.repeat, "tapping an answer moves on");
+  shotRecorded(m, out + "/recorded_ask_5_speed.png");
+  page.recordedClick("macro_mine");
+  m = page.recordedModel("", "");
+  check(m.ask == 5 && m.asRecorded && m.name == "Y", "then the name");
+  shotRecorded(m, out + "/recorded_ask_6_name.png");
+  page.recordedClick("macro_save");
+  m = page.recordedModel("", "");
+  check(m.step == 0 && m.saved.back().plays == "Press B to play, repeats while held", "and it saves the same as any other");
+  page.status.clear();
+  const size_t lastSaved = m.saved.size() - 1;
+  page.recordedClick("macro_edit_" + std::to_string(lastSaved));
+  m = page.recordedModel("", "");
+  check(m.step == 3 && !m.interview, "Edit goes straight to the options");
+  page.recordedClick("macro_cancel");
+  page.recordedClick("macro_interview_off");
+
+  // An interview shut with the dashboard goes back to the same question, and doesn't lose the buttons.
+  page.recordedClick("macro_interview_on");
+  page.recordedClick("macro_record");
+  page.recordedClick("macro_ask_start");
+  page.recordedTick(170000, 170000);
+  page.recordedTick(173000, 170000);
+  check(page.recordedListening(), "listening in an interview");
+  page.recordedClick("macro_abort");
+  check(!page.recordedListening() && page.recordedModel("", "").step == 0, "the dashboard shutting ends it, with nothing to keep");
+  page.recordedClick("macro_record");
+  page.recordedClick("macro_ask_start");
+  page.recordedTick(180000, 180000);
+  page.recordedTick(183000, 180000);
+  page.recordedTick(203001, 180000);
+  m = page.recordedModel("", "");
+  check(m.step == 5 && m.ask == 0 && page.status.find("Nothing was pressed") != std::string::npos, "and pressing nothing goes back to the first question");
+  page.status.clear();
+  page.recordedClick("macro_cancel");
+  page.recordedClick("macro_interview_off");
+
+  // Both options last, and an old take loses what was never a control. On the Frame these were saved from before the fix.
+  page.recordedClick("macro_touch_on");
+  page.recordedClick("macro_interview_on");
+  {
+    auto& mine = page.recorded["steam.app.777|frame_controller"];
+    check(!mine.empty(), "there's a macro to test with");
+    macro::Step sensorOn, sensorOff;
+    sensorOn.hand = sensorOff.hand = 1;
+    sensorOn.path = sensorOff.path = "/input/capsense";
+    sensorOn.kind = macro::Push;
+    sensorOn.x = 100;
+    sensorOff.kind = macro::Centre;
+    sensorOff.delayMs = 900;
+    if (!mine.empty()) {
+      const size_t before = mine[0].steps.size();
+      mine[0].steps.insert(mine[0].steps.begin(), sensorOn);
+      mine[0].steps.push_back(sensorOff);
+      page.recordedClick("macro_touch_on");  // saves
+      Page again(d, fake.make());
+      again.load();
+      check(again.macroTouches && again.macroInterview, "both options are still on next time");
+      const auto& loaded = again.recorded["steam.app.777|frame_controller"];
+      check(!loaded.empty() && loaded[0].steps.size() == before, "and the sensor's gone from an old take");
+      mine[0].steps.erase(mine[0].steps.begin());
+      mine[0].steps.pop_back();
+    }
+  }
+  page.recordedClick("macro_touch_off");
+  page.recordedClick("macro_interview_off");
+  m = page.recordedModel("", "");
+  check(!m.touchesOn && !m.interviewOn, "and both go off again");
+  // These have left things on the buttons. The rest of this test starts with nothing saved.
+  while (!page.recordedModel("", "").saved.empty()) page.recordedClick("macro_del_0");
+  page.status.clear();
+  page.fillInputTable(t);
+  check(t.macros == 0, "nothing left over");
 
   // ---- A rewired button works straight away, when it only means sending one press as another.
   page.setReference("Quest 3");

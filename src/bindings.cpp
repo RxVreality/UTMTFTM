@@ -1173,8 +1173,11 @@ void Page::loadPrefs() {
         if (pair.isArray() && pair.size() == 2 && pair[0].isString() && pair[1].isString()) c.inputs.push_back({pair[0].asString(), pair[1].asString()});
       if (!c.output.empty() && !c.inputs.empty()) combos[k].push_back(c);
     }
+  macroTouches = v.get("macro_touches", false).asBool();
+  macroInterview = v.get("macro_interview", false).asBool();
   recorded.clear();
-  for (const auto& k : v["recorded"].getMemberNames())
+  for (const auto& k : v["recorded"].getMemberNames()) {
+    const Profile* p = lib_.profile(k.substr(k.rfind('|') + 1));
     for (const auto& e : v["recorded"][k]) {
       macro::Recorded m;
       m.name = e.get("name", "").asString();
@@ -1195,8 +1198,11 @@ void Page::loadPrefs() {
         step.delayMs = s[5].asInt();
         m.steps.push_back(step);
       }
+      // Sensors that were never controls got into takes made before the recorder learned to leave them out.
+      if (p) m.steps = macro::onlyWhere(m.steps, [&](const macro::Step& s) { return p->find(s.hand ? "right" : "left", s.path) != nullptr; });
       if (!m.steps.empty()) recorded[k].push_back(m);
     }
+  }
 }
 
 void Page::savePrefs() const {
@@ -1238,6 +1244,8 @@ void Page::savePrefs() const {
       v["combos"][k].append(e);
     }
   }
+  v["macro_touches"] = macroTouches;
+  v["macro_interview"] = macroInterview;
   v["recorded"] = Json::objectValue;
   for (const auto& [k, list] : recorded) {
     if (list.empty()) continue;
@@ -2303,7 +2311,7 @@ void Page::fillInputTable(fhlive::InputTable& t) {
   }
 }
 
-// ---------------------------------------------------------------- recorded combos
+// ---------------------------------------------------------------- macros
 std::string Page::controlName(int hand, const std::string& path) const {
   const Profile* p = lib_.profile(yours_.type);
   const Input* i = p ? p->find(hand ? "right" : "left", path) : nullptr;
@@ -2322,8 +2330,9 @@ std::string Page::playsOn(const macro::Recorded& m) const {
 std::vector<RecordedTile> Page::tilesFor(const std::vector<macro::Step>& steps, bool select) const {
   std::vector<RecordedTile> out;
   const Profile* p = lib_.profile(yours_.type);
-  for (size_t i = 0; i < steps.size(); ++i) {
-    const macro::Step& s = steps[i];
+  const std::vector<macro::Tile> tiles = macro::tilesOf(steps);
+  for (size_t i = 0; i < tiles.size(); ++i) {
+    const macro::Step& s = steps[size_t(tiles[i].first)];
     RecordedTile t;
     if (select) t.id = "macro_tile_" + std::to_string(i);
     t.name = controlName(s.hand, s.path);
@@ -2332,7 +2341,40 @@ std::vector<RecordedTile> Page::tilesFor(const std::vector<macro::Step>& steps, 
     t.kind = s.kind;
     t.x = s.x;
     t.y = s.y;
+    t.both = tiles[i].count == 2;
     out.push_back(t);
+  }
+  return out;
+}
+
+// A controller reports more than its controls. The Frame's raw hand sensor, capsense, looks like a stick that's pushed for as long
+// as you're holding on, and no game can bind it. What SteamVR's description of the controller lists is what a person can press.
+bool Page::isControl(int hand, const std::string& path, const std::string& part) const {
+  const Profile* p = lib_.profile(yours_.type);
+  const Input* i = p ? p->find(hand ? "right" : "left", path) : nullptr;
+  if (!i) return false;
+  if (part == "x" || part == "y") return i->kind == "joystick" || i->kind == "trackpad";
+  return true;
+}
+
+std::string Page::feltNow() const {
+  std::map<std::string, int> level;  // 1 touching it, 2 pressing it
+  for (const auto& [key, v] : felt_) {
+    const size_t cut = key.rfind('/');
+    const std::string part = key.substr(cut + 1);
+    int& l = level[key.substr(0, cut)];
+    if (part == "touch") { if (v > 0.5f) l = std::max(l, 1); }
+    else if (part == "click") { if (v > 0.5f) l = 2; }
+    else if (part == "x" || part == "y") { if (std::fabs(v) > 0.6f) l = 2; }
+    else if (v > 0.75f) l = 2;
+    else if (v > 0.1f) l = std::max(l, 1);
+  }
+  std::string out;
+  for (const auto& [control, l] : level) {
+    if (!l) continue;
+    if (!out.empty()) out += ", ";
+    if (l == 1) out += "Touch ";
+    out += controlName(control[0] - '0', control.substr(1));
   }
   return out;
 }
@@ -2360,13 +2402,18 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
   m.statusGood = statusKind == 1;
   const Profile* mine = lib_.profile(yours_.type);
   if (!hookOk_) m.why = "Restart SteamVR once to turn this on. The add-on has to be there from the start to hear your buttons.";
-  else if (gameKey_.empty()) m.why = "A recorded combo belongs to one game, because what a button does is different in each.";
+  else if (gameKey_.empty()) m.why = "A macro belongs to one game, because what a button does is different in each.";
   else if (!mine) m.why = yours_.type.empty() ? "Turn your controllers on." : "SteamVR has no description of this controller.";
   else if (hookLate_) m.why = "SteamVR set your controllers up before UTMTFTM loaded, so it can't tell which button is which. Try restarting SteamVR.";
   else if (!hookHeard_) m.why = "UTMTFTM hasn't heard a button from this controller yet. Press one. If this stays, restart SteamVR.";
   m.canRecord = m.why.empty();
   if (!m.canRecord && recStep_ != 0) { recStep_ = 0; editing_ = macro::Recorded{}; }
   m.step = recStep_;
+  m.ask = recAsk_;
+  m.interview = recGuided_;
+  m.interviewOn = macroInterview;
+  m.touchesOn = macroTouches;
+  m.feeling = feltNow();
   m.countdown = recCountdown_;
 
   auto saved = recorded.find(choiceKey());
@@ -2375,7 +2422,7 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
       RecordedRow row;
       row.name = r.name;
       const std::string on = playsOn(r);
-      row.plays = on.empty() ? "No button yet" : "Plays on " + on + (r.repeat ? ", repeats while held" : "");
+      row.plays = on.empty() ? "No button yet" : (r.onTouch ? on : "Press " + on) + " to play" + (r.repeat ? ", repeats while held" : "");
       row.tiles = tilesFor(macro::played(r), false);
       m.saved.push_back(row);
     }
@@ -2385,17 +2432,21 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
     const bool anyPress = std::any_of(soFar.begin(), soFar.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
     m.tiles = tilesFor(macro::shown(soFar, !anyPress), false);
   }
-  if (recStep_ == 3 || recStep_ == 4) {
+  if (recStep_ == 3 || recStep_ == 4 || recStep_ == 5) {
     const std::vector<macro::Step> steps = macro::shown(editing_.steps, editing_.withTouches);
     m.tiles = tilesFor(steps, recStep_ == 3);
-    m.selected = recSelected_ < int(steps.size()) ? recSelected_ : -1;
+    m.selected = recSelected_ < int(m.tiles.size()) ? recSelected_ : -1;
+    // Whichever page of tiles the picked one is on.
+    if (m.selected >= 0) recFirstTile_ = m.selected / kRecordedTilesPerPage * kRecordedTilesPerPage;
+    if (recFirstTile_ >= int(m.tiles.size())) recFirstTile_ = 0;
+    m.tileFirst = recFirstTile_;
     m.name = editing_.name;
     m.plays = playsOn(editing_);
     m.onTouch = editing_.onTouch;
     m.repeat = editing_.repeat;
     m.asRecorded = editing_.asRecorded;
     m.withTouches = editing_.withTouches;
-    m.hasBareTouches = macro::hasBareTouches(editing_.steps) && std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    m.hasBareTouches = (macroTouches || editing_.withTouches) && macro::hasBareTouches(editing_.steps) && std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
     if (editing_.hand >= 0) {
       const std::string name = controlName(editing_.hand, editing_.path), row = std::string(editing_.hand ? "right" : "left") + editing_.path;
       std::string job;
@@ -2405,6 +2456,7 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
       m.note = (job.empty() ? name + " stops doing its usual job" : name + " stops being " + job) + " in " + gameName_ + " while this is saved.";
       if (editing_.onTouch) m.note = "Resting on " + name + " plays this. Pressing it still does what it did.";
     }
+    if (macro::played(editing_).size() > fhlive::kMaxSteps) m.note = "That's too long to play in full. Only the first " + std::to_string(fhlive::kMaxSteps / 2) + " presses fit, so the rest won't play.";
   }
   return m;
 }
@@ -2412,7 +2464,7 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
 void Page::recordedClickGreyed(const std::string& id) {
   if (id == "macro_record") {
     if (!hookOk_) say("Restart SteamVR once to turn this on.");
-    else if (gameKey_.empty()) say("Start a game first. A recorded combo belongs to one game.");
+    else if (gameKey_.empty()) say("Start a game first. A macro belongs to one game.");
     else say("Turn your controllers on first.");
   } else if (id == "macro_save") say("Choose which button plays it first.");
   else say("That isn't available right now.");
@@ -2425,30 +2477,61 @@ void Page::recordedClick(const std::string& id) {
     recPhaseStarted_ = false;
     recCountdown_ = 3;
     recSelected_ = -1;
+    recFirstTile_ = 0;
   };
   if (id == "macro_record") {
     auto it = recorded.find(choiceKey());
     if (it != recorded.end() && it->second.size() >= 5) { say("Five per game for now, because that's what fits. Remove one first."); return; }
     editing_ = macro::Recorded{};
     editingAt_ = -1;
+    recGuided_ = macroInterview;
+    recFirstTile_ = 0;
+    if (recGuided_) {
+      recStep_ = 5;
+      recAsk_ = 0;
+      return;
+    }
     startRecording();
     return;
   }
-  if (id == "macro_again") { editing_.steps.clear(); startRecording(); return; }
-  if (id == "macro_leave") { if (recStep_ == 1) recStep_ = editing_.steps.empty() ? 0 : 3; return; }  // tapped another page during the countdown
-  if (id == "macro_abort") {  // the dashboard shut while it was listening
-    if (recordedListening()) recStep_ = editing_.steps.empty() ? 0 : 3;
+  if (id == "macro_touch_on" || id == "macro_touch_off") { macroTouches = id == "macro_touch_on"; savePrefs(); return; }
+  if (id == "macro_interview_on" || id == "macro_interview_off") { macroInterview = id == "macro_interview_on"; savePrefs(); return; }
+  if (id == "macro_ask_start") { startRecording(); return; }
+  if (id == "macro_ask_next") {
+    if (recAsk_ == 2 && editing_.hand < 0) { recordedClickGreyed("macro_save"); return; }
+    if (recAsk_ + 1 < kRecordedQuestions) ++recAsk_;
     return;
   }
-  if (id == "macro_cancel") { recStep_ = 0; editing_ = macro::Recorded{}; return; }
+  if (id == "macro_ask_back") { if (recAsk_ > 0) --recAsk_; return; }
+  if (id == "macro_steps_prev") { recFirstTile_ = std::max(0, recFirstTile_ - kRecordedTilesPerPage); recSelected_ = -1; return; }
+  if (id == "macro_steps_next") { recFirstTile_ += kRecordedTilesPerPage; recSelected_ = -1; return; }
+  if (id == "macro_again") { editing_.steps.clear(); startRecording(); return; }
+  if (id == "macro_leave") {  // tapped another page during the countdown
+    if (recStep_ == 1) {
+      if (editing_.steps.empty()) recStep_ = 0;
+      else backFromListening();
+    }
+    return;
+  }
+  if (id == "macro_abort") {  // the dashboard shut while it was listening
+    if (recordedListening()) {
+      if (editing_.steps.empty()) recStep_ = 0;
+      else backFromListening();
+    }
+    return;
+  }
+  if (id == "macro_cancel") { recStep_ = 0; editing_ = macro::Recorded{}; recGuided_ = false; return; }
   if (id.rfind("macro_edit_", 0) == 0) {
     auto it = recorded.find(choiceKey());
     const size_t at = size_t(std::atoi(id.c_str() + 11));
     if (it == recorded.end() || at >= it->second.size()) return;
     editing_ = it->second[at];
+    recAutoName_.clear();
     editingAt_ = int(at);
     recStep_ = 3;
+    recGuided_ = false;
     recSelected_ = -1;
+    recFirstTile_ = 0;
     return;
   }
   if (id.rfind("macro_del_", 0) == 0) {
@@ -2469,21 +2552,15 @@ void Page::recordedClick(const std::string& id) {
   }
   if (id == "macro_left" || id == "macro_right" || id == "macro_remove_step") {
     // These work on what's showing, so whatever's hidden is gone from here on.
-    if (recSelected_ < 0 || recSelected_ >= int(showing.size())) return;
+    if (recSelected_ < 0 || recSelected_ >= int(macro::tilesOf(showing).size())) return;
     editing_.steps = showing;
     if (id == "macro_remove_step") {
-      editing_.steps.erase(editing_.steps.begin() + recSelected_);
-      if (!editing_.steps.empty()) editing_.steps[0].delayMs = 0;
+      macro::removeTile(editing_.steps, recSelected_);
       recSelected_ = -1;
       if (editing_.steps.empty()) { recStep_ = 0; editing_ = macro::Recorded{}; say("That was the last step, so there's nothing left to save."); }
       return;
     }
-    const int to = recSelected_ + (id == "macro_left" ? -1 : 1);
-    if (to < 0 || to >= int(editing_.steps.size())) return;
-    // The steps swap, and the gaps between them stay where they were.
-    std::swap(editing_.steps[recSelected_], editing_.steps[to]);
-    std::swap(editing_.steps[recSelected_].delayMs, editing_.steps[to].delayMs);
-    recSelected_ = to;
+    recSelected_ = macro::moveTile(editing_.steps, recSelected_, id == "macro_left" ? -1 : 1);
     return;
   }
   if (id == "macro_pick") {
@@ -2492,10 +2569,12 @@ void Page::recordedClick(const std::string& id) {
     recPhaseStarted_ = false;
     return;
   }
-  if (id == "macro_once") { editing_.repeat = false; return; }
-  if (id == "macro_repeat") { editing_.repeat = true; return; }
-  if (id == "macro_quick") { editing_.asRecorded = false; return; }
-  if (id == "macro_mine") { editing_.asRecorded = true; return; }
+  // In the interview these answer the question, so it moves on.
+  const auto answered = [&] { if (recStep_ == 5 && recAsk_ + 1 < kRecordedQuestions) ++recAsk_; };
+  if (id == "macro_once") { editing_.repeat = false; answered(); return; }
+  if (id == "macro_repeat") { editing_.repeat = true; answered(); return; }
+  if (id == "macro_quick") { editing_.asRecorded = false; answered(); return; }
+  if (id == "macro_mine") { editing_.asRecorded = true; answered(); return; }
   if (id == "macro_press_only") { editing_.withTouches = false; return; }
   if (id == "macro_touches") { editing_.withTouches = true; return; }
   if (id == "macro_rename") { recWantsName_ = true; return; }
@@ -2511,6 +2590,7 @@ void Page::recordedClick(const std::string& id) {
     list.push_back(done);
     savePrefs();
     recStep_ = 0;
+    recGuided_ = false;
     editing_ = macro::Recorded{};
     say(done.name + " is on " + playsOn(done) + (replaced ? ", in place of what was there." : ".") + " Works as soon as you close the dashboard.", 1);
     return;
@@ -2519,29 +2599,44 @@ void Page::recordedClick(const std::string& id) {
 
 bool Page::recordedListening() const { return recStep_ == 2 || recStep_ == 4; }
 
+void Page::backFromListening() {
+  recStep_ = recGuided_ ? 5 : 3;
+  recPhaseStarted_ = false;
+}
+
 void Page::recordedReport(const macro::Raw& r) {
-  if (recStep_ == 2) { recorder_.feed(r); return; }
+  std::string path, part;
+  if (!macro::splitName(r.name, path, part) || !isControl(r.hand, path, part)) return;
+  felt_[std::to_string(r.hand) + path + "/" + part] = r.value;
+  const bool counts = macroTouches || part != "touch";
+  if (recStep_ == 2) {
+    if (counts) recorder_.feed(r);
+    return;
+  }
   if (recStep_ != 4) return;
   const bool was = picker_.done();
-  picker_.feed(r);
+  if (counts) picker_.feed(r);
   if (picker_.done() && !was) {
     editing_.hand = picker_.hand();
     editing_.path = picker_.path();
     editing_.onTouch = picker_.onTouch();
-    if (picker_.onTouch()) { recStep_ = 3; recPhaseStarted_ = false; }
+    if (picker_.onTouch()) backFromListening();
     return;
   }
   // The press stays with us until it's let go of, so the dashboard doesn't get half of it and click something.
-  std::string path, part;
-  if (picker_.done() && !picker_.onTouch() && macro::splitName(r.name, path, part) && r.hand == picker_.hand() && path == picker_.path() && (part == "click" || part == "value") && r.value < 0.4f) {
-    recStep_ = 3;
-    recPhaseStarted_ = false;
-  }
+  if (picker_.done() && !picker_.onTouch() && r.hand == picker_.hand() && path == picker_.path() && (part == "click" || part == "value") && r.value < 0.4f) backFromListening();
 }
 
 void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
   if (recStep_ != 1 && recStep_ != 2 && recStep_ != 4) return;
-  if (!recPhaseStarted_) { recPhaseStarted_ = true; recPhaseStart_ = clockMs; }
+  if (!recPhaseStarted_) {
+    recPhaseStarted_ = true;
+    recPhaseStart_ = clockMs;
+    if (recStep_ == 4) {
+      picker_.begin(driverMs);
+      felt_.clear();
+    }
+  }
   const uint32_t elapsed = clockMs - recPhaseStart_;
   if (recStep_ == 1) {
     recCountdown_ = 3 - int(elapsed / 1000);
@@ -2549,13 +2644,18 @@ void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
       recStep_ = 2;
       recPhaseStart_ = clockMs;
       recorder_ = macro::Recorder{};
+      recorder_.begin(driverMs);
+      felt_.clear();
     }
     return;
   }
   if (recStep_ == 2) {
     const bool someDone = recorder_.finished(driverMs) || recorder_.full() || elapsed >= 60000;
     if (recorder_.empty() && elapsed >= 20000) {
-      recStep_ = editing_.hand >= 0 ? 3 : 0;
+      if (recGuided_) {
+        recStep_ = 5;
+        recAsk_ = editing_.steps.empty() ? 0 : 1;
+      } else recStep_ = editing_.hand >= 0 ? 3 : 0;
       say("Nothing was pressed, so nothing's been recorded.", 2);
       return;
     }
@@ -2563,14 +2663,18 @@ void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
     editing_.steps = recorder_.steps();
     const bool anyPress = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
     editing_.withTouches = !anyPress;
-    if (editing_.name.empty()) editing_.name = defaultRecordedName(editing_.steps, [this](int h, const std::string& p) { return controlName(h, p); });
-    recStep_ = 3;
+    if (editing_.name.empty() || editing_.name == recAutoName_) {
+      recAutoName_ = defaultRecordedName(editing_.steps, [this](int h, const std::string& p) { return controlName(h, p); });
+      editing_.name = recAutoName_;
+    }
+    recAsk_ = 1;
+    backFromListening();
     recSelected_ = -1;
     return;
   }
   // Choosing the button. Fifteen seconds, or a second and a half more to let go of what was chosen.
   if (picker_.done() ? elapsed >= 16500 : elapsed >= 15000) {
-    recStep_ = 3;
+    backFromListening();
     if (!picker_.done()) say("Nothing was pressed, so no button's been chosen.");
   }
 }

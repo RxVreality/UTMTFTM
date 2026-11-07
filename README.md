@@ -112,17 +112,24 @@ A combo is a macro for your controller: hold two or more controls together and t
 
 **This is the newest part and it hasn't had much testing.** It writes combos the same way Steam's binding screen does, but it hasn't had much time in real games, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
 
-### Recorded combos
+### Macros
 
 Under **Advanced** on the Combos tab. It's the other way round from a combo: one button plays a whole sequence. Say you want B to hold A, pull the trigger, then let go of both.
 
 1. With a game running, open **Combos**, then **Advanced**, then **Record new**.
-2. Let go of everything, wait for the countdown, and do what you'd like the button to do. Your presses don't reach the dashboard while it's recording, so you don't have to aim the laser anywhere. It stops by itself 2 seconds after you let go.
-3. Check the steps. Tap one to move it or delete it.
+2. Wait for the countdown and do what you'd like the button to do. Your presses don't reach the dashboard while it's recording, so you don't have to aim the laser anywhere. It stops by itself 2 seconds after your last press.
+3. Check the steps. Each press is one tile. Tap one to move it or delete it.
 4. Tap **Choose a button** and press the one that should play it. That button stops doing its usual job in that game while this is saved.
 5. **Save**, and close the dashboard. There's no need to restart the game.
 
-Once by default, or over and over while you hold the button. Steps are 50 ms apart unless you pick **As I did it**. Resting a thumb on something doesn't count as a step unless that's all you did, or you ask for it.
+It plays at the pace you did it, or with **Quick**, 50 ms between every step. It plays once per press, or over and over while you hold the button.
+
+Holding the controller the way you play doesn't add anything. Whatever you were already holding when it started is left out, and a grip or trigger you go on squeezing doesn't stop it finishing. Only the controls SteamVR lists for your controller count, so sensors that no game can bind, like the Frame's capsense, stay out.
+
+Two switches at the bottom of the list:
+
+- **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name. While it listens, it shows what it can feel right now.
+- **Use touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. It's off to begin with, because a thumb brushes past a lot of things.
 
 It doesn't run while the dashboard is open or while you're placing a hand.
 
@@ -201,7 +208,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-Recorded combos came from [u/MMeNDtal](https://www.reddit.com/user/MMeNDtal/) on Reddit, who explained what they should do, using a Logitech mouse's macros as the example, and also found the bug where tapping on the page didn't show until the laser moved.
+Macros came from [u/MMeNDtal](https://www.reddit.com/user/MMeNDtal/) on Reddit, who explained what they should do, using a Logitech mouse's macros as the example, and also found the bug where tapping on the page didn't show until the laser moved.
 
 ## License
 

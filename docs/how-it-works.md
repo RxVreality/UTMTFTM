@@ -114,10 +114,12 @@ The driver also hooks `IVRDriverInput`, the call every controller driver reports
 
 This is what makes two things possible that SteamVR's bindings can't do:
 
-- **Recorded combos.** SteamVR's chords go many to one: hold these and that happens. A recorded combo goes one to many: press this and a whole sequence plays, with its own timing.
+- **Macros.** SteamVR's chords go many to one: hold these and that happens. A macro goes one to many: press this and a whole sequence plays, with its own timing.
 - **Changes that work right away.** A running game keeps the bindings it launched with. If your A should now do what's on the game's B, the driver can send your A's press as B's, so it works without a restart. If nothing on the controller has that action right now, there's no press to send, so that waits for the next launch.
 
 A VR button isn't one thing the way a mouse button is: there's a thumb resting on it, the press itself, and how far a trigger is pulled, each reported separately. Recording folds those into one step, and playing that step sets all of them, so a game reading any of them sees a press.
+
+A controller also reports things that aren't controls. The Frame's `driver_cv` sends its raw hand sensor, capsense, with an `x` like a stick's, and it reads as pushed for as long as you're holding the controller. So recording only takes what the controller's input profile lists, and only takes `x` and `y` from a joystick or trackpad. Anything already down in the first 150 ms of listening was down before it started, like the grip you're holding on with, and isn't a step. A press only stops recording finishing if it's a button or a stick: a grip or trigger you're still squeezing doesn't.
 
 Since a bug here could stick a button in every game, it's kept simple. The hook itself only remembers what the controller said, and passes it on unless that button's been taken over. Everything else runs in `RunFrame`, SteamVR's own loop for drivers, so there's no new thread. It lets go of anything it's holding, and tells SteamVR what your hands are really doing, whenever the dashboard opens, a hand's being placed, the saved table changes, or SteamVR shuts down. While recording, buttons are held back from SteamVR so the dashboard doesn't get them, but the overlay has to keep asking every second, so if it dies they come straight back. The Steam button is never held back.
 
@@ -158,8 +160,7 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 ## Not tested yet
 
-- Whether the Frame's own driver, `driver_cv`, sets its controllers up after the add-on loads. If it doesn't, the page says recorded combos can't tell which button is which.
-- A recorded combo in a real game, in a real headset. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up and a sequence reaches SteamVR. It can't show how a game takes it.
+- A macro on any controller other than the Steam Frame's. On 7 November one played in Titan Isles on a real Frame, so `driver_cv` does report through `IVRDriverInput` and sets its controllers up after the add-on loads. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up for the rest.
 - Room View on the Frame. In the first try the dim appeared and Room View didn't come on, and why isn't known yet. So how the dim looks with the room behind it hasn't been seen either.
 - Virtual Desktop's window in a headset: whether its colour setting takes the overlay as cleanly as `test_ghost`'s numbers suggest, what video compression does to the edge and the stripes, and whether stripes are any use.
 

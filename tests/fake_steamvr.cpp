@@ -653,7 +653,7 @@ void clickCombos(const std::string& id) {
   check(false, ("there's no button called " + id + " on the combos page").c_str());
 }
 
-// And on the recorded combos page.
+// And on the macros page.
 void clickRecorded(const std::string& id) {
   fh::bind::Page& page = *g_pageForClicks;
   fh::Canvas cv(1200, 760);
@@ -671,7 +671,7 @@ void clickRecorded(const std::string& id) {
     page.recordedClick(id);
     return;
   }
-  check(false, ("there's no button called " + id + " on the recorded combos page").c_str());
+  check(false, ("there's no button called " + id + " on the macros page").c_str());
 }
 
 void setDashboard(bool on) {
@@ -922,7 +922,7 @@ void scenarioBindings() {
   finish();
 }
 
-// Recorded combos, through the real program and the real driver, from the Combos tab to a press in the game.
+// Macros, through the real program and the real driver, from the Combos tab to a press in the game.
 void scenarioRecorded() {
   const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
   fh::fixture::writeSteamVR(steamvr, config, fh::platform::dataDir() + "/../fake-games");
@@ -963,13 +963,13 @@ void scenarioRecorded() {
   wait(800);
 
   // Keep the page used for finding buttons in step with the real one.
-  uint32_t t = 0;
+  uint32_t t = 1000;
   const auto copy = [&](int hand, const char* name, float v) { t += 60; fh::macro::Raw r; r.ms = t; r.hand = hand; r.name = name; r.value = v; page.recordedReport(r); };
   clickRecorded("macro_record");
   page.recordedTick(0, 0);
   page.recordedTick(3000, 0);
   wait(3400);
-  check(logHas("recorded combos: listening"), "after the countdown it's listening");
+  check(logHas("macros: listening"), "after the countdown it's listening");
   fakeserver::clearHeardButtons();
   // Press A, press the trigger, let go of the trigger, let go of A.
   reportButton(1, "/input/a/touch", 1);
@@ -986,7 +986,7 @@ void scenarioRecorded() {
   check(!heard("R/input/a/click", 1.f), "while it's recording the dashboard doesn't get any of that");
   wait(2600);
   page.recordedTick(4000, t + 5000);
-  check(logHas("recorded combos: stopped listening"), "it stops by itself");
+  check(logHas("macros: stopped listening"), "it stops by itself");
 
   clickRecorded("macro_pick");
   wait(500);

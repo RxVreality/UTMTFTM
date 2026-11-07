@@ -178,22 +178,31 @@ struct ComboModel {
 std::string comboKey(const ComboModel& m);
 void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& buttons);
 
-// ---------------------------------------------------------------- recorded combos page
+// ---------------------------------------------------------------- macros page
 // One step of a sequence, as a tile: which control, and whether it went down or came back up. Going by G HUB, which shows
 // its steps as a strip with a little arrow on each.
 struct RecordedTile {
   std::string id, name, hand;  // "macro_tile_2", "Trigger", "R"
-  int kind = 0;                // macro::Kind
+  int kind = 0;                // macro::Kind, for the first of its steps
   int x = 0, y = 0;            // a stick's direction
+  bool both = false;           // a press and its let-go, with nothing between them
 };
 struct RecordedRow {
-  std::string name, plays;     // "Reload", "Plays on B, once"
+  std::string name, plays;     // "Reload", "Press B to play"
   std::vector<RecordedTile> tiles;
 };
+constexpr int kRecordedTilesPerPage = 24;  // two rows of them, which is all the room the page has before its options start
+constexpr int kRecordedQuestions = 6;
 struct RecordedModel {
   std::string game;
   LiveState live = LiveState::NoGame;
-  int step = 0;          // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button
+  int step = 0;          // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button, 5 the interview
+  int ask = 0;           // which question the interview is on
+  bool interview = false;    // this one's being made by interview
+  bool interviewOn = false;  // the Interview option
+  bool touchesOn = false;    // the Use touches option
+  std::string feeling;       // what it can feel right now, while listening
+  int tileFirst = 0;         // the first tile showing, when there are more than fit
   bool canRecord = false;
   std::string why;       // why not, when it can't
   std::vector<RecordedRow> saved;

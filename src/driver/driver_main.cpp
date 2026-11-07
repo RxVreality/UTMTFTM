@@ -552,6 +552,7 @@ struct Macro {
   std::vector<Comp*> taken;
   bool repeat = false;
   bool was = false;
+  bool fresh = false;  // this press started after it was armed, so holding it on can go round again
   Playing play;
 };
 struct Route { Comp* from; Comp* to; };
@@ -698,6 +699,7 @@ void arm() {
       if (c->phys.load(std::memory_order_relaxed) != 0.f) sendRaw(c, 0.f);  // the game shouldn't be left thinking it's still held
     }
     m.was = m.source && isActive(m.source, false);  // something you're already holding has to be let go and pressed again
+    m.fresh = false;
   }
   for (Route& r : g_run.routes) {
     r.from->route.store(r.to, std::memory_order_release);
@@ -845,7 +847,7 @@ void tickInput() {
     g_seenSeq = read;
     g_seenComps = comps;
     compile(table);
-    logf("buttons: %u known, %zu recorded combos, %zu swaps, %zu live combos", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size());
+    logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size());
   }
 
   const bool wanted = in->enabled.load(std::memory_order_relaxed) != 0 && !recording;
@@ -867,13 +869,18 @@ void tickInput() {
   if (!g_armed) return;
   for (Macro& m : g_run.macros) {
     const bool pressed = m.source && isActive(m.source, m.was);
-    if (pressed && !m.was && !m.play.running) {
-      startPlaying(m.play, now);
-      in->macrosPlayed.store(in->macrosPlayed.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+    if (pressed && !m.was) {
+      m.fresh = true;
+      if (!m.play.running) {
+        startPlaying(m.play, now);
+        in->macrosPlayed.store(in->macrosPlayed.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+      }
     }
+    if (!pressed) m.fresh = false;
     tickPlaying(m.play, now);
-    // Held down on a repeating one, it goes round again.
-    if (m.repeat && pressed && !m.play.running && m.was) startPlaying(m.play, now + 50);
+    // Held down on a repeating one, it goes round again. Not for a press from before it was armed, like the B that just cancelled
+    // placing a hand: that one has to be let go and pressed again, the same as it does for one that plays once.
+    if (m.repeat && pressed && !m.play.running && m.fresh) startPlaying(m.play, now + 50);
     m.was = pressed;
   }
   for (Chord& ch2 : g_run.chords) {

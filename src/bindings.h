@@ -192,7 +192,7 @@ class Page {
   void comboClick(const std::string& id);
   void comboClickGreyed(const std::string& id);
 
-  // Recorded combos. The driver does the playing, and main.cpp carries things between the two.
+  // Macros. The driver does the playing, and main.cpp carries things between the two.
   RecordedModel recordedModel(const std::string& hover, const std::string& down);
   void recordedClick(const std::string& id);
   void recordedClickGreyed(const std::string& id);
@@ -202,13 +202,15 @@ class Page {
   // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. late: it's hearing buttons it never
   // saw being set up, so it can't tell which is which. Any of those says why on the page.
   void setHookState(bool hookOk, bool heard, bool late = false) { hookOk_ = hookOk; hookHeard_ = heard; hookLate_ = late; }
-  // Everything for the driver about the game that's running: recorded combos, plus whatever's changed since it launched that
+  // Everything for the driver about the game that's running: macros, plus whatever's changed since it launched that
   // can work now. Empty with no game.
   void fillInputTable(fhlive::InputTable& t);
   bool recordedWantsName(std::string* current) const;  // Rename was tapped: show a keyboard
   void recordedSetName(const std::string& name);
 
   std::map<std::string, std::vector<macro::Recorded>> recorded;  // "<game>|<your controller_type>"
+  bool macroTouches = false;    // resting a thumb on something can count, as well as pressing it. Off, only presses do
+  bool macroInterview = false;  // Record new asks one question at a time, instead of going straight to the one page of options
 
   std::string status;
   int statusKind = 0;  // 0 info, 1 good, 2 warning
@@ -258,6 +260,9 @@ class Page {
   std::string controlName(int hand, const std::string& path) const;
   std::string playsOn(const macro::Recorded& m) const;
   std::vector<RecordedTile> tilesFor(const std::vector<macro::Step>& steps, bool select) const;
+  bool isControl(int hand, const std::string& path, const std::string& part) const;  // the controller's description lists it
+  std::string feltNow() const;  // what it can feel right now, in words
+  void backFromListening();
   struct ComboIdeaOf { std::string name; std::vector<ComboInput> inputs; };
   std::vector<ComboIdeaOf> comboIdeas(const Profile& p) const;
   void bake(const std::string& model);
@@ -281,7 +286,11 @@ class Page {
   std::string launchFrom_;
   Wiring launchWiring_;
   std::vector<Combo> launchCombos_;
-  int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button
+  int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button, 5 the interview
+  int recAsk_ = 0;   // which question the interview is on
+  bool recGuided_ = false;  // this one's being made by interview
+  int recFirstTile_ = 0;
+  std::map<std::string, float> felt_;  // while listening: the last thing each part of each control said
   uint32_t recPhaseStart_ = 0;
   bool recPhaseStarted_ = false;
   int recCountdown_ = 3;
@@ -289,6 +298,7 @@ class Page {
   macro::TriggerPicker picker_;
   macro::Recorded editing_;
   int editingAt_ = -1;  // which saved one it replaces. -1: it's new
+  std::string recAutoName_;  // the name it came up with, which recording again can replace. A name you gave it stays
   int recSelected_ = -1;
   bool recWantsName_ = false;
   bool hookOk_ = false, hookHeard_ = false, hookLate_ = false;

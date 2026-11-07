@@ -258,8 +258,23 @@ static std::string protectionOf(const void* addr) {
 
 int main() {
   namespace fs = std::filesystem;
-  std::string home = (fs::temp_directory_path() / "fh-test-driver").string();
+  // A folder of its own, because the driver's file lives there and two runs at once (another copy of the code, say) would share it.
+#ifdef _WIN32
+  const unsigned long me = GetCurrentProcessId();
+#else
+  const unsigned long me = (unsigned long)getpid();
+#endif
+  std::string home = (fs::temp_directory_path() / ("fh-test-driver-" + std::to_string(me))).string();
   std::error_code ec;
+  // The driver still has its file open when this ends, so a run can't always tidy up after itself. Older ones go here.
+  for (fs::directory_iterator it(fs::temp_directory_path(), ec), end; !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (name.rfind("fh-test-driver", 0) != 0) continue;
+    std::error_code e2;
+    const auto when = fs::last_write_time(it->path(), e2);
+    if (!e2 && fs::file_time_type::clock::now() - when > std::chrono::hours(1)) fs::remove_all(it->path(), e2);
+  }
+  ec.clear();
   fs::remove_all(home, ec);
   fs::create_directories(home);
 #ifdef _WIN32
@@ -772,6 +787,31 @@ int main() {
     runFor(120);
     CHECK(heardNow().empty(), "and stays stopped");
     (void)startPlayed;
+    // J4, 7 November: B cancelled placing a hand, and the macro on B played anyway. Macros come back on as the placing ends, with B
+    // still down, and a repeating one took that for being held. It has to be let go and pressed again, the same as any other.
+    in.enabled.store(0);
+    tick();
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(10);
+    in.enabled.store(1);
+    tick();
+    clearHeard();
+    runFor(400);
+    CHECK(!said("R/input/a/click", 1.f), "a press from before macros came back on doesn't start a repeating one");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(20);
+    CHECK(!said("R/input/a/click", 1.f), "nor does letting go of it");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    runFor(600);
+    int again = 0;
+    for (const auto& e : heardNow()) if (e.h == H["R/input/a/click"] && e.v == 1.f) ++again;
+    CHECK(again >= 2, "a new press plays it and goes round again (%d times)", again);
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+    runFor(250);
+    CHECK(lastSaid("R/input/a/click") == 0.f, "and stops, with nothing held");
+    clearHeard();
+    runFor(120);
+    CHECK(heardNow().empty(), "and stays stopped");
     table.macro[0].repeat = 0;
 
     // Resting on it plays it, and pressing it is left alone.
@@ -993,5 +1033,6 @@ int main() {
   CHECK(!memcmp(host.last, &p, sizeof p), "after Cleanup poses are untouched");
 
   printf("%s: %d checks, %d failures\n", fails ? "FAILED" : "PASSED", checks, fails);
+  fs::remove_all(home, ec);
   return fails ? 1 : 0;
 }

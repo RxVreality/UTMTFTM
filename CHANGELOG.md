@@ -2,7 +2,7 @@
 
 ## Not released yet
 
-Recorded combos, under Advanced on the Combos tab: one button plays back a sequence you did with your own hands, the way a Logitech mouse macro does. Press Record, do it, then pick the button. You can move steps around and delete them, and it works with no game restart. Thanks to u/MMeNDtal, who asked for this.
+Macros, under Advanced on the Combos tab: one button plays back a sequence you did with your own hands, the way a Logitech mouse macro does. Press Record, do it, then pick the button. Each press is one tile, which you can move around or delete, and it works with no game restart. It plays at the pace you did it unless you pick Quick. There's an Interview switch that asks one question at a time instead, and a Use touches switch for when resting a thumb should count too. Thanks to u/MMeNDtal, who asked for this.
 
 Rewiring a button now works straight away in the game you're playing, when it only means sending one button's press as another's. So does a new combo, when what it sets off is already on a button. Anything else, like switching to another controller's layout, still waits for the next launch, and the page says which you got.
 

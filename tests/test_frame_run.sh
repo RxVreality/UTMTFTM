@@ -125,7 +125,7 @@ expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
 expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
 rm -f "$DATA/bindings.json"
 
-echo "--- recorded combos"
+echo "--- macros"
 : > "$FAKE_STEAMVR_LOG"
 mkdir -p "$OUT/recorded"
 FAKE_STEAMVR_SHOTS="$OUT/recorded" FAKE_STEAMVR_SCENARIO=recorded timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-recorded.txt"
