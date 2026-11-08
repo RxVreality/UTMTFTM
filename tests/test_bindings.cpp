@@ -170,6 +170,20 @@ static void testFixture(const std::string& work, const std::string& out) {
     check(got.size() == 5, "and that's all of it");
   }
 
+  // A game that reads its stick as a trackpad keeps that mode, as SteamVR's own translation does. Seen on a Frame, 7 November.
+  {
+    Json::Value from;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    std::stringstream text("{\"bindings\": {\"/actions/default\": {\"sources\": [{\"path\": \"/user/hand/right/input/joystick\", \"mode\": \"trackpad\", "
+                           "\"inputs\": {\"position\": {\"output\": \"/actions/default/in/move\"}}}, {\"path\": \"/user/hand/left/input/joystick\", \"mode\": \"joystick\", "
+                           "\"inputs\": {\"position\": {\"output\": \"/actions/default/in/turn\"}}}]}}}");
+    Json::parseFromStream(b, text, &from, &errs);
+    const std::set<std::string> got = sourcesOf(translate(from, w, *lib.profile("oculus_touch"), *lib.profile("frame_controller")));
+    check(got.count("/user/hand/right/input/thumbstick trackpad position /actions/default/in/move"), "a stick read as a trackpad stays a trackpad");
+    check(got.count("/user/hand/left/input/thumbstick joystick position /actions/default/in/turn"), "and one read as a joystick stays a joystick");
+  }
+
   // Names for what's bound.
   bool pass = false, hide = false;
   check(actionLabel("/actions/ue/in/oculustouch_right_a_click", {}, &pass, &hide) == "A" && pass && !hide, "Unreal's names only say the button");

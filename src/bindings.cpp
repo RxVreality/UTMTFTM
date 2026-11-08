@@ -532,7 +532,7 @@ static std::vector<Json::Value> adaptSource(const Json::Value& src, const std::s
       out["inputs"] = button;
       return {out};
     }
-    if (mode == "joystick" || mode == "trackpad") out["mode"] = to.kind;
+    // A stick read as a trackpad stays one, the way SteamVR's own translation leaves it: either mode works on either kind.
     return {out};
   }
   if (mode == "trigger" || mode == "force_sensor" || mode == "scalar_constant") {
