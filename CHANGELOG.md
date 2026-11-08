@@ -2,15 +2,9 @@
 
 ## Not released yet
 
-Macros, under Advanced on the Combos tab: one button plays back a sequence you did with your own hands, the way a Logitech mouse macro does. Press Record, do it, then pick the button. Each press is one tile, which you can move around or delete, and it works with no game restart. It plays at the pace you did it unless you pick Quick. There's an Interview switch that asks one question at a time instead, and a Use touches switch for when resting a thumb should count too. Thanks to u/MMeNDtal, who asked for this.
+Macros, under Advanced on the Combos tab: one button plays back a sequence you did with your own hands, the way a Logitech mouse macro does. Press Record, do it, then pick the button. Each press is one tile, which you can move around or delete, and it works with no game restart. It plays at the pace you did it unless you pick Quick. There's an Interview switch that asks one question at a time instead, and a Capacitive touches switch for when resting a thumb should count too. Thanks to u/MMeNDtal, who asked for this.
 
 Rewiring a button now works straight away in the game you're playing, when it only means sending one button's press as another's. So does a new combo, when what it sets off is already on a button. Anything else, like switching to another controller's layout, still waits for the next launch, and the page says which you got.
-
-See-through globes, so you can line your in-game hand up with your real one, with a See-through button on the Hands tab.
-
-With Virtual Desktop on a Quest 3 or a Pico 4 they're real windows onto the room. Turn on VR Passthrough in Virtual Desktop's Streaming tab, press Configure and set the colour to red 255, green 0, blue 255. Then tap See-through. A window hides the in-game hand while it's inside, so tapping again gives you stripes, with your real hand and the in-game hand showing between them.
-
-On the Steam Frame, placing a hand asks for Room View in its translucent style and dims everything outside the globes. In the first try on a real Frame the dim appeared and Room View didn't, so that part isn't finished.
 
 Fixed: tapping something on the page often showed nothing until the laser moved or you tapped again, and pointing at a button could light up the one you'd been on before.
 

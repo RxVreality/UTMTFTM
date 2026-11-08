@@ -35,7 +35,6 @@ static const char* const kBinDir = "linux64";
 #endif
 
 std::string dataDir() { return fhlive::linuxDataDir(); }
-bool virtualDesktopRunning() { return false; }
 
 std::string exeDir() {
   char b[PATH_MAX];

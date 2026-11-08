@@ -716,11 +716,12 @@ void scenarioPlace() {
   wait(300);
   setDashboard(false);  // the player shuts the dashboard, which is what starts placing
   wait(600);
-  check(g_roomViewStyle == 3, "placing a hand puts Room View in its translucent style", g_roomViewStyle.load());
+  // The globes are as they were in 0.4.0: placing a hand leaves Room View and the Steam button alone.
+  check(g_roomViewStyle == 4, "placing a hand leaves Room View's style as it was", g_roomViewStyle.load());
   {
     int presses = 0;
     for (const auto& b : fakeserver::heardButtons()) if (b.first == "R/input/system/click" && b.second == 1.f) ++presses;
-    check(presses == 2, "and double-presses the Steam button, which is Room View's shortcut", presses);
+    check(presses == 0, "and never presses the Steam button", presses);
   }
 
   {

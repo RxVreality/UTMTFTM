@@ -113,8 +113,7 @@ struct InputChannel {
   std::atomic<uint32_t> enabled;        // macros and the rest may act: there's a game, the dashboard's shut, nobody's placing a hand
   std::atomic<uint32_t> recordUntilMs;  // while the driver's clock is before this it records and holds every button back from
                                         // SteamVR, so the dashboard doesn't get them. It has to be kept moving, so a crash can't leave buttons dead
-  std::atomic<uint32_t> roomToggle;     // goes up by one to have the Steam button double-pressed, which is Room View's shortcut
-  std::atomic<uint32_t> roomToggleDone; // the driver: the last one it acted on. Only moves if there's a Steam button to press
+  uint32_t unused[2];                   // were for Room View, kept so nothing after them moves
   std::atomic<uint32_t> tableSeq;       // seqlock for table
   uint32_t reserved;
   InputEvent events[kEventRing];

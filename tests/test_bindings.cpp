@@ -817,6 +817,8 @@ static void testRecorded(const std::string& work, const std::string& out) {
   m = page.recordedModel("", "");
   check(m.step == 3 && !page.recordedListening() && m.plays == "B", "let go, and B plays it: " + m.plays);
   check(m.note.find("stops") != std::string::npos, "and it says B loses its usual job: " + m.note);
+  check(m.noteWarn, "in red, because that's a warning");
+  check(m.touches == 0, "with Capacitive touches off there's no row for them");
   shotRecorded(m, out + "/recorded_ready.png");
 
   page.recordedClick("macro_save");
@@ -955,8 +957,14 @@ static void testRecorded(const std::string& work, const std::string& out) {
   m = page.recordedModel("", "");
   check(m.step == 3 && m.plays == "X", "pressing X does: " + m.plays);
 
-  // On the page, the worst case for room: lots of touches kept, one picked, and every option showing.
+  // With Capacitive touches on, the row's there even when a take has none, so it's plain that none were felt. Part 2, 7 November:
+  // the slide happened in the countdown, so the take had none, and the empty space where the option should be looked broken.
   page.recordedClick("macro_touch_on");
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.touches == 1 && !m.hasBareTouches, "Capacitive touches on: the row shows, with nothing to choose");
+  shotRecorded(m, out + "/recorded_touches_none.png");
+
+  // On the page, the worst case for room: lots of touches kept, one picked, and every option showing.
   page.recordedClick("macro_cancel");
   page.recordedClick("macro_record");
   page.recordedTick(110000, 110000);
@@ -974,7 +982,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
     page.recordedTick(120000, at + 2100);
   }
   m = page.recordedModel("", "");
-  check(m.step == 3 && m.tiles.size() == 1 && m.hasBareTouches && !m.withTouches, "touches left out to begin with, with Touches there to ask for them");
+  check(m.step == 3 && m.tiles.size() == 1 && m.hasBareTouches && !m.withTouches && m.touches == 2, "touches left out to begin with, with Capacitive touches there to ask for them");
   shotRecorded(m, out + "/recorded_touches_row.png");
   page.recordedClick("macro_touches");
   m = page.recordedModel("", "");
@@ -1001,7 +1009,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   page.recordedClick("macro_pick");
   page.recordedTick(121000, 121000);
   m = page.recordedModel("", "");
-  check(m.touchesOn, "with Use touches on it says so");
+  check(m.touchesOn, "with Capacitive touches on it says so");
   shotRecorded(m, out + "/recorded_choose_touches.png");
   page.recordedReport(rawOf(121400, 1, "/input/y/touch", 1));
   page.recordedReport(rawOf(121600, 1, "/input/y/touch", 0));
@@ -1009,7 +1017,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   check(m.step == 3 && m.plays == "Touch Y" && m.onTouch, "and resting on Y chooses Touch Y: " + m.plays);
   page.recordedClick("macro_press_only");
   m = page.recordedModel("", "");
-  check(m.note.find("Resting on Y") != std::string::npos, "and says what that means: " + m.note);
+  check(m.note.find("Resting on Y") != std::string::npos && !m.noteWarn, "and says what that means, not in red: " + m.note);
   page.recordedClick("macro_save");
   m = page.recordedModel("", "");
   check(m.step == 0 && !m.saved.empty() && m.saved.back().plays == "Touch Y to play", "saved: " + (m.saved.empty() ? "" : m.saved.back().plays));
@@ -1037,7 +1045,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   page.recordedReport(rawOf(141500, 1, "/input/b/click", 1));
   page.recordedReport(rawOf(141600, 1, "/input/b/click", 0));
   m = page.recordedModel("", "");
-  check(m.note.find("first 16 presses") != std::string::npos, "and it says only 16 will play: " + m.note);
+  check(m.note.find("first 16 presses") != std::string::npos && m.noteWarn, "and it says only 16 will play, in red: " + m.note);
   shotRecorded(m, out + "/recorded_too_long.png");
   page.recordedClick("macro_cancel");
 

@@ -2447,6 +2447,10 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
     m.asRecorded = editing_.asRecorded;
     m.withTouches = editing_.withTouches;
     m.hasBareTouches = (macroTouches || editing_.withTouches) && macro::hasBareTouches(editing_.steps) && std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    // With Capacitive touches on, the row's always there, so it's plain whether any were felt.
+    const bool anyPress = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+    const bool anyTouch = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Touch; });
+    if (macroTouches || anyTouch) m.touches = m.hasBareTouches ? 2 : anyTouch && !anyPress ? 3 : 1;
     if (editing_.hand >= 0) {
       const std::string name = controlName(editing_.hand, editing_.path), row = std::string(editing_.hand ? "right" : "left") + editing_.path;
       std::string job;
@@ -2454,9 +2458,16 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
         for (const GameAction& a : comboActions(activeBinding(), *mine))
           if (a.row == row) { job = a.label; break; }
       m.note = (job.empty() ? name + " stops doing its usual job" : name + " stops being " + job) + " in " + gameName_ + " while this is saved.";
-      if (editing_.onTouch) m.note = "Resting on " + name + " plays this. Pressing it still does what it did.";
+      m.noteWarn = true;
+      if (editing_.onTouch) {
+        m.note = "Resting on " + name + " plays this. Pressing it still does what it did.";
+        m.noteWarn = false;
+      }
     }
-    if (macro::played(editing_).size() > fhlive::kMaxSteps) m.note = "That's too long to play in full. Only the first " + std::to_string(fhlive::kMaxSteps / 2) + " presses fit, so the rest won't play.";
+    if (macro::played(editing_).size() > fhlive::kMaxSteps) {
+      m.note = "That's too long to play in full. Only the first " + std::to_string(fhlive::kMaxSteps / 2) + " presses fit, so the rest won't play.";
+      m.noteWarn = true;
+    }
   }
   return m;
 }

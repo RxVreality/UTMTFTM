@@ -569,10 +569,8 @@ struct Compiled {
   std::vector<Chord> chords;
 };
 Compiled g_run;
-Playing g_roomPress;
 bool g_armed = false;
-uint32_t g_seenSeq = 1, g_seenComps = 0, g_seenRoom = 0, g_seenDevice[2] = {fhlive::kNoDevice, fhlive::kNoDevice};
-bool g_seenRoomAtStart = false;
+uint32_t g_seenSeq = 1, g_seenComps = 0, g_seenDevice[2] = {fhlive::kNoDevice, fhlive::kNoDevice};
 bool g_wasRecording = false;
 std::chrono::steady_clock::time_point g_clockStart;
 
@@ -794,24 +792,6 @@ void refreshHands(fhlive::DriverChannel* ch, bool& changed) {
   }
 }
 
-// The Steam button pressed twice, the way a thumb would, which SteamVR takes as Room View's shortcut.
-void startRoomPress(uint32_t now) {
-  Comp* c = compAt(1, "/input/system", "click");
-  if (!c) c = compAt(0, "/input/system", "click");
-  if (!c) { logf("room view: no Steam button to press"); return; }
-  g_roomPress = Playing{};
-  for (int i = 0; i < 2; ++i) {
-    PlayStep down, up;
-    down.delayMs = i ? 70 : 0;
-    down.set.push_back({c, 1.f});
-    up.delayMs = 70;
-    up.letGo.push_back(c);
-    g_roomPress.steps.push_back(down);
-    g_roomPress.steps.push_back(up);
-  }
-  startPlaying(g_roomPress, now);
-}
-
 void tickInput() {
   fhlive::InputChannel* in = g_in.load(std::memory_order_relaxed);
   fhlive::DriverChannel* ch = g_ch.load(std::memory_order_relaxed);
@@ -855,16 +835,6 @@ void tickInput() {
     if (wanted) arm();
     else standDown();
   }
-
-  const uint32_t room = in->roomToggle.load(std::memory_order_relaxed);
-  if (room != g_seenRoom) {
-    g_seenRoom = room;
-    if (!g_roomPress.running) {
-      startRoomPress(now);
-      in->roomToggleDone.store(room, std::memory_order_relaxed);
-    }
-  }
-  tickPlaying(g_roomPress, now);
 
   if (!g_armed) return;
   for (Macro& m : g_run.macros) {
@@ -912,8 +882,6 @@ void startInput(vr::IVRDriverContext* ctx, fhlive::InputChannel* in) {
   in->ticks.store(0, std::memory_order_relaxed);
   in->evWrite.store(0, std::memory_order_relaxed);
   in->nowMs.store(0, std::memory_order_relaxed);
-  g_seenRoom = in->roomToggle.load(std::memory_order_relaxed);
-  in->roomToggleDone.store(g_seenRoom, std::memory_order_relaxed);
   fhlive::seqWriteBegin(in->tableSeq);
   in->table.macros = in->table.routes = in->table.chords = 0;
   fhlive::seqWriteEnd(in->tableSeq);
@@ -924,7 +892,6 @@ void startInput(vr::IVRDriverContext* ctx, fhlive::InputChannel* in) {
 
 void stopInput() {
   standDown();
-  stopPlaying(g_roomPress);
   g_recording.store(false, std::memory_order_relaxed);
   if (fhlive::InputChannel* in = g_in.load(std::memory_order_relaxed)) in->magic.store(0, std::memory_order_release);
   removeInputHooks();

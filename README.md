@@ -119,7 +119,7 @@ Under **Advanced** on the Combos tab. It's the other way round from a combo: one
 1. With a game running, open **Combos**, then **Advanced**, then **Record new**.
 2. Wait for the countdown and do what you'd like the button to do. Your presses don't reach the dashboard while it's recording, so you don't have to aim the laser anywhere. It stops by itself 2 seconds after your last press.
 3. Check the steps. Each press is one tile. Tap one to move it or delete it.
-4. Tap **Choose a button** and press the one that should play it. That button stops doing its usual job in that game while this is saved.
+4. Tap **Choose a button** and press the one that should play it. That button stops doing its usual job in that game while this is saved, and the page says so in red.
 5. **Save**, and close the dashboard. There's no need to restart the game.
 
 It plays at the pace you did it, or with **Quick**, 50 ms between every step. It plays once per press, or over and over while you hold the button.
@@ -129,7 +129,7 @@ Holding the controller the way you play doesn't add anything. Whatever you were 
 Two switches at the bottom of the list:
 
 - **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name. While it listens, it shows what it can feel right now.
-- **Use touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. It's off to begin with, because a thumb brushes past a lot of things.
+- **Capacitive touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. Checking the steps then always has a Capacitive touches row, to keep or leave out the touches that weren't on the way to a press, or to say there weren't any. It's off to begin with, because a thumb brushes past a lot of things.
 
 It doesn't run while the dashboard is open or while you're placing a hand.
 

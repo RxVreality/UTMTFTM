@@ -2,7 +2,6 @@
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
-#include <tlhelp32.h>
 
 #include <json/json.h>
 
@@ -44,18 +43,6 @@ static std::string localAppData() {
 }
 
 std::string dataDir() { return localAppData() + "/UTMTFTM"; }
-
-bool virtualDesktopRunning() {
-  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (snap == INVALID_HANDLE_VALUE) return false;
-  PROCESSENTRY32W p{};
-  p.dwSize = sizeof p;
-  bool found = false;
-  for (BOOL more = Process32FirstW(snap, &p); more && !found; more = Process32NextW(snap, &p))
-    found = _wcsicmp(p.szExeFile, L"VirtualDesktop.Server.exe") == 0;
-  CloseHandle(snap);
-  return found;
-}
 
 std::string exeDir() {
   wchar_t b[MAX_PATH] = {0};

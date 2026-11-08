@@ -943,15 +943,6 @@ int main() {
     inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
     CHECK(lastSaid("R/input/a/click") == 0.f, "back to passing straight through");
 
-    // Room View's shortcut: the Steam button, twice, with a gap.
-    clearHeard();
-    in.roomToggle.fetch_add(1);
-    runFor(350);
-    int steamPresses = 0;
-    for (const auto& e : heardNow()) if (e.h == H["R/input/system/click"] && e.v == 1.f) ++steamPresses;
-    CHECK(steamPresses == 2 && lastSaid("R/input/system/click") == 0.f, "two presses, and let go of (%d)", steamPresses);
-    CHECK(in.roomToggleDone.load() == in.roomToggle.load(), "and the overlay can see it was done");
-
     // A controller switched off and on again sets itself up with new handles, and what's saved still works.
     memset(&table, 0, sizeof table);
     table.macros = 1;

@@ -21,7 +21,6 @@
 #include "overlay_upload.h"
 #include "placement.h"
 #include "platform.h"
-#include "spot.h"
 #include "store.h"
 #include "ui.h"
 #include "xform.h"
@@ -128,21 +127,6 @@ static constexpr float kGhostS = 0.36f;    // metres covered by the stereo ghost
 static constexpr float kGrabReach = 0.16f; // how close your hand must be to grab the hand being placed
 static constexpr float kLostHand = 1.0f;   // an offset this far out is a fault, not a placement: keep the last good one
 
-// The see-through globes, on the Frame itself. SteamVR's Room View can only be switched on the headset that's running it: a
-// PC streaming to a Frame doesn't own those cameras, so on Windows the page just says how.
-#ifdef _WIN32
-static constexpr bool kSeeThroughHere = false;
-#else
-static constexpr bool kSeeThroughHere = true;
-#endif
-static constexpr float kSpotS = 3.6f;      // metres covered by the dim around the globes, kSpotD in front of your eyes. That reaches 71 degrees
-static constexpr float kSpotD = 0.6f;      // off centre, enough for the edge of the view even when you've turned kSpotTurn before it follows
-static constexpr float kSpotTurn = 15.0f;
-static constexpr int kSpotPx = 512;        // per eye
-static constexpr int kKeyPx = 640;         // per eye, on a much smaller plane: Virtual Desktop's window has a hard edge
-static constexpr float kSpotDim = 0.8f;
-static constexpr float kOtherHandGlobe = 0.13f;  // the hand doing the grabbing gets a window too
-static constexpr int kTranslucentStyle = 3;      // SteamVR's "Translucent Pass-Through"
 
 struct App {
   Store store;
@@ -170,22 +154,11 @@ struct App {
   bool inputOn = false, recOn = false;
   uint32_t recCursor = 0;
   std::vector<fhlive::InputEvent*> recEvents;
+  std::map<std::string, int> recHeard;  // what a take heard, for the log: "R/input/a/touch" and how many reports said it was on
+  uint64_t recReports = 0, recLostAtStart = 0;
   uint64_t hookReports = 0, hookTicksSeen = 0, hookUnknown = 0;
   bool hookLogged = false;
   Clock::time_point clockStart = Clock::now();
-  // The see-through globes.
-  vr::VROverlayHandle_t spot = 0;
-  std::vector<uint8_t> spotPx;
-  GhostRenderer::Plane spotPlane{};
-  bool spotPlaneValid = false, spotShowing = false;
-  M spotXf = ident();
-  Clock::time_point spotDrawn{};
-  bool roomViewGuess = false;       // whether Room View's on. SteamVR doesn't say, so it's worked out from its change events
-  bool weTurnedRoomOn = false;
-  int styleBefore = -1;
-  Clock::time_point ignoreCameraEventsUntil{};
-  bool canSeeThrough = false;
-  bool keyHere = false;             // Virtual Desktop's the way in, so the globes are drawn in its colour rather than dimming round them
   Clock::time_point dashSettleAt{};
   std::string keyboardFor;
   bool driverOn = false;   // the driver add-on is loaded in SteamVR and can move the hands
@@ -298,16 +271,8 @@ struct App {
     O->CreateOverlay("utmtftm.hint", "UTMTFTM panel", &hint);
     O->SetOverlayWidthInMeters(hint, 0.36f);
     O->SetOverlaySortOrder(hint, 11);
-    O->CreateOverlay("utmtftm.spot", "UTMTFTM see-through", &spot);
-    O->SetOverlayWidthInMeters(spot, kSpotS);
-    O->SetOverlayFlag(spot, vr::VROverlayFlags_SideBySide_Parallel, true);
-    O->SetOverlaySortOrder(spot, 9);
     drawIcon(thumbCv);
     upload(thumb, thumbCv);
-    vr::ETrackedPropertyError pe = vr::TrackedProp_Success;
-    canSeeThrough = kSeeThroughHere && vr::VRSystem()->GetBoolTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_HasCamera_Bool, &pe);
-    logf("see-through: %s here (headset has a camera: %s)", canSeeThrough ? "available" : "not available", pe == vr::TrackedProp_Success ? "said so" : "didn't say");
-    checkVirtualDesktop();
     Store::inputEnabled(false);
     Store::stopRecording();
     return true;
@@ -347,13 +312,20 @@ struct App {
       if (listen && !recOn) {
         Store::recordingFromHere(recCursor);
         recOn = true;
+        recHeard.clear();
+        recReports = 0;
+        recLostAtStart = Store::recordingLost;
         logf("macros: listening");
       }
       if (!listen && recOn) {
         Store::stopRecording();
         recOn = false;
         dashForce = true;
-        logf("macros: stopped listening");
+        // Which buttons it heard pressed and touched, so a take on a real controller can be read back afterwards.
+        std::string heard;
+        for (const auto& [name, times] : recHeard) heard += " " + name + " x" + std::to_string(times);
+        logf("macros: stopped listening, %llu reports, %llu lost,%s", (unsigned long long)recReports, (unsigned long long)(Store::recordingLost - recLostAtStart),
+             heard.empty() ? " no presses or touches" : heard.c_str());
       }
       if (listen) {
         Store::keepRecording();
@@ -364,105 +336,18 @@ struct App {
           r.hand = e->hand;
           r.name = e->name;
           r.value = e->value;
+          ++recReports;
+          const std::string n = r.name;
+          if (r.value > 0.5f && n.size() > 6 && (n.compare(n.size() - 6, 6, "/touch") == 0 || n.compare(n.size() - 6, 6, "/click") == 0)) {
+            const std::string key = std::string(r.hand ? "R" : "L") + n;
+            if (recHeard.size() < 40 || recHeard.count(key)) ++recHeard[key];
+          }
           bindings.recordedReport(r);
         }
         if (!recEvents.empty()) dashPoke = true;
       }
       bindings.recordedTick(clockMs, Store::inputNowMs());
     });
-  }
-
-  // ---------------- the see-through globes
-  // While a hand's being placed, Room View goes on in its translucent style, and everything outside the globes goes dark.
-  // On a PC, this depends on Virtual Desktop being what's streaming. A Frame streaming to the same PC has no colour to use.
-  void checkVirtualDesktop() {
-    if (kSeeThroughHere) return;
-    const bool now = platform::virtualDesktopRunning() && Store::controllerType != "frame_controller";
-    if (now != keyHere) logf("see-through: Virtual Desktop %s", now ? "is here, so its colour can make a window" : "isn't here");
-    keyHere = canSeeThrough = now;
-  }
-
-  bool seeThroughWanted() const { return canSeeThrough && (keyHere ? store.seeThroughKey != 0 : store.seeThrough); }
-
-  void seeThroughOn() {
-    if (spotShowing || !seeThroughWanted()) return;
-    if (keyHere) {
-      spotPlaneValid = false;
-      spotShowing = true;
-      vr::VROverlay()->ShowOverlay(spot);
-      logf("see-through: on, in Virtual Desktop's colour, as %s", store.seeThroughKey == 2 ? "stripes" : "a window");
-      return;
-    }
-    vr::EVRSettingsError e = vr::VRSettingsError_None;
-    styleBefore = vr::VRSettings()->GetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, &e);
-    if (e != vr::VRSettingsError_None) styleBefore = -1;
-    if (styleBefore != kTranslucentStyle) vr::VRSettings()->SetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, kTranslucentStyle, &e);
-    weTurnedRoomOn = !roomViewGuess && Store::pressRoomViewShortcut();
-    ignoreCameraEventsUntil = Clock::now() + std::chrono::milliseconds(1500);
-    spotPlaneValid = false;
-    spotShowing = true;
-    vr::VROverlay()->ShowOverlay(spot);
-    logf("see-through: on (style was %d, %s)", styleBefore, weTurnedRoomOn ? "asked for Room View" : "Room View looked on already");
-  }
-
-  void seeThroughOff() {
-    if (!spotShowing) return;
-    spotShowing = false;
-    vr::VROverlay()->HideOverlay(spot);
-    vr::EVRSettingsError e = vr::VRSettingsError_None;
-    if (styleBefore >= 0 && styleBefore != kTranslucentStyle) vr::VRSettings()->SetInt32(vr::k_pch_Camera_Section, vr::k_pch_Camera_RoomViewStyle_Int32, styleBefore, &e);
-    if (weTurnedRoomOn) Store::pressRoomViewShortcut();
-    weTurnedRoomOn = false;
-    ignoreCameraEventsUntil = Clock::now() + std::chrono::milliseconds(1500);
-    logf("see-through: off");
-  }
-
-  void renderSpot(int fitHand) {
-    if (!spotShowing) return;
-    const auto now = Clock::now();
-    if (now - spotDrawn < std::chrono::milliseconds(33)) return;
-    spotDrawn = now;
-    V3 eyes[2], ahead;
-    if (!eyePositions(eyes, &ahead)) return;
-    const SpotHole holes[2] = {{pos(in.h[fitHand].grip), std::max(store.max_pos, kOtherHandGlobe)}, {pos(in.h[1 - fitHand].grip), kOtherHandGlobe}};
-    const V3 head = (eyes[0] + eyes[1]) * 0.5f;
-    // Facing the headset and fixed in the room between moves, so a late picture can't shift anything.
-    const auto face = [&](V3 centre, V3 toHead, float size) {
-      V3 up{0, 1, 0};
-      if (std::fabs(dot(up, toHead)) > 0.95f) up = {0, 0, -1};
-      const V3 X = norm(cross(up, toHead)), Y = cross(toHead, X);
-      spotPlane = {centre, X, Y, toHead, size};
-      spotPlaneValid = true;
-      M q = ident();
-      q.m[0][0] = X.x; q.m[1][0] = X.y; q.m[2][0] = X.z;
-      q.m[0][1] = Y.x; q.m[1][1] = Y.y; q.m[2][1] = Y.z;
-      q.m[0][2] = toHead.x; q.m[1][2] = toHead.y; q.m[2][2] = toHead.z;
-      q.m[0][3] = centre.x; q.m[1][3] = centre.y; q.m[2][3] = centre.z;
-      spotXf = q;
-    };
-    if (keyHere) {
-      // Just big enough for the globes, around the hands.
-      const V3 centre = (holes[0].c + holes[1].c) * 0.5f, toHead = norm(head - centre);
-      bool redo = !spotPlaneValid || len(centre - spotPlane.c) > 0.1f || dot(toHead, spotPlane.N) < std::cos(25.f * kDeg);
-      if (!redo) {
-        const float need = keyPlaneSize(spotPlane, eyes, holes, 2);
-        redo = need > spotPlane.S || need < spotPlane.S - 0.8f;
-      }
-      if (redo) {
-        face(centre, toHead, 1.f);
-        spotPlane.S = std::ceil(keyPlaneSize(spotPlane, eyes, holes, 2) / 0.4f) * 0.4f;
-        vr::VROverlay()->SetOverlayWidthInMeters(spot, spotPlane.S);
-      }
-      drawKeyWindows(spotPx, kKeyPx, kKeyPx, spotPlane, eyes, holes, 2, store.seeThroughKey == 2);
-      put(spot, spotPx.data(), 2 * kKeyPx, kKeyPx, true);
-    } else {
-      // Centred on where you're looking rather than on your hands, or its edge comes into view when you look up from them.
-      const V3 centre = head + ahead * kSpotD;
-      if (!spotPlaneValid || len(centre - spotPlane.c) > 0.25f || dot(ahead * -1.f, spotPlane.N) < std::cos(kSpotTurn * kDeg)) face(centre, ahead * -1.f, kSpotS);
-      drawSpot(spotPx, kSpotPx, kSpotPx, spotPlane, eyes, holes, 2, kSpotDim);
-      put(spot, spotPx.data(), 2 * kSpotPx, kSpotPx, true);
-    }
-    vr::VROverlay()->SetOverlayTransformAbsolute(spot, vr::TrackingUniverseStanding, &spotXf);
   }
 
   // ---------------- the bindings page's way to SteamVR
@@ -770,18 +655,6 @@ struct App {
     m.fine = fineAdjust && mode == Mode::Idle;
     m.fineBig = fineBig;
     m.hint = nudgeHint(fx.hover, fineBig);
-    if (keyHere) {
-      if (fx.hover == "see_through")
-        m.hint = store.seeThroughKey == 0 ? "Shows your real hands. Set Virtual Desktop's VR Passthrough colour to red 255, green 0, blue 255."
-               : store.seeThroughKey == 1 ? "A clear window onto your real hands, though it covers the in-game hand. Tap for stripes."
-                                          : "Your real hands and the in-game hand between the stripes. Tap to turn it off.";
-      m.seeThrough = store.seeThroughKey != 0;
-      m.seeThroughLook = store.seeThroughKey == 2 ? "stripes" : "window";
-    } else {
-      if (fx.hover == "see_through") m.hint = store.seeThrough ? "While you place a hand, your real hands show through and everything else goes dim." : "Your real hands won't show through while you place one.";
-      m.seeThrough = store.seeThrough;
-    }
-    m.canSeeThrough = canSeeThrough;
     return m;
   }
 
@@ -913,12 +786,6 @@ struct App {
       else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
       else if (id == "page_combos") { page = DashPage::Combos; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
       else if (id == "page_recorded") { page = DashPage::Recorded; statusUntil = {}; guarded([&] { syncBindings(); }); }
-      else if (id == "see_through") {
-        if (keyHere) store.seeThroughKey = (store.seeThroughKey + 1) % 3;
-        else store.seeThrough = !store.seeThrough;
-        store.save();
-        statusUntil = {};
-      }
       else if (id == "fine_toggle") { fineAdjust = !fineAdjust; statusUntil = {}; }
       else if (id == "fine_small") fineBig = false;
       else if (id == "fine_big") fineBig = true;
@@ -1051,7 +918,6 @@ struct App {
 
   void finishSession(bool save) {
     vr::VROverlay()->HideOverlay(ghost);
-    seeThroughOff();
     mode = Mode::Idle;
     dashForce = true;
     in.release();
@@ -1092,7 +958,6 @@ struct App {
     if (mode == Mode::Armed) {
       if (panelShowing()) return;
       mode = Mode::Placing;
-      seeThroughOn();
       startStep();
     }
     if (mode != Mode::Placing) return;
@@ -1175,7 +1040,6 @@ struct App {
     }
 
     if (live) store.publishLive(&work);  // the in-game hand follows right now
-    renderSpot(f);
 
     // Bubble / ghost colour: off-white resting, yellow while held, red past the limit.
     if (over) vr::VROverlay()->SetOverlayColor(ghost, 1.0f, 0.33f, 0.20f);
@@ -1236,9 +1100,6 @@ struct App {
                     : std::string("Grab the ghost with your ") + side[o] + " hand";
       p.status = live ? "It can move anywhere inside the bubble" : readout;
       if (live && !cur().zero()) p.status = readout;
-      // Worth saying where it can't be done for you, and where SteamVR couldn't tell whether it worked.
-      if (cur().zero() && Store::controllerType == "frame_controller" && (seeThroughWanted() || !kSeeThroughHere)) p.status = "Can't see your real hands? Double-press the Steam button";
-      if (cur().zero() && keyHere && seeThroughWanted()) p.status = "Pink globes? Turn on VR Passthrough in Virtual Desktop";
       p.keys = {{resetKey(), "No offset"}, {cancelKey(), "Cancel"}};
     }
     return p;
@@ -1351,13 +1212,7 @@ struct App {
     vr::VREvent_t ev;
     while (vr::VRSystem()->PollNextEvent(&ev, sizeof ev)) {
       if (ev.eventType == vr::VREvent_Quit) { vr::VRSystem()->AcknowledgeQuit_Exiting(); return false; }
-      if (ev.eventType == vr::VREvent_DashboardActivated) { dashForce = true; checkVirtualDesktop(); }
-      // SteamVR says nothing about whether Room View is on, but this goes off whenever someone switches it.
-      if (ev.eventType == vr::VREvent_CameraSettingsHaveChanged && Clock::now() >= ignoreCameraEventsUntil) {
-        roomViewGuess = !roomViewGuess;
-        if (spotShowing) weTurnedRoomOn = false;  // you switched it yourself, so it stays how you left it
-        logf("see-through: Room View looks %s now", roomViewGuess ? "on" : "off");
-      }
+      if (ev.eventType == vr::VREvent_DashboardActivated) dashForce = true;
     }
     while (vr::VROverlay()->PollNextOverlayEvent(dash, &ev, sizeof ev)) {
       double x = ev.data.mouse.x, y = dashCv.h - ev.data.mouse.y;
@@ -1432,7 +1287,6 @@ struct App {
     // closing: leave the game exactly as saved
     vr::VROverlay()->HideOverlay(ghost);
     vr::VROverlay()->HideOverlay(hint);
-    seeThroughOff();
     Store::stopRecording();
     Store::inputEnabled(false);  // nobody's left to say the dashboard's opened
     Store::askTruePoses(false);
@@ -1441,7 +1295,6 @@ struct App {
     store.publishLive();
     store.save();
     vr::VROverlay()->DestroyOverlay(ghost);
-    vr::VROverlay()->DestroyOverlay(spot);
     vr::VROverlay()->DestroyOverlay(hint);
     vr::VROverlay()->DestroyOverlay(dash);
   }

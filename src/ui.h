@@ -58,9 +58,6 @@ struct DashModel {
   bool fine = false;          // fine adjust: arrows either side of each number
   bool fineBig = false;       // and they go 1 cm and 5 degrees a tap, rather than 1 mm and 1 degree
   std::string hint;           // what's under the laser would do, when it isn't obvious
-  bool canSeeThrough = false; // the headset has cameras
-  bool seeThrough = false;    // your real hands show through while you place one
-  std::string seeThroughLook; // how, when there's more than one way: "window" or "stripes"
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;
@@ -200,7 +197,7 @@ struct RecordedModel {
   int ask = 0;           // which question the interview is on
   bool interview = false;    // this one's being made by interview
   bool interviewOn = false;  // the Interview option
-  bool touchesOn = false;    // the Use touches option
+  bool touchesOn = false;    // the Capacitive touches option
   std::string feeling;       // what it can feel right now, while listening
   int tileFirst = 0;         // the first tile showing, when there are more than fit
   bool canRecord = false;
@@ -212,7 +209,9 @@ struct RecordedModel {
   std::string name;
   std::string plays;     // "Right B", empty until there is one
   std::string note;      // what it takes over from
+  bool noteWarn = false; // and that's a warning, so it's red
   bool onTouch = false, repeat = false, asRecorded = false, withTouches = false, hasBareTouches = false;
+  int touches = 0;       // the Capacitive touches row: 0 not there, 1 none in this take, 2 a choice, 3 it's only touches
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;

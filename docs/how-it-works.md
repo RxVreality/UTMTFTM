@@ -125,23 +125,6 @@ Since a bug here could stick a button in every game, it's kept simple. The hook 
 
 In the tests the hook adds too little to measure against a fake's own lock and list, around a nanosecond either way, per button report, with nothing recorded on that button.
 
-## See-through
-
-The dream is a window around each hand showing the real room, with the game everywhere else. SteamVR doesn't allow it on the Frame:
-
-- Passthrough is drawn by SteamVR's compositor, across the whole view. Overlays can only be drawn on top of it, with ordinary alpha, so they can't cut a hole through to it.
-- `IVRTrackedCamera`, the public way to get the camera picture, gives nothing on the Frame, and asking for it can black out passthrough until it's toggled. That was measured by [frame-autopass](https://github.com/bod09/frame-autopass), and I haven't repeated it, because it would interrupt someone's view to find out.
-
-So on the Frame, while you place a hand, this does the next best thing with what's public. It sets `camera/roomViewStyle` to translucent and double-presses the Steam button through the button hook, which is Room View's shortcut. Then a big dark overlay, drawn per eye like the ghost, covers everything except circles around your hands. Inside them you can see your real hands and the in-game ones together, and that's where your eye goes. All of it goes back how it was when you finish.
-
-SteamVR doesn't say whether Room View is on, so that's a guess from `VREvent_CameraSettingsHaveChanged`, which fires when it's toggled. If it guesses wrong you get the opposite of what you wanted for one placement, and double-pressing the Steam button fixes it.
-
-On a PC streaming to a Frame, the headset's own compositor adds the passthrough after the PC's picture arrives, so a dark overlay from the PC couldn't do this. There the panel just says how to turn it on.
-
-Virtual Desktop is different, because it can turn one colour into the real room after the picture reaches the headset. Anything drawn in that exact colour is a real window, which is what the dream was. So when `VirtualDesktop.Server.exe` is running, the See-through button appears, off to begin with because without Virtual Desktop's own setting all you'd get is pink circles. Tapping it draws the globes in pure magenta, red 255, green 0, blue 255, on a plane just big enough to hold them, so the pixels stay fine and the edge can be hard. A soft edge would be neither the colour nor the game.
-
-The catch is that an overlay sits on top of the game, so a solid window hides the in-game hand at the moment you're trying to line it up. Tapping again draws stripes instead, whole rows of pixels on and off. They're level so they look the same from both eyes, and you get the room in one and the game in the next. Stripes rather than a see-through colour because a colour that's half magenta is at the mercy of how Virtual Desktop's slider happens to be set.
-
 ## Tests
 
 None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh` on ARM64 Linux.
@@ -161,8 +144,7 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 ## Not tested yet
 
 - A macro on any controller other than the Steam Frame's. On 7 November one played in Titan Isles on a real Frame, so `driver_cv` does report through `IVRDriverInput` and sets its controllers up after the add-on loads. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up for the rest.
-- Room View on the Frame. In the first try the dim appeared and Room View didn't come on, and why isn't known yet. So how the dim looks with the room behind it hasn't been seen either.
-- Virtual Desktop's window in a headset: whether its colour setting takes the overlay as cleanly as `test_ghost`'s numbers suggest, what video compression does to the edge and the stripes, and whether stripes are any use.
+- Touches recorded on a real Frame. On 7 November one take with Capacitive touches on had none, probably because the thumb moved during the countdown. The log now says what each take heard (`macros: stopped listening`), so the next one can be read back.
 
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.

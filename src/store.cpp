@@ -69,8 +69,6 @@ bool Store::load() {
   Json::Value v;
   if (!readJson(dir() + "/profiles.json", v)) return false;
   max_pos = std::clamp(v["limits"].get("max_pos_m", 0.15).asFloat(), 0.01f, 0.30f);
-  seeThrough = v.get("see_through", true).asBool();
-  seeThroughKey = std::clamp(v.get("see_through_key", 0).asInt(), 0, 2);
   max_rot = 180.f;  // never limit rotation (older profiles stored 60)
   global = pairFrom(v["global"]);
   // Version 1 profiles matched the ghost to the old hand mesh, so those matches no longer line up.
@@ -101,8 +99,6 @@ bool Store::save() const {
   Json::Value v;
   v["version"] = 2;
   v["limits"]["max_pos_m"] = max_pos;
-  v["see_through"] = seeThrough;
-  v["see_through_key"] = seeThroughKey;
   v["global"] = pairJ(global);
   for (int h = 0; h < 2; ++h) {
     const char* k = h ? "right" : "left";
@@ -400,12 +396,17 @@ void Store::recordingFromHere(uint32_t& cursor) {
   cursor = m ? m->input.evWrite.load(std::memory_order_acquire) : 0;
 }
 
+uint64_t Store::recordingLost = 0;
+
 size_t Store::readRecording(uint32_t& cursor, std::vector<fhlive::InputEvent*>& out) {
   out.clear();
   fhlive::Shared* m = platform::mapLive();
   if (!m) return 0;
   const uint32_t end = m->input.evWrite.load(std::memory_order_acquire);
-  if (end - cursor > fhlive::kEventRing) cursor = end - fhlive::kEventRing;
+  if (end - cursor > fhlive::kEventRing) {
+    recordingLost += end - cursor - fhlive::kEventRing;
+    cursor = end - fhlive::kEventRing;
+  }
   while (cursor != end) {
     fhlive::InputEvent& e = m->input.events[cursor % fhlive::kEventRing];
     if (e.seq.load(std::memory_order_acquire) != cursor + 1) break;  // still being written: next time
@@ -413,13 +414,6 @@ size_t Store::readRecording(uint32_t& cursor, std::vector<fhlive::InputEvent*>& 
     ++cursor;
   }
   return out.size();
-}
-
-bool Store::pressRoomViewShortcut() {
-  fhlive::Shared* m = platform::mapLive();
-  if (!m || m->input.magic.load(std::memory_order_acquire) != fhlive::kInputMagic) return false;
-  m->input.roomToggle.fetch_add(1, std::memory_order_relaxed);
-  return true;
 }
 
 bool Store::driverTruePose(int hand, M* out) {

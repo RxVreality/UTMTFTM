@@ -620,12 +620,6 @@ int main() {
   memset(&table, 0, sizeof table);
   publish();
 
-  // Room View's shortcut, sent through the same hook. Nothing to see with no camera, but SteamVR takes the presses.
-  const uint32_t room0 = in.roomToggleDone.load();
-  in.roomToggle.fetch_add(1);
-  wait(500);
-  check(in.roomToggleDone.load() != room0, "the Steam button got double-pressed");
-
   checkPanelImage();
   return finish();
 }

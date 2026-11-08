@@ -482,7 +482,7 @@ std::string dashKey(const DashModel& m) {
     }
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
-  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint + std::to_string(m.canSeeThrough) + std::to_string(m.seeThrough) + m.seeThroughLook;
+  k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint;
   return k;
 }
 
@@ -699,10 +699,7 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(lims[i]) + " cm", on ? INK : PAPER, 1, 1, 1);
     btn.push_back({bx + rd / 2, fy, rw, fh, id});
   }
-  // Whether your real hands show through while you place one, beside the only other thing that sometimes lives down here.
-  const double seeW = m.canSeeThrough ? 214 : 0, seeGap = m.canSeeThrough ? 10 : 0;
-  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx - seeW - seeGap, fh, "use_global", "Use all-games default", Outline);
-  if (m.canSeeThrough) button(c, btn, R - seeW, fy, seeW, fh, "see_through", "See-through: " + (m.seeThrough ? (m.seeThroughLook.empty() ? std::string("on") : m.seeThroughLook) : std::string("off")), m.seeThrough ? Solid : Outline);
+  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
 
   // one line of status along the bottom edge
   hline(c, L, R, 700);
@@ -1147,7 +1144,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
 
 // ---------------------------------------------------------------- macros page
 std::string recordedKey(const RecordedModel& m) {
-  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canRecord) + "|" + m.why + "|" + std::to_string(m.countdown) + "|" + std::to_string(m.selected) + "|" + m.name + "|" + m.plays + "|" + m.note + "|" + std::to_string(m.onTouch) + std::to_string(m.repeat) + std::to_string(m.asRecorded) + std::to_string(m.withTouches) + std::to_string(m.hasBareTouches) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.ask) + std::to_string(m.interview) + std::to_string(m.interviewOn) + std::to_string(m.touchesOn) + "|" + m.feeling + "|" + std::to_string(m.tileFirst) + "|";
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canRecord) + "|" + m.why + "|" + std::to_string(m.countdown) + "|" + std::to_string(m.selected) + "|" + m.name + "|" + m.plays + "|" + m.note + "|" + std::to_string(m.onTouch) + std::to_string(m.repeat) + std::to_string(m.asRecorded) + std::to_string(m.withTouches) + std::to_string(m.hasBareTouches) + std::to_string(m.touches) + std::to_string(m.noteWarn) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.ask) + std::to_string(m.interview) + std::to_string(m.interviewOn) + std::to_string(m.touchesOn) + "|" + m.feeling + "|" + std::to_string(m.tileFirst) + "|";
   for (const RecordedTile& t : m.tiles) k += t.id + t.name + t.hand + std::to_string(t.kind) + std::to_string(t.both) + ";";
   for (const RecordedRow& r : m.saved) {
     k += r.name + ">" + r.plays + ">";
@@ -1256,7 +1253,7 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     const double optY = 622, optW = mid - 12 - L, rx = mid + 12, segW = 200;
     recordedCaption(c, L, optY, optW, "Interview", "Easy mode: it asks you one question at a time.");
     segments(c, btn, L, optY + 24, segW, 42, {{"macro_interview_off", "Off", !m.interviewOn, true}, {"macro_interview_on", "On", m.interviewOn, true}});
-    recordedCaption(c, rx, optY, R - rx, "Use touches", "Resting a thumb can count, as well as pressing.");
+    recordedCaption(c, rx, optY, R - rx, "Capacitive touches", "A resting thumb counts, as well as a press.");
     segments(c, btn, rx, optY + 24, segW, 42, {{"macro_touch_off", "Off", !m.touchesOn, true}, {"macro_touch_on", "On", m.touchesOn, true}});
   } else if (m.step == 1) {
     slab(c, L, 112, R - L, 150, SIGNAL);
@@ -1304,9 +1301,12 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     button(c, btn, L + colW - 140, row2 + 24, 140, ctlH, "macro_rename", "Rename", Outline);
     recordedCaption(c, rx, row2, R - rx, "Timing", "The gaps you left, or the same short gap each time.");
     segments(c, btn, rx, row2 + 24, R - rx, ctlH, {{"macro_mine", "As I did it", m.asRecorded, true}, {"macro_quick", "Quick", !m.asRecorded, true}});
-    if (m.hasBareTouches) {
-      recordedCaption(c, rx, row3, R - rx, "Touches", "Where your thumb rested without pressing.");
-      segments(c, btn, rx, row3 + 24, R - rx, ctlH, {{"macro_press_only", "Leave out", !m.withTouches, true}, {"macro_touches", "Keep", m.withTouches, true}});
+    if (m.touches) {
+      // Always there with Capacitive touches on. Only a take with touches and presses has anything to choose.
+      const bool choice = m.touches == 2, kept = m.touches == 3 || (choice && m.withTouches);
+      recordedCaption(c, rx, row3, R - rx, "Capacitive touches",
+                      choice ? "Where your thumb rested without pressing." : m.touches == 3 ? "It's only touches, so they stay in." : "None this time, only presses.");
+      segments(c, btn, rx, row3 + 24, R - rx, ctlH, {{"macro_press_only", "Leave out", !kept, choice}, {"macro_touches", "Keep", kept, choice}});
     }
     button(c, btn, L, 640, 140, 48, "macro_cancel", "Cancel", Outline);
     button(c, btn, L + 150, 640, 190, 48, "macro_again", "Record again", Outline);
@@ -1328,7 +1328,9 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
       text(c, L, subY, 18, "I'll ask a few short questions, and nothing counts until you say so.", false, DIM, 1, 0, R - L);
       text(c, L, 260, 23, "Press Start and wait for the countdown.", false, PAPER);
       text(c, L, 300, 23, "Then do what you'd like that one button to do, the way you'd do it in the game.", false, PAPER, 1, 0, R - L);
-      text(c, L, 340, 23, "Holding the controller doesn't count. Only your presses do.", false, PAPER, 1, 0, R - L);
+      text(c, L, 340, 23, m.touchesOn ? "Holding the controller doesn't count. Only your presses and capacitive touches do." : "Holding the controller doesn't count. Only your presses do.", false, PAPER, 1, 0, R - L);
+      text(c, L, 380, 19, m.touchesOn ? "(Capacitive touches are on. You can switch them off at the bottom of the Macros page.)"
+                                      : "(Capacitive touches can count too. Switch them on at the bottom of the Macros page first.)", false, DIM, 1, 0, R - L);
       button(c, btn, R - 230, 640, 230, 48, "macro_ask_start", "Start", Primary);
     } else if (m.ask == 1) {
       text(c, L, headY, 27, "Is this what you did?", true, PAPER, 1, 0, R - L - 200);
@@ -1375,7 +1377,10 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
   } else if ((m.step == 3 || (m.step == 5 && m.ask == 2)) && !m.note.empty()) {
-    text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
+    if (m.noteWarn) {
+      lamp(c, L, baseY - 14, 14, ALERT);
+      text(c, L + 28, baseY, 19, m.note, true, ALERT, 1, 0, R - L - 28);
+    } else text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
   } else if (m.step == 0 && m.canRecord) {
     text(c, L, baseY, 19, "Close the dashboard and press the button. Macros don't run while the dashboard's open.", false, DIM, 1, 0, R - L);
   }

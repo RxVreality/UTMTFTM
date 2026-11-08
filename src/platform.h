@@ -40,7 +40,6 @@ fhlive::Shared* mapLive();
 bool setDriverRegistered(bool on, const std::string& driverDir);
 
 // Whether Virtual Desktop's server is running here, which is the one that can turn a colour into the real room. Always false on a Frame.
-bool virtualDesktopRunning();
 
 }  // namespace platform
 }  // namespace fh
