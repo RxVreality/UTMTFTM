@@ -26,7 +26,16 @@ There's a zip on the release page too, if you'd rather skip the installer. Unpac
 
 ### Steam Frame
 
-Use this one for games running on the headset.
+Use this one for games running on the headset. There are two ways to put it there.
+
+**With FrameDrop.** If you already send things to your Frame with [FrameDrop](https://framedropvr.com) on a Windows PC:
+
+1. Click **[Install with FrameDrop](https://framedropvr.com/install/?manifest=https%3A%2F%2Fgithub.com%2FRxVreality%2FUTMTFTM%2Freleases%2Flatest%2Fdownload%2Futmtftm.framedrop.json)** and say yes when FrameDrop asks.
+2. On the headset, find **UTMTFTM** in your Steam library and press **Play**. Nothing shows for a few seconds, then SteamVR restarts to load the add-on. That closes anything that's running, so don't do it mid-game.
+
+After that, **Play** on UTMTFTM just opens the yellow hand's page. For a new version, click the button again and press **Play** once more.
+
+**With Konsole:**
 
 1. In Steam, go to **Settings > System** and turn on **Enable Developer Mode**. Konsole doesn't show up without it.
 2. Open **Konsole** from the **+** on the bar at the bottom.
@@ -178,6 +187,8 @@ The logs are `utmtftm.log` and `driver.log`, in `%LOCALAPPDATA%\UTMTFTM` on Wind
 ```sh
 sh ~/.local/share/UTMTFTM/app/uninstall.sh
 ```
+
+If you installed it with FrameDrop, that leaves a UTMTFTM entry in your Steam library, which you can remove from Steam like any other shortcut.
 
 If you just want it out of the way for a while, switch it off in Manage Add-ons.
 
