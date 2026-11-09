@@ -152,6 +152,8 @@ struct App {
   uint32_t bindStatusSeen = 0;
   // Macros and anything else the driver's button hook does.
   bool inputOn = false, recOn = false;
+  // Macros record with the dashboard shut, with a sign in front of you (see pumpRecording).
+  bool recWaitLogged = false, signShown = false, messageGoesWithDash = false;
   uint32_t recCursor = 0;
   std::vector<fhlive::InputEvent*> recEvents;
   std::map<std::string, int> recHeard;  // what a take heard, for the log: "R/input/a/touch" and how many reports said it was on
@@ -306,8 +308,16 @@ struct App {
   void pumpRecording(bool panelUp) {
     const uint32_t clockMs = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - clockStart).count());
     guarded([&] {
-      // If the dashboard shuts while it's listening, the game mustn't lose its buttons.
-      if (recOn && !panelUp) bindings.recordedClick("macro_abort");
+      // It records with the dashboard shut. Steam Link runs the dashboard from the headset and the PC hears no buttons while
+      // it's open, and J4 liked it better this way on the Frame too (8 November). So it waits for the dashboard to shut, a sign
+      // in front of you says what's happening, and opening the dashboard again stops it.
+      bindings.setRecordShut(true);
+      bindings.recordedDashboard(panelUp);
+      const bool waiting = bindings.recordedWaitingForShut();
+      if (waiting != recWaitLogged) {
+        recWaitLogged = waiting;
+        if (waiting) logf("macros: waiting for the dashboard to shut");
+      }
       const bool listen = bindings.recordedListening();
       if (listen && !recOn) {
         Store::recordingFromHere(recCursor);
@@ -315,7 +325,7 @@ struct App {
         recHeard.clear();
         recReports = 0;
         recLostAtStart = Store::recordingLost;
-        logf("macros: listening");
+        logf("macros: listening, with the dashboard shut");
       }
       if (!listen && recOn) {
         Store::stopRecording();
@@ -347,6 +357,16 @@ struct App {
         if (!recEvents.empty()) dashPoke = true;
       }
       bindings.recordedTick(clockMs, Store::inputNowMs());
+      std::string title, sub;
+      if (bindings.recordedReopen(&title, &sub)) {
+        logf("macros: done with the dashboard shut (%s), opening it again", title.c_str());
+        vr::VROverlay()->ShowDashboard("utmtftm.dashboard");
+        page = DashPage::Recorded;
+        dashForce = true;
+        // In case SteamVR doesn't open it from here, say where the steps went. It goes as soon as the dashboard's up.
+        showMessage(title, sub, title == "Got it");
+        messageGoesWithDash = true;
+      }
     });
   }
 
@@ -1250,7 +1270,7 @@ struct App {
       float dt = std::chrono::duration<float>(now - last).count();
       last = now;
       bool dashUp = panelShowing();
-      bool busy = mode != Mode::Idle || dashUp || !panelDrawn.empty() || now - lastDashEvent < std::chrono::seconds(2);
+      bool busy = mode != Mode::Idle || dashUp || !panelDrawn.empty() || recOn || signShown || now - lastDashEvent < std::chrono::seconds(2);
       // While fine adjusting, the hand that isn't pointing can stay moved, so you can watch it go.
       int liveHand = -1;
       if (dashUp && fineAdjust && page == DashPage::Hands && mode == Mode::Idle) {
@@ -1270,6 +1290,19 @@ struct App {
         Store::inputEnabled(wantInput);
       }
       if (bindings.loaded()) pumpRecording(dashUp);
+      // Recording with the dashboard shut: a sign in front of you says what's happening.
+      PanelModel sign;
+      bool signUp = false;
+      if (bindings.loaded() && mode == Mode::Idle && !dashUp) guarded([&] { signUp = bindings.recordedSign(sign); });
+      if (signUp) {
+        if (!signShown) { vr::VROverlay()->ShowOverlay(hint); signShown = true; panelDrawn.clear(); }
+        showPanel(sign, nullptr);
+      } else if (signShown) {
+        signShown = false;
+        if (panelDrawn != "#message") { vr::VROverlay()->HideOverlay(hint); panelDrawn.clear(); }
+      }
+      if (messageGoesWithDash && dashUp && panelDrawn == "#message") messageUntil = now;
+      if (panelDrawn != "#message") messageGoesWithDash = false;
       bool wantTrue = mode != Mode::Idle && store.useDriver;
       if (wantTrue != askedTrue) { Store::askTruePoses(wantTrue); askedTrue = wantTrue; }
       if (mode != Mode::Idle) { in.poll(mode == Mode::Placing); truePoses(); }  // controllers only matter while placing
@@ -1277,7 +1310,7 @@ struct App {
       loadControllerModels();
       loadBindModels();
       tickSession(dt);
-      if (mode == Mode::Idle && !panelDrawn.empty()) {
+      if (mode == Mode::Idle && !signUp && !panelDrawn.empty()) {
         if (panelDrawn == "#message" && now < messageUntil) placePanel(nullptr);
         else { vr::VROverlay()->HideOverlay(hint); panelDrawn.clear(); }
       }

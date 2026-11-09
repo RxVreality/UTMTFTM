@@ -204,6 +204,7 @@ struct RecordedModel {
   std::string why;       // why not, when it can't
   std::vector<RecordedRow> saved;
   int countdown = 0;
+  bool waitShut = false;  // Steam Link: it can only hear your buttons with the dashboard shut, so it's waiting for that
   std::vector<RecordedTile> tiles;
   int selected = -1;
   std::string name;

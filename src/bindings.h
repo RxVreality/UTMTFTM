@@ -199,6 +199,15 @@ class Page {
   bool recordedListening() const;  // what the controllers report is wanted, and the dashboard shouldn't get it
   void recordedReport(const macro::Raw& r);
   void recordedTick(uint32_t clockMs, uint32_t driverMs);
+  // Steam Link runs the dashboard from the headset, and while it's open the PC hears nothing from the buttons. Then recording
+  // and choosing the button happen with the dashboard shut, with a small sign in front of you instead.
+  void setRecordShut(bool shut) { recShutMode_ = shut; }
+  bool recordShut() const { return recShutMode_; }
+  void recordedDashboard(bool up);           // every tick: whether the dashboard's showing
+  bool recordedSign(PanelModel& p) const;    // the sign to float in front of you now, with the dashboard shut. False: none
+  // A take or a choice just finished with the dashboard shut: open it again (once). What to say meanwhile, too.
+  bool recordedReopen(std::string* title = nullptr, std::string* sub = nullptr);
+  bool recordedWaitingForShut() const { return recWaitShut_; }
   // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. late: it's hearing buttons it never
   // saw being set up, so it can't tell which is which. Any of those says why on the page.
   void setHookState(bool hookOk, bool heard, bool late = false) { hookOk_ = hookOk; hookHeard_ = heard; hookLate_ = late; }
@@ -263,6 +272,8 @@ class Page {
   bool isControl(int hand, const std::string& path, const std::string& part) const;  // the controller's description lists it
   std::string feltNow() const;  // what it can feel right now, in words
   void backFromListening();
+  void stopListening();  // the dashboard got in the way: keep what there is, and go back
+  void finishTake();     // what was recorded becomes the steps
   struct ComboIdeaOf { std::string name; std::vector<ComboInput> inputs; };
   std::vector<ComboIdeaOf> comboIdeas(const Profile& p) const;
   void bake(const std::string& model);
@@ -293,6 +304,12 @@ class Page {
   std::map<std::string, float> felt_;  // while listening: the last thing each part of each control said
   uint32_t recPhaseStart_ = 0;
   bool recPhaseStarted_ = false;
+  bool recShutMode_ = false;  // buttons only reach UTMTFTM with the dashboard shut (Steam Link)
+  bool recWaitShut_ = false;  // waiting for the dashboard to shut before the countdown or the choosing starts
+  bool recReopen_ = false;    // finished with it shut: the dashboard should open again
+  bool recWasShutPhase_ = false;  // last tick, it was counting down, recording or choosing with the dashboard shut
+  int recShutStep_ = 0;           // which of those
+  std::string recReopenTitle_, recReopenSub_;
   int recCountdown_ = 3;
   macro::Recorder recorder_;
   macro::TriggerPicker picker_;

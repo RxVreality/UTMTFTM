@@ -354,6 +354,7 @@ struct Comp {
   std::atomic<Comp*> route{nullptr};
   std::atomic<bool> heldBack{false}; // said something while recording that SteamVR hasn't heard
   float lastLogged = -2;             // while recording: sticks and triggers report constantly, and most of that isn't news
+  uint32_t lastLoggedMs = 0;         // and Steam Link sends every button about 360 times a second, changed or not
   // RunFrame's own.
   int holds = 0;
   bool mine = false;
@@ -430,18 +431,24 @@ int handOfContainer(vr::PropertyContainerHandle_t c) {
 }
 
 uint32_t nowMs();
+constexpr uint32_t kSameAgainMs = 100;  // under the 150 ms the overlay allows for "it was already down when listening started"
 
 // Only while recording.
 void logReport(fhlive::InputChannel* in, Comp* c, float v) {
   const int hand = handOfContainer(c->container);
   if (hand == fhlive::kNoHand || strncmp(c->name, "/input/", 7) != 0 || strncmp(c->name, "/input/system", 13) == 0) return;
   if (c->scalar && std::fabs(v - c->lastLogged) < 0.02f) return;
+  // A button that says the same again is only worth passing on now and then, so the overlay still knows it's held. Steam Link
+  // repeats all of them all the time, and that flood filled the ring faster than the overlay could read it, losing presses.
+  const uint32_t now = nowMs();
+  if (!c->scalar && v == c->lastLogged && now - c->lastLoggedMs < kSameAgainMs) return;
   c->lastLogged = v;
+  c->lastLoggedMs = now;
   const uint32_t n = in->evWrite.fetch_add(1, std::memory_order_acq_rel);
   fhlive::InputEvent& e = in->events[n % fhlive::kEventRing];
   e.seq.store(0, std::memory_order_relaxed);
   std::atomic_thread_fence(std::memory_order_release);
-  e.ms = nowMs();
+  e.ms = now;
   e.value = v;
   e.hand = uint8_t(hand);
   snprintf(e.name, sizeof e.name, "%s", c->name);

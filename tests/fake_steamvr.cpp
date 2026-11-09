@@ -202,6 +202,12 @@ bool ovDashVisible(void*) {
   std::lock_guard<std::mutex> lock(g.m);
   return g.dashboardVisible;
 }
+std::atomic<int> g_showDashboards{0};
+void ovShowDashboard(void*, const char*) {
+  ++g_showDashboards;
+  std::lock_guard<std::mutex> lock(g.m);
+  g.dashboardVisible = true;
+}
 bool ovVisible(void*, vr::VROverlayHandle_t h) {
   std::lock_guard<std::mutex> lock(g.m);
   return h == kOverlayDash && g.dashboardVisible;
@@ -519,6 +525,7 @@ void fillInterfaces() {
   FILL(g_overlay, IVROverlay, IsDashboardVisible, ovDashVisible);
   FILL(g_overlay, IVROverlay, GetPrimaryDashboardDevice, ovPrimaryDevice);
   FILL(g_overlay, IVROverlay, IsOverlayVisible, ovVisible);
+  FILL(g_overlay, IVROverlay, ShowDashboard, ovShowDashboard);
   FILL(g_overlay, IVROverlay, PollNextOverlayEvent, ovPollEvent);
   FILL(g_overlay, IVROverlay, SetOverlayTexture, ovTexture);
   FILL(g_overlay, IVROverlay, SetOverlayRaw, ovRaw);
@@ -826,6 +833,18 @@ std::string settingNow(const std::string& name) {
   return it == g_strings.end() ? "" : it->second;
 }
 
+std::string logText() {
+  std::ifstream in(fh::platform::dataDir() + "/utmtftm.log");
+  std::stringstream log;
+  log << in.rdbuf();
+  return log.str();
+}
+// The log carries on from run to run, so a scenario can look at only what it wrote itself.
+bool logHasSince(size_t from, const std::string& what) {
+  const std::string all = logText();
+  return all.size() > from && all.find(what, from) != std::string::npos;
+}
+
 bool logHas(const std::string& what) {
   std::ifstream in(fh::platform::dataDir() + "/utmtftm.log");
   std::stringstream log;
@@ -924,7 +943,11 @@ void scenarioBindings() {
 }
 
 // Macros, through the real program and the real driver, from the Combos tab to a press in the game.
+// Records a macro the way the program does it: with the dashboard shut and a sign in front of you. Steam Link runs the dashboard
+// from the headset, and while it's open the PC hears no buttons at all (J4's PC, 8 November), and J4 liked it better this way
+// on the Frame too. Steam Link also says every button again about 360 times a second, changed or not, and that flood is in here.
 void scenarioRecorded() {
+  const size_t logStart = logText().size();
   const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
   fh::fixture::writeSteamVR(steamvr, config, fh::platform::dataDir() + "/../fake-games");
   fh::bind::Dirs dirs;
@@ -937,6 +960,7 @@ void scenarioRecorded() {
   page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
   page.setGame("steam.app.12345", "steam.app.12345", "Simulated Game");
   page.setHookState(true, true);
+  page.setRecordShut(true);
   g_pageForClicks = &page;
 
   startServer(true);
@@ -952,50 +976,82 @@ void scenarioRecorded() {
     for (size_t i = 0; i < all.size(); ++i) if (all[i].first == who && all[i].second == v) return int(i);
     return -1;
   };
-  // The program needs to have heard something to offer recording, as it would from any real controller.
   reportButton(1, "/input/thumbstick/touch", 1);
   reportButton(1, "/input/thumbstick/touch", 0);
   wait(1200);
-  check(logHas("button hook: ready"), "the program knows the driver can hear the buttons");
+  check(logHasSince(logStart, "button hook: ready"), "the program knows the driver can hear the buttons");
 
   click("page_combos");
   wait(800);
   clickCombos("page_recorded");
   wait(800);
 
-  // Keep the page used for finding buttons in step with the real one.
   uint32_t t = 1000;
   const auto copy = [&](int hand, const char* name, float v) { t += 60; fh::macro::Raw r; r.ms = t; r.hand = hand; r.name = name; r.value = v; page.recordedReport(r); };
+  page.recordedDashboard(true);
   clickRecorded("macro_record");
+  wait(1500);
+  check(logHasSince(logStart, "macros: waiting for the dashboard to shut"), "Record new waits for the dashboard to shut");
+  check(!logHasSince(logStart, "macros: listening"), "and isn't listening yet");
+  fakeserver::clearHeardButtons();
+  reportButton(1, "/input/a/click", 1);
+  wait(50);
+  reportButton(1, "/input/a/click", 0);
+  check(heard("R/input/a/click", 1.f), "nothing's held back while it waits");
+
+  const int signsBefore = g_otherUploads;
+  setDashboard(false);
+  page.recordedDashboard(false);
   page.recordedTick(0, 0);
   page.recordedTick(3000, 0);
-  wait(3400);
-  check(logHas("macros: listening"), "after the countdown it's listening");
+  wait(800);
+  check(logHasSince(logStart, "macros: listening, with the dashboard shut"), "shut, it listens");
+  check(g_otherUploads > signsBefore, "and puts a sign up in front of you", g_otherUploads - signsBefore);
+  wait(2800);  // the countdown
+
+  // Steam Link's flood, around the real presses. A thousand reports at a time is four rings' worth.
+  const char* same[] = {"/input/x/click", "/input/y/click", "/input/grip/touch", "/input/menu/click", "/input/thumbrest/touch"};
+  const auto flood = [&] { for (int i = 0; i < 200; ++i) for (const char* n : same) reportButton(1, n, 0); };
   fakeserver::clearHeardButtons();
-  // Press A, press the trigger, let go of the trigger, let go of A.
+  flood();
   reportButton(1, "/input/a/touch", 1);
   reportButton(1, "/input/a/click", 1); copy(1, "/input/a/click", 1);
+  flood();
   wait(150);
   reportButton(1, "/input/trigger/value", 1);
   reportButton(1, "/input/trigger/click", 1); copy(1, "/input/trigger/click", 1);
+  flood();
   wait(150);
   reportButton(1, "/input/trigger/click", 0); copy(1, "/input/trigger/click", 0);
   reportButton(1, "/input/trigger/value", 0);
+  flood();
   wait(150);
   reportButton(1, "/input/a/click", 0); copy(1, "/input/a/click", 0);
   reportButton(1, "/input/a/touch", 0);
-  check(!heard("R/input/a/click", 1.f), "while it's recording the dashboard doesn't get any of that");
+  check(!heard("R/input/a/click", 1.f) && !heard("R/input/trigger/click", 1.f), "the game doesn't get any of it");
   wait(2600);
   page.recordedTick(4000, t + 5000);
-  check(logHas("macros: stopped listening"), "it stops by itself");
+  check(logHasSince(logStart, "macros: stopped listening"), "it stops by itself");
+  check(logHasSince(logStart, " 0 lost,") && logHasSince(logStart, "R/input/trigger/click x"), "and lost nothing in the flood, trigger included");
+  check(g_showDashboards >= 1 && logHasSince(logStart, "opening it again"), "then opens the dashboard again by itself", g_showDashboards);
+  page.recordedDashboard(false);
+  page.recordedDashboard(true);
 
+  // Choosing the button, the same way.
   clickRecorded("macro_pick");
-  wait(500);
+  wait(600);
+  const int opened = g_showDashboards;
+  setDashboard(false);
+  page.recordedDashboard(false);
   page.recordedTick(0, 0);
+  wait(600);
   reportButton(1, "/input/b/click", 1); copy(1, "/input/b/click", 1);
   wait(100);
   reportButton(1, "/input/b/click", 0); copy(1, "/input/b/click", 0);
-  wait(500);
+  wait(600);
+  check(g_showDashboards > opened, "after B's let go of, the dashboard opens again", g_showDashboards);
+  page.recordedDashboard(false);
+  page.recordedDashboard(true);
   clickRecorded("macro_save");
   wait(800);
 
@@ -1010,15 +1066,6 @@ void scenarioRecorded() {
   check(!heard("R/input/b/click", 1.f), "the game doesn't see B");
   const int aDown = where("R/input/a/click", 1.f), trigDown = where("R/input/trigger/click", 1.f), trigUp = where("R/input/trigger/click", 0.f), aUp = where("R/input/a/click", 0.f);
   check(aDown >= 0 && trigDown > aDown && trigUp > trigDown && aUp > trigUp, "it sees A, then the trigger, then the trigger up, then A up", aDown);
-
-  // The dashboard's open: B's just B.
-  setDashboard(true);
-  wait(400);
-  fakeserver::clearHeardButtons();
-  reportButton(1, "/input/b/click", 1);
-  wait(200);
-  reportButton(1, "/input/b/click", 0);
-  check(heard("R/input/b/click", 1.f) && !heard("R/input/a/click", 1.f), "with the dashboard open, B's just B, for the laser");
   check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
   g_pageForClicks = nullptr;
   finish();

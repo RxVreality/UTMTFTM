@@ -1235,6 +1235,154 @@ static void testRecorded(const std::string& work, const std::string& out) {
   }
 }
 
+// Steam Link runs the dashboard from the headset, and the PC hears nothing from the buttons while it's open (J4's PC,
+// 8 November: 922,870 reports in five takes, every one of them 0). So there it records with the dashboard shut.
+static void testRecordShut(const std::string& work, const std::string& out) {
+  const std::string steamvr = work + "/shut-steamvr", config = work + "/shut-config", data = work + "/shut-data";
+  fixture::writeSteamVR(steamvr, config, work + "/shut-games");
+  Dirs d;
+  d.steamvr = steamvr;
+  d.steam = work + "/shut-steam";
+  d.data = data;
+  d.config = {config};
+  FakeSettings fake;
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+  page.setGame("steam.app.777", "", "Named Game");
+  giveModels(page, steamvr);
+  page.setHookState(true, true);
+  page.setRecordShut(true);
+  PanelModel sign;
+
+  page.recordedDashboard(true);
+  page.recordedClick("macro_record");
+  page.recordedDashboard(true);
+  page.recordedTick(1000, 1000);
+  RecordedModel m = page.recordedModel("", "");
+  check(m.step == 1 && m.waitShut, "Record new waits for the dashboard to shut");
+  check(!page.recordedListening() && !page.recordedSign(sign), "holding nothing back, and with no sign yet");
+  shotRecorded(m, out + "/recorded_shut_wait.png");
+  page.recordedTick(9000, 9000);
+  check(page.recordedModel("", "").step == 1, "however long the dashboard stays open");
+
+  // Shut: the countdown starts, and the game doesn't get your buttons from now on.
+  page.recordedDashboard(false);
+  check(!page.recordedModel("", "").waitShut && page.recordedListening(), "shut, it holds your buttons back straight away");
+  page.recordedTick(10000, 10000);
+  check(page.recordedSign(sign) && sign.chip == "3" && sign.text == "Let go of everything", "and the sign counts down: " + sign.chip + " " + sign.text);
+  { Canvas cv(820, 300); drawPanel(cv, sign); cv.savePNG(out + "/recorded_shut_sign_countdown.png"); }
+  page.recordedReport(rawOf(10500, 1, "/input/a/click", 1));  // pressed during the countdown: not a step
+  page.recordedReport(rawOf(10700, 1, "/input/a/click", 0));
+  page.recordedDashboard(false);
+  page.recordedTick(13000, 13000);
+  m = page.recordedModel("", "");
+  check(m.step == 2 && page.recordedListening(), "then it records");
+  check(page.recordedSign(sign) && sign.text == "Do your sequence now" && sign.status.rfind("Nothing yet", 0) == 0, "with the sign saying so: " + sign.status);
+  page.recordedReport(rawOf(13050, 1, "/input/grip/touch", 1));  // the hand holding the controller, already there
+  page.recordedReport(rawOf(13500, 1, "/input/a/touch", 1));
+  page.recordedReport(rawOf(13550, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(13700, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(13750, 1, "/input/a/touch", 0));
+  page.recordedReport(rawOf(14000, 1, "/input/b/click", 1));
+  page.recordedReport(rawOf(14200, 1, "/input/b/click", 0));
+  page.recordedDashboard(false);
+  page.recordedTick(14300, 14300);
+  check(page.recordedSign(sign) && sign.status.find("Heard A, B") == 0, "the sign says what it's heard: " + sign.status);
+  check(sign.chip.empty(), "with no countdown left on it: " + sign.chip);
+  { Canvas cv(820, 300); drawPanel(cv, sign); cv.savePNG(out + "/recorded_shut_sign_recording.png"); }
+  std::string title, sub;
+  check(!page.recordedReopen(&title, &sub), "nothing to open yet");
+  page.recordedDashboard(false);
+  page.recordedTick(16300, 16300);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && !page.recordedListening(), "2 seconds after the last press it's done");
+  check(m.tiles.size() == 2 && m.tiles[0].name == "A" && m.tiles[1].name == "B", "with A then B");
+  page.recordedDashboard(false);
+  check(page.recordedReopen(&title, &sub) && title == "Got it", "and the dashboard opens again by itself: " + title + ", " + sub);
+  check(!page.recordedReopen(), "once");
+  check(!page.recordedSign(sign), "the sign goes");
+  page.recordedDashboard(true);
+
+  // Choosing the button works the same way.
+  page.recordedClick("macro_pick");
+  page.recordedDashboard(true);
+  m = page.recordedModel("", "");
+  check(m.step == 4 && m.waitShut && !page.recordedListening(), "Choose a button waits for the dashboard to shut too");
+  shotRecorded(m, out + "/recorded_shut_wait_choose.png");
+  page.recordedDashboard(false);
+  page.recordedTick(20000, 20000);
+  check(page.recordedListening() && page.recordedSign(sign) && sign.header == "CHOOSE THE BUTTON", "shut, it listens, with a sign");
+  page.recordedReport(rawOf(20050, 1, "/input/grip/touch", 1));
+  page.recordedReport(rawOf(20500, 1, "/input/y/click", 1));
+  page.recordedSign(sign);
+  check(sign.status.find("Y") != std::string::npos, "it says what it got, and to let go: " + sign.status);
+  page.recordedReport(rawOf(20700, 1, "/input/y/click", 0));
+  page.recordedDashboard(false);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.plays == "Y", "let go, and Y plays it: " + m.plays);
+  check(page.recordedReopen(&title, &sub) && sub.find("Y plays it") == 0, "then back to the dashboard: " + sub);
+  page.recordedDashboard(true);
+
+  // Opening the dashboard part way through stops it, and keeps what you'd done.
+  page.recordedClick("macro_again");
+  page.recordedDashboard(false);
+  page.recordedTick(30000, 30000);
+  page.recordedTick(33000, 33000);
+  check(page.recordedModel("", "").step == 2, "recording again");
+  page.recordedReport(rawOf(33500, 0, "/input/trigger/click", 1));
+  page.recordedReport(rawOf(33600, 0, "/input/trigger/click", 0));
+  page.recordedDashboard(true);
+  m = page.recordedModel("", "");
+  check(m.step == 3 && m.tiles.size() == 1 && m.tiles[0].name == "Trigger", "the dashboard opened: it stopped with the trigger it heard");
+  check(!page.recordedReopen(), "and doesn't try to open what's already open");
+
+  // Changed your mind while it waits.
+  page.recordedClick("macro_pick");
+  page.recordedClick("macro_leave");
+  m = page.recordedModel("", "");
+  check(m.step == 3 && !m.waitShut, "leaving the page while it waits goes back to the steps");
+  {
+    Canvas cv(1200, 760);
+    std::vector<Button> b;
+    page.recordedClick("macro_pick");
+    drawRecorded(cv, page.recordedModel("", ""), b);
+    bool back = false, cancel = false;
+    for (const Button& x : b) { back = back || x.id == "macro_leave"; cancel = cancel || x.id == "macro_cancel"; }
+    check(back && !cancel, "the wait to choose a button only goes back, so the steps aren't thrown away");
+    page.recordedClick("macro_leave");
+  }
+  page.recordedClick("macro_cancel");
+  page.recordedClick("macro_record");
+  page.recordedClick("macro_leave");
+  m = page.recordedModel("", "");
+  check(m.step == 0 && !m.waitShut && !page.recordedListening(), "and Cancel cancels the wait");
+
+  // Nothing pressed: it says so.
+  page.recordedClick("macro_record");
+  page.recordedDashboard(false);
+  page.recordedTick(40000, 40000);
+  page.recordedTick(43000, 43000);
+  page.recordedDashboard(false);
+  page.recordedTick(63500, 63500);
+  page.recordedDashboard(false);
+  check(page.recordedReopen(&title, &sub) && title == "Nothing was pressed", "twenty seconds of nothing ends it: " + title);
+  page.recordedDashboard(true);
+
+  // Everywhere else it's as before: the dashboard shutting while it listens stops it.
+  page.setRecordShut(false);
+  page.recordedClick("macro_record");
+  page.recordedDashboard(true);
+  check(!page.recordedModel("", "").waitShut, "with the dashboard's own buttons, no waiting");
+  page.recordedTick(50000, 50000);
+  page.recordedTick(53000, 53000);
+  page.recordedDashboard(true);
+  check(page.recordedListening(), "it records with the dashboard open");
+  page.recordedDashboard(false);
+  check(!page.recordedListening() && page.recordedModel("", "").step == 0, "and shutting the dashboard stops it");
+  check(!page.recordedSign(sign), "with no sign");
+}
+
 static void testGuides(const std::string& work) {
   const std::string steamvr = work + "/gsteamvr", config = work + "/gconfig", guides = work + "/guides.json";
   fixture::writeSteamVR(steamvr, config, work + "/ggames");
@@ -1718,6 +1866,7 @@ int main(int argc, char** argv) {
   fs::create_directories(fs::u8path(out), ec);
   testFixture(tmp.generic_u8string(), out);
   testRecorded(tmp.generic_u8string(), out);
+  testRecordShut(tmp.generic_u8string(), out);
   testGuides(tmp.generic_u8string());
   testGuideTable();
   testGuideShots(tmp.generic_u8string(), out);

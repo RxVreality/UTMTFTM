@@ -2415,6 +2415,7 @@ RecordedModel Page::recordedModel(const std::string& hover, const std::string& d
   m.touchesOn = macroTouches;
   m.feeling = feltNow();
   m.countdown = recCountdown_;
+  m.waitShut = recWaitShut_;
 
   auto saved = recorded.find(choiceKey());
   if (saved != recorded.end())
@@ -2486,6 +2487,7 @@ void Page::recordedClick(const std::string& id) {
   const auto startRecording = [&] {
     recStep_ = 1;
     recPhaseStarted_ = false;
+    recWaitShut_ = recShutMode_;
     recCountdown_ = 3;
     recSelected_ = -1;
     recFirstTile_ = 0;
@@ -2517,11 +2519,13 @@ void Page::recordedClick(const std::string& id) {
   if (id == "macro_steps_prev") { recFirstTile_ = std::max(0, recFirstTile_ - kRecordedTilesPerPage); recSelected_ = -1; return; }
   if (id == "macro_steps_next") { recFirstTile_ += kRecordedTilesPerPage; recSelected_ = -1; return; }
   if (id == "macro_again") { editing_.steps.clear(); startRecording(); return; }
-  if (id == "macro_leave") {  // tapped another page during the countdown
+  if (id == "macro_leave") {  // tapped another page during the countdown, or while it waited for the dashboard to shut
+    const bool waited = recWaitShut_;
+    recWaitShut_ = false;
     if (recStep_ == 1) {
       if (editing_.steps.empty()) recStep_ = 0;
       else backFromListening();
-    }
+    } else if (waited && recStep_ == 4) backFromListening();
     return;
   }
   if (id == "macro_abort") {  // the dashboard shut while it was listening
@@ -2531,7 +2535,7 @@ void Page::recordedClick(const std::string& id) {
     }
     return;
   }
-  if (id == "macro_cancel") { recStep_ = 0; editing_ = macro::Recorded{}; recGuided_ = false; return; }
+  if (id == "macro_cancel") { recStep_ = 0; editing_ = macro::Recorded{}; recGuided_ = false; recWaitShut_ = false; return; }
   if (id.rfind("macro_edit_", 0) == 0) {
     auto it = recorded.find(choiceKey());
     const size_t at = size_t(std::atoi(id.c_str() + 11));
@@ -2578,6 +2582,7 @@ void Page::recordedClick(const std::string& id) {
     picker_ = macro::TriggerPicker{};
     recStep_ = 4;
     recPhaseStarted_ = false;
+    recWaitShut_ = recShutMode_;
     return;
   }
   // In the interview these answer the question, so it moves on.
@@ -2608,7 +2613,107 @@ void Page::recordedClick(const std::string& id) {
   }
 }
 
-bool Page::recordedListening() const { return recStep_ == 2 || recStep_ == 4; }
+// With the dashboard shut the game's in front of you, so the countdown holds your buttons back from it too.
+bool Page::recordedListening() const {
+  if (recWaitShut_) return false;
+  return recStep_ == 2 || recStep_ == 4 || (recShutMode_ && recStep_ == 1);
+}
+
+void Page::recordedDashboard(bool up) {
+  const auto phase = [&] { return recStep_ == 1 || recStep_ == 2 || recStep_ == 4; };
+  if (!recShutMode_) {
+    recWaitShut_ = false;
+    if (recordedListening() && !up) recordedClick("macro_abort");  // the dashboard shut while it was listening
+  } else if (recWaitShut_) {
+    if (!phase()) recWaitShut_ = false;
+    else if (!up) {  // shut: now it can start, and the sign takes over
+      recWaitShut_ = false;
+      recPhaseStarted_ = false;
+    }
+  } else if (phase() && up) stopListening();  // opened again part way through
+  const bool shutPhase = recShutMode_ && !recWaitShut_ && phase();
+  if (recWasShutPhase_ && !shutPhase && !up) {
+    recReopen_ = true;
+    // What the sign says while the dashboard opens again, in case SteamVR doesn't open it from here.
+    if (recShutStep_ == 4) {
+      const std::string on = playsOn(editing_);
+      recReopenTitle_ = picker_.done() && !on.empty() ? "Got it" : "Nothing was pressed";
+      recReopenSub_ = picker_.done() && !on.empty() ? on + " plays it. Save it in UTMTFTM on the dashboard." : "So no button's been chosen.";
+    } else if (recShutStep_ == 2 && !recorder_.empty()) {
+      recReopenTitle_ = "Got it";
+      recReopenSub_ = "Your steps are in UTMTFTM on the dashboard.";
+    } else {
+      recReopenTitle_ = "Nothing was pressed";
+      recReopenSub_ = "So nothing's been recorded.";
+    }
+  }
+  if (shutPhase) recShutStep_ = recStep_;
+  recWasShutPhase_ = shutPhase;
+}
+
+bool Page::recordedReopen(std::string* title, std::string* sub) {
+  const bool r = recReopen_;
+  recReopen_ = false;
+  if (r && title) *title = recReopenTitle_;
+  if (r && sub) *sub = recReopenSub_;
+  return r;
+}
+
+bool Page::recordedSign(PanelModel& p) const {
+  p = PanelModel{};
+  if (!recShutMode_ || recWaitShut_) return false;
+  if (recStep_ == 1) {
+    p.header = "RECORDING A MACRO";
+    p.chip = std::to_string(std::max(1, recCountdown_));
+    p.text = "Let go of everything";
+    p.status = "Then do your sequence. The game won't get your buttons while it records.";
+    p.keys = {{"STEAM", "Stop"}};
+    return true;
+  }
+  if (recStep_ == 2) {
+    p.header = "RECORDING";
+    p.text = "Do your sequence now";
+    std::string heard;
+    int presses = 0;
+    for (const macro::Step& s : recorder_.soFar())
+      if (s.kind == macro::Press || s.kind == macro::Push) {
+        ++presses;
+        if (presses <= 6) heard += (heard.empty() ? "" : ", ") + controlName(s.hand, s.path);
+      }
+    if (presses > 6) heard += " and " + std::to_string(presses - 6) + " more";
+    p.status = presses ? "Heard " + heard + ". It stops 2 seconds after your last press." : "Nothing yet. It stops 2 seconds after your last press.";
+    p.keys = {{"STEAM", "Stop"}};
+    return true;
+  }
+  if (recStep_ == 4) {
+    p.header = "CHOOSE THE BUTTON";
+    p.text = macroTouches ? "Press or touch what should play this" : "Press what should play this";
+    p.status = picker_.done() ? "Got " + controlName(picker_.hand(), picker_.path()) + ". Now let go of it." : "Any button, on either controller.";
+    p.keys = {{"STEAM", "Cancel"}};
+    return true;
+  }
+  return false;
+}
+
+void Page::stopListening() {
+  if (recStep_ == 2 && !recorder_.empty()) { finishTake(); return; }  // keep what you did before opening it
+  if (recStep_ == 4 && picker_.done()) { backFromListening(); return; }
+  if (!recGuided_ && editing_.steps.empty() && recStep_ != 4) recStep_ = 0;
+  else backFromListening();
+}
+
+void Page::finishTake() {
+  editing_.steps = recorder_.steps();
+  const bool anyPress = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
+  editing_.withTouches = !anyPress;
+  if (editing_.name.empty() || editing_.name == recAutoName_) {
+    recAutoName_ = defaultRecordedName(editing_.steps, [this](int h, const std::string& p) { return controlName(h, p); });
+    editing_.name = recAutoName_;
+  }
+  recAsk_ = 1;
+  backFromListening();
+  recSelected_ = -1;
+}
 
 void Page::backFromListening() {
   recStep_ = recGuided_ ? 5 : 3;
@@ -2640,6 +2745,7 @@ void Page::recordedReport(const macro::Raw& r) {
 
 void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
   if (recStep_ != 1 && recStep_ != 2 && recStep_ != 4) return;
+  if (recWaitShut_) return;  // nothing starts until the dashboard's shut
   if (!recPhaseStarted_) {
     recPhaseStarted_ = true;
     recPhaseStart_ = clockMs;
@@ -2671,16 +2777,7 @@ void Page::recordedTick(uint32_t clockMs, uint32_t driverMs) {
       return;
     }
     if (recorder_.empty() || !someDone) return;
-    editing_.steps = recorder_.steps();
-    const bool anyPress = std::any_of(editing_.steps.begin(), editing_.steps.end(), [](const macro::Step& s) { return s.kind == macro::Press || s.kind == macro::Push; });
-    editing_.withTouches = !anyPress;
-    if (editing_.name.empty() || editing_.name == recAutoName_) {
-      recAutoName_ = defaultRecordedName(editing_.steps, [this](int h, const std::string& p) { return controlName(h, p); });
-      editing_.name = recAutoName_;
-    }
-    recAsk_ = 1;
-    backFromListening();
-    recSelected_ = -1;
+    finishTake();
     return;
   }
   // Choosing the button. Fifteen seconds, or a second and a half more to let go of what was chosen.

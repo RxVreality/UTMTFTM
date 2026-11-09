@@ -1144,7 +1144,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
 
 // ---------------------------------------------------------------- macros page
 std::string recordedKey(const RecordedModel& m) {
-  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canRecord) + "|" + m.why + "|" + std::to_string(m.countdown) + "|" + std::to_string(m.selected) + "|" + m.name + "|" + m.plays + "|" + m.note + "|" + std::to_string(m.onTouch) + std::to_string(m.repeat) + std::to_string(m.asRecorded) + std::to_string(m.withTouches) + std::to_string(m.hasBareTouches) + std::to_string(m.touches) + std::to_string(m.noteWarn) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.ask) + std::to_string(m.interview) + std::to_string(m.interviewOn) + std::to_string(m.touchesOn) + "|" + m.feeling + "|" + std::to_string(m.tileFirst) + "|";
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + std::to_string(m.canRecord) + "|" + m.why + "|" + std::to_string(m.countdown) + "|" + std::to_string(m.selected) + "|" + m.name + "|" + m.plays + "|" + m.note + "|" + std::to_string(m.onTouch) + std::to_string(m.repeat) + std::to_string(m.asRecorded) + std::to_string(m.withTouches) + std::to_string(m.hasBareTouches) + std::to_string(m.touches) + std::to_string(m.noteWarn) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.ask) + std::to_string(m.interview) + std::to_string(m.interviewOn) + std::to_string(m.touchesOn) + "|" + m.feeling + "|" + std::to_string(m.tileFirst) + "|" + std::to_string(m.waitShut) + "|";
   for (const RecordedTile& t : m.tiles) k += t.id + t.name + t.hand + std::to_string(t.kind) + std::to_string(t.both) + ";";
   for (const RecordedRow& r : m.saved) {
     k += r.name + ">" + r.plays + ">";
@@ -1255,6 +1255,20 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     segments(c, btn, L, optY + 24, segW, 42, {{"macro_interview_off", "Off", !m.interviewOn, true}, {"macro_interview_on", "On", m.interviewOn, true}});
     recordedCaption(c, rx, optY, R - rx, "Capacitive touches", "A resting thumb counts, as well as a press.");
     segments(c, btn, rx, optY + 24, segW, 42, {{"macro_touch_off", "Off", !m.touchesOn, true}, {"macro_touch_on", "On", m.touchesOn, true}});
+  } else if (m.waitShut && (m.step == 1 || m.step == 4)) {
+    // This part happens with the dashboard shut. Steam Link keeps every button for the dashboard while it's open, and it's
+    // easier in the game anyway.
+    slab(c, L, 112, R - L, 150, SIGNAL);
+    text(c, L + 48, 174, 36, "Now close the dashboard", true, INK, 1, 0, R - L - 80);
+    text(c, L + 34, 222, 21, m.step == 1 ? "It records with the dashboard shut. A sign in front of you counts down, then do your sequence."
+                                         : "It listens with the dashboard shut. Then press what should play this.",
+         false, INK, 1, 0, R - L - 80);
+    const char* how[3] = {"Shut it the way you usually do.",
+                          m.step == 1 ? "It stops 2 seconds after your last press, and this page opens again by itself." : "As soon as you let go of it, this page opens again by itself.",
+                          m.step == 1 ? "Open the dashboard while it records and it stops there, keeping what you did." : "Open the dashboard before then and it stops without choosing."};
+    for (int i = 0; i < 3; ++i) text(c, L, 320 + i * 34, 21, how[i], false, DIM, 1, 0, R - L);
+    // Back to where you were: the steps you already have stay, which Cancel on the steps page wouldn't do.
+    button(c, btn, L, 640, 150, 48, "macro_leave", m.step == 4 ? "Back" : "Cancel", Outline);
   } else if (m.step == 1) {
     slab(c, L, 112, R - L, 150, SIGNAL);
     text(c, L + 48, 174, 36, "Let go of everything", true, INK, 1, 0, R - L - 260);

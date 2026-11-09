@@ -926,6 +926,24 @@ int main() {
     CHECK(written == 2, "it logged the A and one trigger move, not the tiny wobble or the Steam button (%u)", written);
     const fhlive::InputEvent& first = in.events[cursorStart % fhlive::kEventRing];
     CHECK(first.seq.load() == cursorStart + 1 && first.hand == 1 && first.value == 1.f && !strcmp(first.name, "/input/a/click"), "an event says who and what");
+    // Steam Link says every button again about 360 times a second, changed or not, and on J4's PC that flood filled the ring
+    // before the overlay could read it. A change goes straight through, and a button that hasn't changed only now and then.
+    {
+      const uint32_t before = in.evWrite.load();
+      for (int i = 0; i < 50; ++i) inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+      CHECK(in.evWrite.load() - before == 1, "fifty reports of B up go to the overlay once (%u)", in.evWrite.load() - before);
+      inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+      CHECK(in.evWrite.load() - before == 2, "B going down goes straight away");
+      for (int i = 0; i < 20; ++i) inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+      CHECK(in.evWrite.load() - before == 2, "and saying it's still down doesn't, at first");
+      in.recordUntilMs.store(in.nowMs.load() + 1000);
+      runFor(130);
+      in.recordUntilMs.store(in.nowMs.load() + 1000);
+      inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+      CHECK(in.evWrite.load() - before == 3, "but a tenth of a second on it does, so the overlay knows it's held (%u)", in.evWrite.load() - before);
+      inputApi->UpdateBooleanComponent(H["R/input/b/click"], false, 0);
+      CHECK(in.evWrite.load() - before == 4, "and letting go goes straight away");
+    }
     in.recordUntilMs.store(0);
     tick();
     CHECK(lastSaid("R/input/a/click") == 1.f && lastSaid("R/input/trigger/value") == 0.905f, "stopping tells SteamVR what your hands are doing now");
