@@ -36,5 +36,5 @@ Get-Content "$Rt\localapp\UTMTFTM\driver.log" -ErrorAction SilentlyContinue | Ad
 "--- vrserver, about drivers" | Add-Content $out
 Get-Content "$Rt\logs\vrserver.txt" -ErrorAction SilentlyContinue | Select-String -Pattern 'driver utmtftm|driver testctl|Loaded server driver|Unable to load|crash|exception|Sending Quit|Kill process|OnMsg_LaunchApplication' | Select-Object -First 30 | ForEach-Object { $s = "$_"; $s.Substring(0, [Math]::Min(240, $s.Length)) } | Add-Content $out
 
-& powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -release -owner $Owner
+if ($Gate -and (Test-Path $Gate)) { & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -release -owner $Owner }
 "finished" | Add-Content $out

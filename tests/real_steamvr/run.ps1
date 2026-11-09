@@ -2,21 +2,23 @@
 # J4's is read or written, and tries the add-on's button hook against it. Waits its turn for the PC first. No headset needed.
 # Result: build\rt\result.txt, ending in "finished". after.ps1 closes everything, because the PC's guard takes this SteamVR for J4
 # playing and cuts this script as soon as the check program ends. That's expected, and the other jobs wait about a minute for it.
-param([string]$Root = (Resolve-Path "$PSScriptRoot\..\..").Path, [string]$Gate = 'C:\Users\jorda\Documents\tideborn\tools\heavy_gate.ps1')
+# -Gate, or UTMTFTM_HEAVY_GATE, is an optional script that queues heavy jobs on a busy PC. Without one it just runs.
+param([string]$Root = (Resolve-Path "$PSScriptRoot\..\..").Path, [string]$Gate = $env:UTMTFTM_HEAVY_GATE)
 $ErrorActionPreference = 'Continue'
+$useGate = $Gate -and (Test-Path $Gate)
 $rt = "$Root\build\rt"
 $out = "$rt\result.txt"
 New-Item -ItemType Directory -Force "$rt\config", "$rt\logs", "$rt\localapp", "$rt\testctl\bin\win64", "$rt\testctl\resources\settings" | Out-Null
 "waiting for its turn on the PC" | Set-Content $out
 
 $owner = $PID
-& powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -session "UTMTFTM" -what "real SteamVR hook check" -owner $owner -ram_gb 4
-if ($LASTEXITCODE -ne 0) { "gave up waiting for the PC`nfinished" | Set-Content $out; exit 4 }
+if ($useGate) { & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -session "UTMTFTM" -what "real SteamVR hook check" -owner $owner -ram_gb 4 }
+if ($useGate -and $LASTEXITCODE -ne 0) { "gave up waiting for the PC`nfinished" | Set-Content $out; exit 4 }
 
 $running = @(Get-Process vrserver, vrcompositor, vrmonitor -ErrorAction SilentlyContinue)
 if ($running.Count -gt 0) {
   "SteamVR is already running here. Not touching it.`nfinished" | Set-Content $out
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -release -owner $owner
+  if ($useGate) { & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -release -owner $owner }
   exit 3
 }
 

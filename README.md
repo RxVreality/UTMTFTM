@@ -108,7 +108,7 @@ There's more on how it finds all this in [docs/how-it-works.md](docs/how-it-work
 
 ## Combos
 
-A combo is a macro for your controller: hold two or more controls together and they do one thing in the game. Touching counts and doesn't press anything, so your thumb on A and B can be its own action without setting off A or B. VRChat players build these by hand in Steam's binding screen, and this is the same thing without the binding screen.
+With a combo, you hold two or more controls together and they do one thing in the game. Touching counts and doesn't press anything, so your thumb on A and B can be its own action without setting off A or B. VRChat players build these by hand in Steam's binding screen, and this is the same thing without the binding screen.
 
 ![Picking touch A, touch B and press grip for a combo in Pavlov](docs/combos.png)
 
@@ -131,16 +131,16 @@ Under **Advanced** on the Combos tab. It's the other way round from a combo: one
 4. Tap **Choose a button**, close the dashboard again and press the one that should play it. That button stops doing its usual job in that game while this is saved, and the page says so in red.
 5. **Save**, and close the dashboard. There's no need to restart the game.
 
-It records with the dashboard shut because when you stream to a Frame over Steam Link, the headset runs the dashboard and the PC hears none of your buttons while it's open. It's the same on the headset, since it's easier in the game anyway. Opening the dashboard part way through stops it and keeps what it heard.
+It records with the dashboard shut because when you stream to a Frame over Steam Link, the headset runs the dashboard and the PC hears none of your buttons while it's open. It works that way on the headset too, because recording in the game is easier. Opening the dashboard part way through stops it and keeps what it heard.
 
 It plays at the pace you did it, or with **Quick**, 50 ms between every step. It plays once per press, or over and over while you hold the button.
 
-Holding the controller the way you play doesn't add anything. Whatever you were already holding when it started is left out, and a grip or trigger you go on squeezing doesn't stop it finishing. Only the controls SteamVR lists for your controller count, so sensors that no game can bind, like the Frame's capsense, stay out.
+Holding the controller the way you play doesn't add anything. Whatever you were already holding when it started is left out, and a grip or trigger you keep squeezing doesn't keep the recording going. Only the controls SteamVR lists for your controller count, so the Frame's raw hand sensor, which no game can bind, stays out.
 
 Two switches at the bottom of the list:
 
 - **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name.
-- **Capacitive touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. Checking the steps then always has a Capacitive touches row, to keep or leave out the touches that weren't on the way to a press, or to say there weren't any. It's off to begin with, because a thumb brushes past a lot of things.
+- **Capacitive touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. Checking the steps then always has a Capacitive touches row, where you keep or drop touches that didn't end in a press, and it says so when there weren't any. It's off to begin with, because a thumb brushes past a lot of things.
 
 It doesn't run while the dashboard is open or while you're placing a hand.
 
@@ -221,7 +221,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-The Combos tab, combos and macros both, was co-authored with [MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit). They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved.
+[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved.
 
 ## License
 
