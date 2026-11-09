@@ -121,7 +121,9 @@ A VR button isn't one thing the way a mouse button is: there's a thumb resting o
 
 A controller also reports things that aren't controls. The Frame's `driver_cv` sends its raw hand sensor, capsense, with an `x` like a stick's, and it reads as pushed for as long as you're holding the controller. So recording only takes what the controller's input profile lists, and only takes `x` and `y` from a joystick or trackpad. Anything already down in the first 150 ms of listening was down before it started, like the grip you're holding on with, and isn't a step. A press only stops recording finishing if it's a button or a stick: a grip or trigger you're still squeezing doesn't.
 
-Since a bug here could stick a button in every game, it's kept simple. The hook itself only remembers what the controller said, and passes it on unless that button's been taken over. Everything else runs in `RunFrame`, SteamVR's own loop for drivers, so there's no new thread. It lets go of anything it's holding, and tells SteamVR what your hands are really doing, whenever the dashboard opens, a hand's being placed, the saved table changes, or SteamVR shuts down. While recording, buttons are held back from SteamVR so the dashboard doesn't get them, but the overlay has to keep asking every second, so if it dies they come straight back. The Steam button is never held back.
+Recording happens with the dashboard shut, with a sign floating in front of you instead of the page. Streaming a Frame from a PC, Steam Link runs the PC's dashboard from the headset, and while it's open the PC gets laser clicks and nothing else: every button reads 0. On 8 November five takes there logged 922,870 reports and every one was 0. Steam Link also says every button again about 360 times a second, changed or not, which filled the overlay's ring of 256 reports faster than it was read. So while recording, the driver passes a button on only when it changes, or again 100 ms after it last did, so one that's held still reads as held.
+
+Since a bug here could stick a button in every game, it's kept simple. The hook itself only remembers what the controller said, and passes it on unless that button's been taken over. Everything else runs in `RunFrame`, SteamVR's own loop for drivers, so there's no new thread. It lets go of anything it's holding, and tells SteamVR what your hands are really doing, whenever the dashboard opens, a hand's being placed, the saved table changes, or SteamVR shuts down. While recording, buttons are held back from SteamVR so the game doesn't get them, but the overlay has to keep asking every second, so if it dies they come straight back. The Steam button is never held back.
 
 In the tests the hook adds too little to measure against a fake's own lock and list, around a nanosecond either way, per button report, with nothing recorded on that button.
 
@@ -143,13 +145,15 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 ## Not tested yet
 
-- A macro on any controller other than the Steam Frame's. On 7 November one played in Titan Isles on a real Frame, so `driver_cv` does report through `IVRDriverInput` and sets its controllers up after the add-on loads. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up for the rest.
+- Changes that work right away in a game: rewiring one button, or a new combo whose action is already on a button. The tests and the simulated SteamVR cover them, but I haven't tried them in a real game.
+- Recording with the dashboard shut on the Frame itself. It's how recording works streaming to a Frame over Steam Link, where I've used it, and the simulated SteamVR runs it on ARM64, but not yet on the headset.
+- A macro on any controller other than the Steam Frame's, on the headset or streamed from a PC. On 7 November one played in Titan Isles on a real Frame, so `driver_cv` does report through `IVRDriverInput` and sets its controllers up after the add-on loads. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up for the rest.
 - Touches recorded on a real Frame. On 7 November one take with Capacitive touches on had none, probably because the thumb moved during the countdown. The log now says what each take heard (`macros: stopped listening`), so the next one can be read back.
 
 - Any controller other than the Steam Frame's and the Quest 3's on real hardware.
 - The game ignoring buttons while you place a hand. UTMTFTM asks for that with `k_nActionSetOverlayGlobalPriorityMin`.
 - Any layout from the bindings page in a real game. What's written matches SteamVR's own translation and uses the settings route that's worked for offsets, but only a game can show it's right.
-- A combo in a real game, and whether SteamVR's chords work the same for OpenXR games as for SteamVR Input ones.
+- Whether SteamVR's chords work the same for OpenXR games as for SteamVR Input ones.
 - Fine adjust in a headset: which hand SteamVR says is holding the laser, and whether a game keeps drawing the hand behind the dashboard.
 - Most of `input/game_labels.json`. I've checked Pavlov and Titan Isles on my Frame, and `headset_checked` says so for each game.
 - Index's squeeze threshold. Its grip reads as fully closed just from holding the controller, so the binding goes by squeeze force. 0.6 is a judgement call.

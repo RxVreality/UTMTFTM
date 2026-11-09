@@ -100,7 +100,7 @@ Tap the button on your own controller, and a yellow bar asks what it should do. 
 - You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
 - Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
-- Rewiring one button does work mid-game, when what you want it to do is already on another button. The add-on just sends that press as the other one until the next launch. The page says whether you got that or have to restart the game.
+- Rewiring one button does work mid-game, when what you want it to do is already on another button. The add-on just sends that press as the other one until the next launch. The page says whether you got that or have to restart the game. I haven't tried this in a game myself yet, so if it doesn't take, restart the game.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
 - I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
 
@@ -115,21 +115,23 @@ A combo is a macro for your controller: hold two or more controls together and t
 1. With a game running, open the **Combos** tab and tap **New combo**.
 2. Tap each control you want in it: once for touch, again for press, and again to clear it.
 3. Tap **Next** and pick what it should do.
-4. If what it sets off is already on a button, it works straight away. Otherwise restart the game.
+4. If what it sets off is already on a button, it should work straight away, though I haven't tried that in a game yet. Otherwise restart the game.
 
 **Remove** takes one out again. Each game can have six.
 
-**This is the newest part and it hasn't had much testing.** It writes combos the same way Steam's binding screen does, but it hasn't had much time in real games, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
+I've used combos and macros in games on my Frame, and macros from my PC over Steam Link too. Combos are written the same way Steam's binding screen does it, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
 
 ### Macros
 
 Under **Advanced** on the Combos tab. It's the other way round from a combo: one button plays a whole sequence. Say you want B to hold A, pull the trigger, then let go of both.
 
 1. With a game running, open **Combos**, then **Advanced**, then **Record new**.
-2. Wait for the countdown and do what you'd like the button to do. Your presses don't reach the dashboard while it's recording, so you don't have to aim the laser anywhere. It stops by itself 2 seconds after your last press.
+2. Close the dashboard when it asks. A sign in front of you counts down, then do what you'd like the button to do. The game doesn't get your presses while it's recording. It stops by itself 2 seconds after your last press, and the dashboard opens again.
 3. Check the steps. Each press is one tile. Tap one to move it or delete it.
-4. Tap **Choose a button** and press the one that should play it. That button stops doing its usual job in that game while this is saved, and the page says so in red.
+4. Tap **Choose a button**, close the dashboard again and press the one that should play it. That button stops doing its usual job in that game while this is saved, and the page says so in red.
 5. **Save**, and close the dashboard. There's no need to restart the game.
+
+It records with the dashboard shut because when you stream to a Frame over Steam Link, the headset runs the dashboard and the PC hears none of your buttons while it's open. It's the same on the headset, since it's easier in the game anyway. Opening the dashboard part way through stops it and keeps what it heard.
 
 It plays at the pace you did it, or with **Quick**, 50 ms between every step. It plays once per press, or over and over while you hold the button.
 
@@ -137,7 +139,7 @@ Holding the controller the way you play doesn't add anything. Whatever you were 
 
 Two switches at the bottom of the list:
 
-- **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name. While it listens, it shows what it can feel right now.
+- **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name.
 - **Capacitive touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. Checking the steps then always has a Capacitive touches row, to keep or leave out the touches that weren't on the way to a press, or to say there weren't any. It's off to begin with, because a thumb brushes past a lot of things.
 
 It doesn't run while the dashboard is open or while you're placing a hand.
@@ -219,7 +221,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-Macros came from [u/MMeNDtal](https://www.reddit.com/user/MMeNDtal/) on Reddit, who explained what they should do, using a Logitech mouse's macros as the example, and also found the bug where tapping on the page didn't show until the laser moved.
+The Combos tab, combos and macros both, was co-authored with [MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit). They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved.
 
 ## License
 
