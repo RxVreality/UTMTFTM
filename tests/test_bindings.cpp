@@ -1857,6 +1857,307 @@ static void testReal(const std::string& work, const std::string& out) {
   shot(page.model("", ""), out + "/game_pavlov_quest_yours.png");
 }
 
+// The source in a binding with this path, mode, input and output. Null if there isn't one.
+static const Json::Value* sourceWith(const Json::Value& binding, const std::string& path, const std::string& mode, const std::string& input, const std::string& output) {
+  for (const auto& set : binding["bindings"].getMemberNames())
+    for (const auto& src : binding["bindings"][set]["sources"])
+      if (src["path"].asString() == path && src["mode"].asString() == mode && src["inputs"][input]["output"].asString() == output) return &src;
+  return nullptr;
+}
+
+static Json::Value parse(const std::string& text) {
+  Json::Value v;
+  Json::CharReaderBuilder b;
+  std::string errs;
+  std::stringstream in(text);
+  Json::parseFromStream(b, in, &v, &errs);
+  return v;
+}
+
+// One part of a control with a job of its own: a stick pushed one way, its press, a touch. MMeNDtal asked for a button
+// that pushes a stick (8 November), and J4 for the two ways of naming the directions (9 November).
+static void testParts(const std::string& work, const std::string& out) {
+  const std::string steamvr = work + "/parts/steamvr", config = work + "/parts/config", data = work + "/parts/data";
+  fixture::writeSteamVR(steamvr, config, work + "/parts/games");
+  Dirs d;
+  d.steamvr = steamvr;
+  d.steam = work + "/parts/steam";
+  d.data = data;
+  d.config = {config};
+  FakeSettings fake;
+  Library lib;
+  lib.load(d);
+  const Profile& touch = *lib.profile("oculus_touch");
+  const Profile& frame = *lib.profile("frame_controller");
+  const std::string in = "/user/hand/", act = "/actions/oculustouchcontroller/in/";
+
+  check(partOf("left/input/thumbstick#east") == "east" && baseOf("left/input/thumbstick#east") == "left/input/thumbstick", "a part is named after a #");
+  check(partOf("left/input/thumbstick").empty() && baseOf("left/input/thumbstick") == "left/input/thumbstick", "and without one it's all of it");
+
+  // Straight through translate, with games that read their sticks each way.
+  {
+    const Json::Value pad = parse("{\"bindings\": {\"/actions/x\": {\"sources\": ["
+                                  "{\"path\": \"/user/hand/right/input/joystick\", \"mode\": \"dpad\", \"parameters\": {\"sub_mode\": \"touch\"}, \"inputs\": {\"north\": {\"output\": \"/actions/x/in/jump\"}, \"east\": {\"output\": \"/actions/x/in/turn\"}}},"
+                                  "{\"path\": \"/user/hand/right/input/joystick\", \"mode\": \"joystick\", \"inputs\": {\"position\": {\"output\": \"/actions/x/in/look\"}, \"click\": {\"output\": \"/actions/x/in/crouch\"}}},"
+                                  "{\"path\": \"/user/hand/right/input/a\", \"mode\": \"button\", \"inputs\": {\"click\": {\"output\": \"/actions/x/in/use\"}, \"touch\": {\"output\": \"/actions/x/in/point\"}}},"
+                                  "{\"path\": \"/user/hand/right/input/b\", \"mode\": \"button\", \"inputs\": {\"click\": {\"output\": \"/actions/x/in/menu\"}}}"
+                                  "]}}}");
+    Wiring w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    // The game reads up on the stick as a button, Jump. Your Y does it.
+    w["right/input/y"] = "right/input/joystick#north";
+    std::map<std::string, int> hits;
+    Json::Value t = translate(pad, w, touch, frame, &hits);
+    check(sourceWith(t, in + "right/input/y", "button", "click", "/actions/x/in/jump") != nullptr, "a button can do what pushing a stick up does, when the game reads it as a d-pad");
+    check(!sourceWith(t, in + "right/input/y", "button", "click", "/actions/x/in/menu"), "and it stops doing its old job");
+    check(sourceWith(t, in + "right/input/y", "scalar_constant", "value", "/actions/x/in/look") != nullptr, "and looks up too, since pushing that stick up does both");
+    check(hits["right/input/y"] == 2, "and the count says both went in");
+    check(sourceWith(t, in + "right/input/thumbstick", "dpad", "north", "/actions/x/in/jump") != nullptr, "the stick still jumps when pushed up as well");
+
+    // Pushing your stick right does the B button's job. The stick still looks around and still turns.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/thumbstick#south"] = "right/input/b";
+    hits.clear();
+    t = translate(pad, w, touch, frame, &hits);
+    const Json::Value* d = sourceWith(t, in + "right/input/thumbstick", "dpad", "south", "/actions/x/in/menu");
+    check(d != nullptr, "pushing a stick one way can press a button");
+    check(d && (*d)["inputs"].isMember("north") && (*d)["inputs"].isMember("east"), "in the d-pad the game already had there, keeping its other ways");
+    check(sourceWith(t, in + "right/input/thumbstick", "joystick", "position", "/actions/x/in/look") != nullptr, "and the stick still moves as it did");
+    check(hits["right/input/thumbstick#south"] == 1, "counted");
+
+    // Taking a way the game already uses replaces that way.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/thumbstick#north"] = "right/input/b";
+    t = translate(pad, w, touch, frame);
+    check(!sourceWith(t, in + "right/input/thumbstick", "dpad", "north", "/actions/x/in/jump"), "a way given a new job stops doing the old one");
+    check(sourceWith(t, in + "right/input/thumbstick", "dpad", "north", "/actions/x/in/menu") != nullptr, "and does the new one");
+    check(sourceWith(t, in + "right/input/thumbstick", "dpad", "east", "/actions/x/in/turn") != nullptr, "while the other ways keep theirs");
+
+    // Its press on its own: pressing the stick in opens the menu, and doesn't crouch any more.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/thumbstick#click"] = "right/input/b";
+    t = translate(pad, w, touch, frame);
+    check(sourceWith(t, in + "right/input/thumbstick", "button", "click", "/actions/x/in/menu") != nullptr, "a stick's press can be given its own job");
+    check(!sourceWith(t, in + "right/input/thumbstick", "joystick", "click", "/actions/x/in/crouch"), "and stops doing the old one");
+    check(sourceWith(t, in + "right/input/thumbstick", "joystick", "position", "/actions/x/in/look") != nullptr, "but still moves");
+
+    // A touch on its own, set to nothing: A still presses, and resting a thumb on it no longer points.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/a#touch"] = "";
+    t = translate(pad, w, touch, frame);
+    check(sourceWith(t, in + "right/input/a", "button", "click", "/actions/x/in/use") != nullptr, "turning off a touch leaves the press");
+    check(!sourceWith(t, in + "right/input/a", "button", "touch", "/actions/x/in/point"), "and takes the touch away");
+
+    // A touch of yours on a button of theirs with no touch: resting on it presses theirs.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/x#touch"] = "right/input/b";
+    hits.clear();
+    t = translate(pad, w, touch, frame, &hits);
+    check(sourceWith(t, in + "right/input/x", "button", "touch", "/actions/x/in/menu") != nullptr, "a touch can press a button that has nothing for a touch");
+
+    // A push can't push another stick a set way: SteamVR only has that for buttons and triggers. It's counted as nothing.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    const Json::Value stick = parse("{\"bindings\": {\"/actions/x\": {\"sources\": [{\"path\": \"/user/hand/left/input/joystick\", \"mode\": \"joystick\", \"inputs\": {\"position\": {\"output\": \"/actions/x/in/move\"}}}]}}}");
+    w["right/input/thumbstick#east"] = "left/input/joystick#north";
+    hits.clear();
+    t = translate(stick, w, touch, frame, &hits);
+    check(hits.count("right/input/thumbstick#east") && hits["right/input/thumbstick#east"] == 0, "a push onto a stick read as a stick puts nothing in");
+
+    // Arizona Sunshine 2 and lots of other OpenXR games read a stick as two numbers, across and up. Up is the second one.
+    {
+      const Json::Value split = parse("{\"bindings\": {\"/actions/x\": {\"sources\": ["
+                                      "{\"path\": \"/user/hand/right/input/joystick\", \"mode\": \"trackpad\", \"inputs\": {\"position_x\": {\"output\": \"/actions/x/in/stick_x\"}}},"
+                                      "{\"path\": \"/user/hand/right/input/joystick\", \"mode\": \"trackpad\", \"inputs\": {\"position_y\": {\"output\": \"/actions/x/in/stick_y\"}}}]}}}");
+      Wiring s = defaultWiring(lib, "oculus_touch", "frame_controller");
+      s["right/input/y"] = "right/input/joystick#south";
+      const Json::Value got = translate(split, s, touch, frame);
+      const Json::Value* down = sourceWith(got, in + "right/input/y", "scalar_constant", "value", "/actions/x/in/stick_y");
+      check(down && (*down)["parameters"]["on/x"].asString() == "-1", "a stick read as two numbers: Y sets the up one to all the way down");
+      check(!sourceWith(got, in + "right/input/y", "scalar_constant", "value", "/actions/x/in/stick_x"), "and leaves the across one alone");
+    }
+
+    // A trigger can push a stick too, the way a button does.
+    w = defaultWiring(lib, "oculus_touch", "frame_controller");
+    w["right/input/bumper"] = "left/input/joystick#west";
+    t = translate(stick, w, touch, frame);
+    const Json::Value* c = sourceWith(t, in + "right/input/bumper", "scalar_constant", "value", "/actions/x/in/move");
+    check(c && (*c)["parameters"]["on/x"].asString() == "-1" && (*c)["parameters"]["on/y"].asString() == "0", "the bumper pushes the left stick left, all the way");
+  }
+
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  giveModels(page, steamvr);
+  page.setGame("steam.app.12345", "", "Fixture Game");
+  page.gameStarted();
+  const std::string key = "steam.app.12345/frame_controller_250820_CurrentURL_openxr";
+  check(!page.stickAxes, "stick directions start as compass points");
+
+  // MMeNDtal's: the game wants the right stick pushed forward, and Y does it instead.
+  page.click("y:right/input/y");
+  BindModel m = page.model("", "");
+  check(m.armed == "y:right/input/y" && !m.picking, "tapping your Y asks what it should do");
+  bool all = false, press = false, way = false;
+  for (const auto& ch : m.chips) {
+    all = all || (ch.id == "bind_part_all" && ch.on);
+    press = press || ch.id == "bind_part_click";
+    way = way || ch.id == "bind_part_north";
+  }
+  check(all && press && !way, "a button offers all of it, its press or its touch, and no directions");
+  check(!m.directions, "so the switch for naming directions isn't there");
+  page.click("t:right/input/joystick");
+  m = page.model("", "");
+  check(m.picking && m.directions, "tapping their stick asks which part of it");
+  check(m.prompt.find("right Stick") != std::string::npos, "and says which stick: " + m.prompt);
+  check(m.target == "t:right/input/joystick" && m.armed == "y:right/input/y", "the stick you tapped stays lit, and so does your Y");
+  check(page.wiringChanges.empty(), "nothing's saved yet");
+  shot(m, out + "/parts_pick_way.png");
+  page.click("bind_cancel");
+  m = page.model("", "");
+  check(m.armed == "y:right/input/y" && !m.picking, "Cancel goes back a step, not all the way");
+  page.click("t:right/input/joystick");
+  page.click("bind_way_north");
+  check(page.wiringChanges["oculus_touch>frame_controller"]["right/input/y"] == "right/input/joystick#north", "Y pushes the right stick up");
+  check(page.status.find("Your Y now pushes the Quest's right Stick North") != std::string::npos, "and the page says so: " + page.status);
+  check(page.status.find("next time") != std::string::npos, "and that it takes the next launch");
+  check(fake.values[key].rfind("file:///", 0) == 0, "the game's on our file");
+  Json::Value written = readFile(page.fileFor("steam.app.12345", "frame_controller"));
+  const Json::Value* c = sourceWith(written, in + "right/input/y", "scalar_constant", "value", act + "thumbstick");
+  check(c && (*c)["parameters"]["on/x"].asString() == "0" && (*c)["parameters"]["on/y"].asString() == "1", "the file says Y is the stick pushed all the way up");
+  check(!sourceWith(written, in + "right/input/y", "button", "click", act + "secondarybutton"), "and Y doesn't do B's job any more");
+  check(sourceWith(written, in + "right/input/thumbstick", "joystick", "position", act + "thumbstick") != nullptr, "the stick still moves");
+  m = page.model("", "");
+  check(actionOf(m.yours, "y:right/input/y") == "Stick North", "your Y's row says what it does: " + actionOf(m.yours, "y:right/input/y"));
+  check(m.lit.empty(), "nothing lit without the laser");
+  check(page.model("y:right/input/y", "").lit.count("t:right/input/joystick"), "pointing at Y lights up the stick it pushes");
+  check(page.model("t:right/input/joystick", "").lit.count("y:right/input/y"), "and the other way");
+  shot(m, out + "/parts_y_pushes.png");
+
+  // Pushing your right stick right presses the Quest's B.
+  page.click("y:right/input/thumbstick");
+  m = page.model("", "");
+  check(m.directions && m.chips.size() == 7, "a stick offers all of it, four ways, its press and its touch");
+  check(m.chips.size() > 2 && m.chips[1].text == "North" && m.chips[2].text == "East", "named round the compass");
+  shot(m, out + "/parts_stick_armed.png");
+  page.click("bind_part_east");
+  m = page.model("", "");
+  check(m.armed == "y:right/input/thumbstick", "the stick's row stays lit for one part of it");
+  check(m.prompt.find("pushing your right Stick East") != std::string::npos, "and the prompt says which way: " + m.prompt);
+  page.click("t:right/input/b");
+  check(page.wiringChanges["oculus_touch>frame_controller"]["right/input/thumbstick#east"] == "right/input/b", "pushing it right does B");
+  written = readFile(page.fileFor("steam.app.12345", "frame_controller"));
+  check(sourceWith(written, in + "right/input/thumbstick", "dpad", "east", act + "secondarybutton") != nullptr, "the file has it as a d-pad way");
+  check(sourceWith(written, in + "right/input/thumbstick", "joystick", "position", act + "thumbstick") != nullptr, "and the stick still moves");
+  m = page.model("", "");
+  check(actionOf(m.yours, "y:right/input/thumbstick") == "East: Secondary", "the stick's row says it: " + actionOf(m.yours, "y:right/input/thumbstick"));
+  shot(m, out + "/parts_saved.png");
+
+  // J4's switch: the same, named as axes. It's kept.
+  page.click("y:right/input/thumbstick");
+  page.click("bind_dirs_axes");
+  m = page.model("", "");
+  check(page.stickAxes && m.stickAxes, "the switch goes to axes");
+  check(m.chips.size() > 4 && m.chips[1].text == "Y+" && m.chips[2].text == "Y-" && m.chips[3].text == "X+" && m.chips[4].text == "X-", "in the order axes read: up and down Y, then X");
+  shot(m, out + "/parts_stick_axes.png");
+  page.click("bind_cancel");
+  m = page.model("", "");
+  check(actionOf(m.yours, "y:right/input/thumbstick") == "X+: Secondary" && actionOf(m.yours, "y:right/input/y") == "Stick Y+", "and the rows say it that way too");
+  shot(m, out + "/parts_saved_axes.png");
+  {
+    Page again(d, fake.make());
+    again.load();
+    check(again.stickAxes, "it's remembered");
+    check(again.wiringChanges["oculus_touch>frame_controller"]["right/input/thumbstick#east"] == "right/input/b", "and so are the parts");
+  }
+
+  // A push of the stick onto the other stick, which the game reads as a stick: turned down, with why.
+  page.click("y:right/input/thumbstick");
+  page.click("bind_part_west");
+  page.click("t:left/input/joystick");
+  page.click("bind_way_north");
+  check(!page.wiringChanges["oculus_touch>frame_controller"].count("right/input/thumbstick#west"), "a route that can't do anything isn't saved");
+  check(page.statusKind == 2 && page.status.find("can only press a button") != std::string::npos, "and the page says why: " + page.status);
+  shot(page.model("", ""), out + "/parts_turned_down.png");
+
+  // A touch on its own, to nothing.
+  page.click("y:right/input/a");
+  page.click("bind_part_touch");
+  page.click("bind_nothing");
+  check(page.wiringChanges["oculus_touch>frame_controller"].count("right/input/a#touch") && page.wiringChanges["oculus_touch>frame_controller"]["right/input/a#touch"].empty(), "resting on A can be made to do nothing");
+  check(page.status.find("Touching your A now does nothing") != std::string::npos, "said plainly: " + page.status);
+  written = readFile(page.fileFor("steam.app.12345", "frame_controller"));
+  check(sourceWith(written, in + "right/input/a", "button", "click", act + "primarybutton") != nullptr, "A still presses");
+  check(!sourceWith(written, in + "right/input/a", "button", "touch", act + "primarytouched"), "but touching it doesn't count");
+  check(actionOf(page.model("", "").yours, "y:right/input/a") == "Primary, Touch: nothing", "its row: " + actionOf(page.model("", "").yours, "y:right/input/a"));
+
+  // None of that can go live: the game still has the binding it launched with.
+  {
+    fhlive::InputTable t;
+    page.setHookState(true, true);
+    page.fillInputTable(t);
+    check(t.routes == 0, "parts don't go to the driver as button swaps");
+  }
+
+  // Undo takes all of it away.
+  page.click("bind_reset_wiring");
+  check(page.wiringChanges.empty(), "Undo rewiring takes the parts too");
+  written = readFile(page.fileFor("steam.app.12345", "frame_controller"));
+  check(!sourceWith(written, in + "right/input/y", "scalar_constant", "value", act + "thumbstick"), "and the file goes back");
+}
+
+// The same parts against every Quest binding real games have left on this machine: Y pushes the right stick up, and
+// pushing your right stick right does B. Whatever the game reads the stick as, the rest of its binding comes through.
+static void testPartsReal() {
+  Dirs d;
+  d.steamvr = platform::steamvrDir();
+  d.steam = platform::steamDir();
+  d.config = platform::configDirs();
+  Library lib;
+  lib.load(d);
+  const Profile* touch = lib.profile("oculus_touch");
+  const Profile* frame = lib.profile("frame_controller");
+  if (!touch || !frame) { printf("no Quest or Frame description here, skipping parts on real games\n"); return; }
+  int games = 0, pushes = 0, presses = 0;
+  for (const std::string& dir : d.config) {
+    std::error_code ec;
+    for (const auto& f : fs::directory_iterator(fs::u8path(dir) / "openxr", ec)) {
+      const std::string name = f.path().filename().u8string();
+      if (name.find("_oculus_touch_") == std::string::npos || name.find("_binding.json") == std::string::npos) continue;
+      const Json::Value from = readFile(f.path().u8string());
+      if (!from.isMember("bindings")) continue;
+      ++games;
+      const Wiring plain = defaultWiring(lib, "oculus_touch", "frame_controller");
+      Wiring w = plain;
+      w["right/input/y"] = "right/input/joystick#north";
+      w["right/input/thumbstick#east"] = "right/input/b";
+      std::map<std::string, int> hits;
+      const Json::Value t = translate(from, w, *touch, *frame, &hits);
+      const Json::Value base = translate(from, plain, *touch, *frame);
+      bool stickMoves = false, bOnB = false;
+      for (const auto& set : from["bindings"].getMemberNames())
+        for (const auto& src : from["bindings"][set]["sources"]) {
+          const std::string p = src["path"].asString(), mode = src["mode"].asString();
+          if (p == "/user/hand/right/input/joystick" && (mode == "joystick" || mode == "dpad" || mode == "trackpad")) stickMoves = true;
+          if (p == "/user/hand/right/input/b" && src["inputs"].isMember("click")) bOnB = true;
+        }
+      check(!stickMoves || hits["right/input/y"] > 0, name + ": Y can push the right stick up");
+      check(!bOnB || hits["right/input/thumbstick#east"] > 0, name + ": pushing the stick right can press B");
+      pushes += hits["right/input/y"] > 0;
+      presses += hits["right/input/thumbstick#east"] > 0;
+      // Nothing else is lost: every source of the plain translation is still there, except what Y did before.
+      int lost = 0;
+      const std::set<std::string> now = sourcesOf(t);
+      for (const std::string& s : sourcesOf(base))
+        // Y's old job goes, and so does whatever the game had on pushing the stick right: that's B now.
+        if (!now.count(s) && s.rfind("/user/hand/right/input/y ", 0) != 0 && !(s.rfind("/user/hand/right/input/thumbstick dpad", 0) == 0 && s.find(" east ") != std::string::npos)) {
+          ++lost;
+          printf("  %s lost: %s\n", name.c_str(), s.c_str());
+        }
+      check(lost == 0, name + ": the rest of the binding comes through");
+    }
+  }
+  printf("parts on real games: %d Quest bindings, Y pushes the stick in %d, a stick push presses B in %d\n", games, pushes, presses);
+}
+
 int main(int argc, char** argv) {
   const std::string out = argc > 1 ? argv[1] : ".";
   std::error_code ec;
@@ -1865,12 +2166,14 @@ int main(int argc, char** argv) {
   fs::create_directories(tmp, ec);
   fs::create_directories(fs::u8path(out), ec);
   testFixture(tmp.generic_u8string(), out);
+  testParts(tmp.generic_u8string(), out);
   testRecorded(tmp.generic_u8string(), out);
   testRecordShut(tmp.generic_u8string(), out);
   testGuides(tmp.generic_u8string());
   testGuideTable();
   testGuideShots(tmp.generic_u8string(), out);
   testReal(tmp.generic_u8string(), out);
+  testPartsReal();
   fs::remove_all(tmp, ec);
   printf("test_bindings: %d checks, %d failures\n", checks, fails);
   return fails ? 1 : 0;

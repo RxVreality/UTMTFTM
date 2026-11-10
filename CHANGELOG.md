@@ -1,5 +1,15 @@
 # Changelog
 
+## Next (test build, not released yet)
+
+Stick directions on the Bindings tab, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of your controls and pick "Or one part" underneath: one way of pushing the stick, its press, or its touch, then tap what that should do. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before.
+
+Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, whichever you think in. The Names switch at the end of that row changes it, and it's remembered.
+
+A button's press and its touch can do different things now, or one of them nothing. Anything that can't work in the game you're in, like a stick push onto a stick the game reads as a stick, gets turned down with the reason, rather than saved and quietly doing nothing.
+
+These change the game's binding file, so they take effect the next time the game launches. I've checked them against the bindings of 40 games on my PC, but haven't tried them in a game yet.
+
 ## 0.5.0
 
 Macros, under Advanced on the Combos tab: one button plays back a sequence you record yourself, the way a Logitech mouse macro does. Tap Record new, close the dashboard, do it, then pick the button. Each press is one tile, which you can move around or delete, and it works with no game restart. It plays at the pace you did it unless you pick Quick. There's an Interview switch that asks one question at a time instead, and a Capacitive touches switch for when resting a thumb should count too. [MMeNDtal](https://github.com/MMeNDtal) co-authored the Combos tab, both combos and macros, and asked for macros in the first place.

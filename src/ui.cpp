@@ -857,11 +857,13 @@ std::string bindKey(const BindModel& m) {
     }
   }
   for (const auto& l : m.lit) k += l + ",";
+  k += "|" + m.prompt + std::to_string(m.picking) + m.target + m.chipsLabel + std::to_string(m.directions) + std::to_string(m.stickAxes);
+  for (const auto& ch : m.chips) k += ch.id + "=" + ch.text + std::to_string(ch.on) + ";";
   return k;
 }
 
 // One hand: the controller in the middle, the buttons down either side with a line to where each one really is.
-static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& armedId, const std::set<std::string>& litRows, const ControllerPicture* pic, const std::vector<BindRow>& rows, double X0, double W, double y0, double H) {
+static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& armedId, const std::string& targetId, const std::set<std::string>& litRows, const ControllerPicture* pic, const std::vector<BindRow>& rows, double X0, double W, double y0, double H) {
   const double S = 184, px = X0 + (W - S) / 2, py = y0 + (H - S) / 2, cellW = (W - S) / 2 - 4, rowH = 34;
   if (pic) {
     cairo_set_source_surface(c, pic->image(), px, py);
@@ -884,7 +886,7 @@ static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& ar
     for (size_t i = 0; i < col[a].size(); ++i) {
       const BindRow& r = *col[a][i];
       // Being rewired, or pressed as part of a combo, it's solid yellow. Touched as part of a combo, it's outlined in it.
-      const bool lit = litRows.count(r.id) > 0, armed = armedId == r.id || r.mark == 2, touched = r.mark == 1;
+      const bool lit = litRows.count(r.id) > 0, armed = armedId == r.id || targetId == r.id || r.mark == 2, touched = r.mark == 1;
       const double cx = a == 0 ? X0 : X0 + W - cellW, cy = top + i * rowH, mid = cy + rowH / 2;
       if (armed) slab(c, cx, cy + 1, cellW, rowH - 2, SIGNAL);
       else if (touched) frame(c, cx, cy + 1, cellW, rowH - 2, SIGNAL, 1, 2);
@@ -975,7 +977,7 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
       caps(c, R - 54, y + 22, 16, m.controls, PAPER, 1, 2, 1.2);
     }
     for (int h = 0; h < 2; ++h)
-      bindHand(c, btn, m.armed, m.lit, s.pic[h], s.rows[h], h ? mid + 12 : L, cw, y + stripH, bodyH);
+      bindHand(c, btn, m.armed, m.target, m.lit, s.pic[h], s.rows[h], h ? mid + 12 : L, cw, y + stripH, bodyH);
   }
 
   // What this game does about it, or the next step if you've picked a button to rewire.
@@ -983,8 +985,9 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
   hline(c, L, R, ay - 4, LINE);
   if (!m.armed.empty()) {
     slab(c, L, ay, R - L, ah, SIGNAL);
-    text(c, L + 26, ay + 35, 23, "Now tap what your " + m.armedName + " should do, on the " + m.ref + " above", true, INK, 1, 0, R - L - 320);
-    button(c, btn, R - 290, ay + 7, 130, 40, "bind_nothing", "Nothing", OnSignal);
+    const std::string prompt = m.prompt.empty() ? "Now tap what your " + m.armedName + " should do, on the " + m.ref + " above" : m.prompt;
+    text(c, L + 26, ay + 35, 23, prompt, true, INK, 1, 0, R - L - (m.picking ? 180 : 320));
+    if (!m.picking) button(c, btn, R - 290, ay + 7, 130, 40, "bind_nothing", "Nothing", OnSignal);
     button(c, btn, R - 150, ay + 7, 130, 40, "bind_cancel", "Cancel", OnSignal);
   } else {
     const double useW = label(c, L, ay + 34, 16, m.hasGame ? "This game uses" : "Games use");
@@ -997,7 +1000,21 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
 
   hline(c, L, R, 700);
   const double baseY = 734;
-  if (!m.status.empty()) {
+  if (!m.armed.empty() && !m.chips.empty()) {
+    // One part of the control, under the prompt. Stick directions can be named either way, and the switch for that sits
+    // at the end, where the names it changes are.
+    const double chipY = 709, chipH = 40;
+    const double lw = label(c, L, chipY + 26, 16, m.chipsLabel);
+    const double switchW = m.directions ? 290 : 0;
+    const double x0 = L + lw + 16, x1 = R - (switchW ? switchW + 24 : 0);
+    std::vector<Segment> list;
+    for (const BindModel::Chip& ch : m.chips) list.push_back({ch.id, ch.text, ch.on, true});
+    segments(c, btn, x0, chipY, std::min(x1 - x0, 150.0 * list.size()), chipH, list, 16);  // a few don't stretch across
+    if (switchW) {
+      const double sw = label(c, R - switchW, chipY + 26, 16, "Names");
+      segments(c, btn, R - switchW + sw + 14, chipY, switchW - sw - 14, chipH, {{"bind_dirs_compass", "N E S W", !m.stickAxes, true}, {"bind_dirs_axes", "Y+ X+", m.stickAxes, true}}, 16);
+    }
+  } else if (!m.status.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
   } else {
@@ -1034,7 +1051,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
   const double headY = 138, subY = 164, picY = 174, picH = 236, belowY = picY + picH + 10;
   auto pictures = [&] {
     hline(c, L, R, picY, LINE);
-    for (int h = 0; h < 2; ++h) bindHand(c, btn, "", std::set<std::string>{}, m.yours.pic[h], m.yours.rows[h], h ? mid + 12 : L, cw, picY + 4, picH);
+    for (int h = 0; h < 2; ++h) bindHand(c, btn, "", "", std::set<std::string>{}, m.yours.pic[h], m.yours.rows[h], h ? mid + 12 : L, cw, picY + 4, picH);
     hline(c, L, R, belowY - 4, LINE);
   };
 

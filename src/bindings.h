@@ -92,14 +92,22 @@ std::string currentUrlKey(const std::string& controllerType, const std::string& 
 Found findBinding(const Dirs& d, const Library& lib, const Settings& s, const std::vector<std::string>& appKeys, const std::string& controllerType);
 
 // Which of their inputs each of yours acts as. Keys and values are "left/input/x". A value of "" means nothing.
+// Either side can also name one part of a control, after a '#': "left/input/thumbstick#east" is pushing the left stick
+// right, "#click" is pressing it in and "#touch" is resting a thumb on it. A part of yours with a job of its own stops
+// doing what the rest of that control does. Directions are named the way SteamVR's own d-pad mode names them: north is
+// up (Y+), east is right (X+), south is down (Y-), west is left (X-).
 using Wiring = std::map<std::string, std::string>;
+std::string partOf(const std::string& id);  // "east", or "" for all of it
+std::string baseOf(const std::string& id);  // "left/input/thumbstick"
+bool isDirection(const std::string& part);
 
 // SteamVR's own translation when it has one, the reverse of the other direction's if not, and same-named inputs after that.
 Wiring defaultWiring(const Library& lib, const std::string& theirs, const std::string& yours);
 
 // Their binding, rewritten to run on your controller. It still drives the same actions in the game, and an OpenXR game
-// goes on being told it's holding the other controller.
-Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profile& theirs, const Profile& yours);
+// goes on being told it's holding the other controller. hits, if given, counts what each part route put in it, by its
+// wiring key: none means the game's binding has nothing that part could set off.
+Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profile& theirs, const Profile& yours, std::map<std::string, int>* hits = nullptr);
 
 // What an action is called on the page. passThrough: the name only says which button it came from, as in Unreal's
 // "oculustouch_right_a_click", so the game's meaning for it can't be known. hide: it isn't a separate thing to show.
@@ -220,6 +228,8 @@ class Page {
   std::map<std::string, std::vector<macro::Recorded>> recorded;  // "<game>|<your controller_type>"
   bool macroTouches = false;    // resting a thumb on something can count, as well as pressing it. Off, only presses do
   bool macroInterview = false;  // Record new asks one question at a time, instead of going straight to the one page of options
+  bool stickAxes = false;       // stick directions read Y+ Y- X+ X- instead of North East South West. Each player's own choice
+  std::string directionName(const std::string& part) const;  // "North" or "Y+", "press", "touch"
 
   std::string status;
   int statusKind = 0;  // 0 info, 1 good, 2 warning
@@ -289,7 +299,13 @@ class Page {
   Headset yours_, ref_;
   std::string gameKey_, gameAlt_, gameName_;
   bool saveForGame_ = true;
-  std::string armed_;  // your row being rewired
+  std::string armed_;   // your row being rewired, or one part of it: "left/input/thumbstick#east"
+  std::string target_;  // their stick that was tapped, waiting to be told which part of it
+  // Saves one change to the wiring and puts it in the game's file. False if it was turned down, with the reason said.
+  bool wire(std::string mine, std::string their);  // copies: it clears what was picked as it goes
+  std::string yourWords(const std::string& id) const;   // "your Y", "pushing your left Stick North"
+  std::string theirWords(const std::string& id) const;  // "the Quest 3's B", "the Quest 3's right Stick North"
+  std::string handedName(const Profile& p, const std::string& id, bool always) const;  // "left Stick", "Y"
   std::string group_;  // which of the game's sets of controls is showing
   int comboStep_ = 0;  // 0 what's saved, 1 what you do, 2 what it does
   std::map<std::string, std::string> picked_;  // the combo being made: "right/input/a" -> "touch" or "click"

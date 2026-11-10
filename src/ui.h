@@ -140,6 +140,15 @@ struct BindModel {
   bool saveForGame = true;
   bool wiringChanged = false;
   std::string armed, armedName;  // the button of yours being rewired
+  std::string prompt;            // what to do next while rewiring
+  bool picking = false;          // choosing which part of their control, where Nothing doesn't apply
+  std::string target;            // "t:right/input/joystick", their control that was tapped, while picking
+  // Under the prompt: one part of a control to pick, like one way of pushing a stick. Empty when there's no choice.
+  struct Chip { std::string id, text; bool on = false; };
+  std::string chipsLabel;
+  std::vector<Chip> chips;
+  bool directions = false;  // some of them are stick directions, so the switch for how they're named shows
+  bool stickAxes = false;   // Y+ Y- X+ X-, not North East South West
   std::set<std::string> lit;    // rows lit up because the laser is on them or their match
   std::string status;
   bool statusWarn = false, statusGood = false;

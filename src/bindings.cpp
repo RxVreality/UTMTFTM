@@ -590,15 +590,159 @@ static std::vector<Json::Value> adaptSource(const Json::Value& src, const std::s
   return {out};
 }
 
-Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profile& theirs, const Profile& yours) {
-  // Their input -> the ones of yours that act as it.
+// ---------------------------------------------------------------- one part of a control
+std::string partOf(const std::string& id) {
+  const size_t at = id.find('#');
+  return at == std::string::npos ? "" : id.substr(at + 1);
+}
+std::string baseOf(const std::string& id) { return id.substr(0, id.find('#')); }
+bool isDirection(const std::string& p) { return p == "north" || p == "east" || p == "south" || p == "west"; }
+
+namespace {
+// Something a part of their control sets off. kind 0: on or off. 1: a stick pushed all the way one way. 2: a full pull.
+struct PartOut {
+  int kind = 0;
+  std::string output;
+  int x = 0, y = 0;
+  Json::Value params;
+};
+}  // namespace
+
+// What their control, or one part of it, does in one set of a binding, as things one press of yours could set off.
+static std::vector<PartOut> partOutputs(const Json::Value& set, const Profile& theirs, const std::string& their, const std::string& part, bool touch) {
+  std::vector<PartOut> out;
+  for (const auto& src : set["sources"]) {
+    const std::string path = after(src["path"].asString(), "/user/hand/");
+    if (path.empty()) continue;
+    const std::string row = theirs.rowOf(path);
+    if ((row.empty() ? path : row) != their) continue;
+    const std::string mode = src["mode"].asString();
+    const Json::Value& in = src["inputs"];
+    auto put = [&](int kind, const std::string& name) {
+      if (!in.isMember(name) || !in[name].isMember("output")) return false;
+      PartOut o;
+      o.kind = kind;
+      o.output = in[name]["output"].asString();
+      out.push_back(o);
+      return true;
+    };
+    if (isDirection(part)) {
+      // A game that reads the stick as four buttons has one for each way. One that reads it as a stick gets told it's
+      // pushed that way, all the way.
+      if (mode == "dpad" || mode == "dpad_click" || mode == "dpad_touch") put(0, part);
+      else if (mode == "joystick" || mode == "trackpad") {
+        const int x = part == "east" ? 1 : part == "west" ? -1 : 0, y = part == "north" ? 1 : part == "south" ? -1 : 0;
+        if (in.isMember("position") && in["position"].isMember("output")) {
+          PartOut o;
+          o.kind = 1;
+          o.output = in["position"]["output"].asString();
+          o.x = x;
+          o.y = y;
+          out.push_back(o);
+        }
+        // Lots of OpenXR games read a stick as two numbers, across and up, each its own action. A number like that only
+        // has the one value, which SteamVR's constant sets with its x.
+        const char* axis = x ? "position_x" : "position_y";
+        if (in.isMember(axis) && in[axis].isMember("output")) {
+          PartOut o;
+          o.kind = 1;
+          o.output = in[axis]["output"].asString();
+          o.x = x ? x : y;
+          out.push_back(o);
+        }
+      }
+    } else if (touch) {
+      put(0, "touch");
+    } else {
+      if (mode == "button" || mode == "toggle_button" || mode == "joystick" || mode == "trackpad" || mode == "trigger") put(0, "click");
+      if (mode == "grab") put(0, "grab");
+      if (mode == "trigger") put(2, "pull");
+      if (mode == "force_sensor") put(2, "force");
+      if (mode == "scalar_constant" && put(2, "value") && src.isMember("parameters")) out.back().params = src["parameters"];
+    }
+  }
+  // Touching yours can press theirs, when theirs has nothing for a touch.
+  if (out.empty() && touch && part.empty()) return partOutputs(set, theirs, their, "click", false);
+  return out;
+}
+
+// A part of yours with a job of its own doesn't do what the rest of that control does.
+static void dropPart(Json::Value& sources, const std::string& mine, const std::string& part) {
+  const std::string path = "/user/hand/" + baseOf(mine);
+  Json::Value kept(Json::arrayValue);
+  for (Json::Value s : sources) {
+    if (s["path"].asString() == path && s.isMember("inputs")) {
+      const std::string mode = s["mode"].asString();
+      if (!isDirection(part) || mode == "dpad" || mode == "dpad_click" || mode == "dpad_touch") s["inputs"].removeMember(part);
+      if (s["inputs"].empty()) continue;
+    }
+    kept.append(s);
+  }
+  sources = kept;
+}
+
+// Puts what a part route sets off on your control, the way SteamVR's own binding screen would: a d-pad for a stick pushed
+// one way, a constant for a button that pushes a stick, a plain press otherwise. Returns how many it put there.
+static int emitPart(Json::Value& sources, const std::string& mine, const Input& to, const std::vector<PartOut>& outs) {
+  const std::string path = "/user/hand/" + baseOf(mine), part = partOf(mine);
+  int n = 0;
+  for (const PartOut& o : outs) {
+    if (isDirection(part)) {
+      if (o.kind != 0 || !is2D(to)) continue;  // a push can only press something
+      // Into a d-pad already on this stick that goes off with a push, if there's one with that way free.
+      Json::Value* pad = nullptr;
+      for (Json::Value& s : sources)
+        if (s["path"].asString() == path && s["mode"].asString() == "dpad" && !s["inputs"].isMember(part) &&
+            s.get("parameters", Json::Value()).get("sub_mode", "touch").asString() == "touch") { pad = &s; break; }
+      if (!pad) {
+        Json::Value s;
+        s["path"] = path;
+        s["mode"] = "dpad";
+        s["parameters"]["sub_mode"] = "touch";
+        s["inputs"] = Json::objectValue;
+        pad = &sources.append(s);
+      }
+      (*pad)["inputs"][part]["output"] = o.output;
+      ++n;
+      continue;
+    }
+    Json::Value s;
+    s["path"] = path;
+    if (o.kind == 0) {
+      const char* name = part == "touch" ? (to.touch ? "touch" : nullptr) : (to.click || to.value || is2D(to)) ? "click" : to.touch ? "touch" : nullptr;
+      if (!name) continue;
+      s["mode"] = "button";
+      s["inputs"][name]["output"] = o.output;
+    } else {
+      // Held down, it says the stick's pushed that way, or the trigger's pulled all the way. SteamVR only has that for a
+      // button or a trigger, not a stick or a touch.
+      if (part == "touch" || is2D(to) || (to.kind != "button" && to.kind != "trigger")) continue;
+      s["mode"] = "scalar_constant";
+      s["inputs"]["value"]["output"] = o.output;
+      if (o.kind == 1) {
+        s["parameters"]["on/x"] = std::to_string(o.x);
+        s["parameters"]["on/y"] = std::to_string(o.y);
+      } else if (o.params.isObject()) s["parameters"] = o.params;
+    }
+    sources.append(s);
+    ++n;
+  }
+  return n;
+}
+
+Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profile& theirs, const Profile& yours, std::map<std::string, int>* hits) {
+  // Their input -> the ones of yours that act as it. Parts of controls go in afterwards, on top.
   std::map<std::string, std::vector<std::string>> onto;
   for (const auto& [mine, their] : wiring)
-    if (!their.empty()) onto[their].push_back(mine);
+    if (!their.empty() && mine.find('#') == std::string::npos && their.find('#') == std::string::npos) onto[their].push_back(mine);
   auto yourInput = [&](const std::string& id) -> const Input* {
-    const size_t slash = id.find('/');
-    return slash == std::string::npos ? nullptr : yours.find(id.substr(0, slash), id.substr(slash));
+    const std::string base = baseOf(id);
+    const size_t slash = base.find('/');
+    return slash == std::string::npos ? nullptr : yours.find(base.substr(0, slash), base.substr(slash));
   };
+  if (hits)
+    for (const auto& [mine, their] : wiring)
+      if (!their.empty() && (mine.find('#') != std::string::npos || their.find('#') != std::string::npos)) (*hits)[mine] = 0;
   // Anything the wiring doesn't mention stays where it is, if your controller has it at all. That's the right hand's
   // system button on most of them, which profiles only list on one side.
   std::map<std::string, std::vector<std::string>> same;
@@ -626,7 +770,19 @@ Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profi
         for (const Json::Value& adapted : adaptSource(src, mine, *to)) sources.append(adapted);
       }
     }
-    if (set.isMember("sources")) nextSet["sources"] = sources;
+    // Parts with jobs of their own: first they stop doing the rest of the control's, then they get theirs.
+    for (const auto& [mine, their] : wiring)
+      if (!partOf(mine).empty() && yourInput(mine)) dropPart(sources, mine, partOf(mine));
+    for (const auto& [mine, their] : wiring) {
+      if (their.empty() || (mine.find('#') == std::string::npos && their.find('#') == std::string::npos)) continue;
+      const Input* to = yourInput(mine);
+      if (!to) continue;
+      // A touch of yours on the whole of theirs is a touch of theirs. Pick one part of theirs, and it's that part.
+      const bool touch = partOf(their) == "touch" || (partOf(their).empty() && partOf(mine) == "touch");
+      const int n = emitPart(sources, mine, *to, partOutputs(set, theirs, baseOf(their), partOf(their), touch));
+      if (hits) (*hits)[mine] += n;
+    }
+    if (set.isMember("sources") || sources.size()) nextSet["sources"] = sources;
 
     // A pose your controller doesn't have falls back to its plain pose. Hand skeletons don't change.
     if (set.isMember("poses")) {
@@ -1175,6 +1331,7 @@ void Page::loadPrefs() {
     }
   macroTouches = v.get("macro_touches", false).asBool();
   macroInterview = v.get("macro_interview", false).asBool();
+  stickAxes = v.get("stick_names", "compass").asString() == "axes";
   recorded.clear();
   for (const auto& k : v["recorded"].getMemberNames()) {
     const Profile* p = lib_.profile(k.substr(k.rfind('|') + 1));
@@ -1246,6 +1403,7 @@ void Page::savePrefs() const {
   }
   v["macro_touches"] = macroTouches;
   v["macro_interview"] = macroInterview;
+  v["stick_names"] = stickAxes ? "axes" : "compass";
   v["recorded"] = Json::objectValue;
   for (const auto& [k, list] : recorded) {
     if (list.empty()) continue;
@@ -1636,7 +1794,8 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   m.ref = ref_.name;
   m.saveForGame = saveForGame_ && !gameKey_.empty();
   m.hasGame = !gameKey_.empty();
-  m.armed = armed_.empty() ? "" : "y:" + armed_;
+  m.armed = armed_.empty() ? "" : "y:" + baseOf(armed_);
+  m.stickAxes = stickAxes;
 
   const Profile* yourP = lib_.profile(yours_.type);
   const Profile* theirP = lib_.profile(ref_.type);
@@ -1691,19 +1850,44 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   m.wiringChanged = wc != wiringChanges.end() && !wc->second.empty();
 
   // What your input acts as on theirs, in words. Nothing at all if it's the same button: what's different is what matters.
-  auto actsAs = [&](const RowText& mine) -> RowText {
+  auto describe = [&](const RowText& mine, const std::string& their) -> RowText {
     RowText r;
-    auto it = wired.find(mine.id);
-    if (it == wired.end() || it->second.empty()) { r.unused = true; return r; }
+    if (their.empty()) { r.unused = true; return r; }
+    const std::string base = baseOf(their), part = partOf(their);
     for (const auto& rows : theirRows)
       for (const RowText& t : rows)
-        if (t.id == it->second) {
+        if (t.id == base) {
           if (theirBinding && t.unused) { r.unused = true; return r; }
-          if (!t.action.empty()) r.action = t.action;
-          else if (squeezed(t.name) != squeezed(mine.name) || it->second.substr(0, 5) != mine.id.substr(0, 5)) r.action = refShort + " " + t.name;
+          const bool otherHand = base.substr(0, 5) != mine.id.substr(0, 5);
+          if (!part.empty()) {
+            // "Stick North", or "Left Stick Y+" when it's the stick in the other hand
+            std::string hand = base.substr(0, base.find('/'));
+            hand[0] = char(std::toupper(static_cast<unsigned char>(hand[0])));
+            r.action = (otherHand ? hand + " " : "") + t.name + " " + directionName(part);
+          } else if (!t.action.empty()) r.action = t.action;
+          else if (squeezed(t.name) != squeezed(mine.name) || otherHand) r.action = refShort + " " + t.name;
           return r;
         }
-    r.action = refShort + " " + titleCase(it->second.substr(it->second.rfind('/') + 1));
+    r.action = refShort + " " + titleCase(base.substr(base.rfind('/') + 1)) + (part.empty() ? "" : " " + directionName(part));
+    return r;
+  };
+  auto actsAs = [&](const RowText& mine) -> RowText {
+    auto it = wired.find(mine.id);
+    RowText r = describe(mine, it == wired.end() ? "" : it->second);
+    // Its parts with jobs of their own: "East: Quest B", "Touch: nothing".
+    std::string parts;
+    for (const char* part : {"north", "east", "south", "west", "click", "touch"}) {
+      auto p = wired.find(mine.id + "#" + part);
+      if (p == wired.end()) continue;
+      const RowText d = describe(mine, p->second);
+      std::string name = directionName(part);
+      name[0] = char(std::toupper(static_cast<unsigned char>(name[0])));
+      parts += (parts.empty() ? "" : ", ") + name + ": " + (d.unused ? "nothing" : d.action.empty() ? mine.name : d.action);
+    }
+    if (!parts.empty()) {
+      r.action = r.unused ? parts : r.action.empty() ? parts : r.action + ", " + parts;
+      r.unused = false;
+    }
     return r;
   };
 
@@ -1779,27 +1963,148 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
   };
   if (hover.rfind("y:", 0) == 0) {
     m.lit.insert(hover);
-    if (!sameAction(hover.substr(2), yourRows, theirRows, "t:")) {
-      auto it = wired.find(hover.substr(2));
-      if (it != wired.end() && !it->second.empty()) m.lit.insert("t:" + it->second);
-    }
+    if (!sameAction(hover.substr(2), yourRows, theirRows, "t:"))
+      for (const auto& [mine, their] : wired)  // all of it, and any parts with jobs of their own
+        if (baseOf(mine) == hover.substr(2) && !their.empty()) m.lit.insert("t:" + baseOf(their));
   } else if (hover.rfind("t:", 0) == 0) {
     m.lit.insert(hover);
     if (!sameAction(hover.substr(2), theirRows, yourRows, "y:"))
       for (const auto& [mine, their] : wired)
-        if (their == hover.substr(2)) m.lit.insert("y:" + mine);
+        if (baseOf(their) == hover.substr(2)) m.lit.insert("y:" + baseOf(mine));
   }
 
   const bool changesAnything = ref_.type != yours_.type || m.wiringChanged;
   m.layoutOk = changesAnything && (!m.hasGame || theirBinding != nullptr);
   if (!armed_.empty() && yourP) {
-    const Input* i = yourP->find(armed_.substr(0, armed_.find('/')), armed_.substr(armed_.find('/')));
-    m.armedName = i ? i->name : armed_;
+    const std::string base = baseOf(armed_), part = partOf(armed_);
+    const Input* i = yourP->find(base.substr(0, base.find('/')), base.substr(base.find('/')));
+    m.armedName = i ? i->name : base;
+    auto chip = [&](const std::string& id, const std::string& p, bool on) {
+      std::string text = p.empty() ? "All of it" : directionName(p);
+      text[0] = char(std::toupper(static_cast<unsigned char>(text[0])));
+      m.chips.push_back({id, text, on});
+      m.directions = m.directions || isDirection(p);
+    };
+    // Directions in the order each way of naming them reads: round the compass, or up and down the Y axis first.
+    const std::vector<std::string> ways = stickAxes ? std::vector<std::string>{"north", "south", "east", "west"} : std::vector<std::string>{"north", "east", "south", "west"};
+    const Profile* theirP2 = lib_.profile(ref_.type);
+    const size_t ts = target_.find('/');
+    const Input* t = theirP2 && ts != std::string::npos ? theirP2->find(target_.substr(0, ts), target_.substr(ts)) : nullptr;
+    if (t) {
+      // Their stick was tapped: which part of it.
+      m.picking = true;
+      m.target = "t:" + target_;
+      std::string who = yourWords(armed_);
+      m.prompt = "Pick what " + who + " does on " + theirWords(target_) + ", below";
+      m.chipsLabel = "Which part";
+      for (const std::string& w : ways) chip("bind_way_" + w, w, false);
+      if (t->click) chip("bind_way_click", "click", false);
+      if (t->touch) chip("bind_way_touch", "touch", false);
+    } else if (i) {
+      m.prompt = "Now tap what " + yourWords(armed_) + " should do, on the " + ref_.name + " above";
+      if (is2D(*i) || i->touch) {
+        m.chipsLabel = "Or one part";
+        chip("bind_part_all", "", part.empty());
+        if (is2D(*i))
+          for (const std::string& w : ways) chip("bind_part_" + w, w, part == w);
+        if (i->click || i->value) chip("bind_part_click", "click", part == "click");
+        if (i->touch) chip("bind_part_touch", "touch", part == "touch");
+      }
+    }
   }
   m.status = status;
   m.statusWarn = statusKind == 2;
   m.statusGood = statusKind == 1;
   return m;
+}
+
+// ---------------------------------------------------------------- rewiring one part of a control
+std::string Page::directionName(const std::string& part) const {
+  // J4, 9 November: some players think of a stick in compass points and some in axes, so it's their choice. Axes go the
+  // way a graph does: Y+ is pushed away from you, X+ is to the right.
+  static const std::map<std::string, std::pair<std::string, std::string>> names = {
+      {"north", {"North", "Y+"}}, {"east", {"East", "X+"}}, {"south", {"South", "Y-"}}, {"west", {"West", "X-"}}, {"click", {"press", "press"}}, {"touch", {"touch", "touch"}}};
+  auto it = names.find(part);
+  if (it == names.end()) return part;
+  return stickAxes ? it->second.second : it->second.first;
+}
+
+// A control's name, with which hand when the controller has one on each.
+std::string Page::handedName(const Profile& p, const std::string& id, bool always) const {
+  const std::string base = baseOf(id);
+  const size_t slash = base.find('/');
+  if (slash == std::string::npos) return base;
+  const std::string hand = base.substr(0, slash);
+  const Input* i = p.find(hand, base.substr(slash));
+  const std::string name = i ? i->name : titleCase(base.substr(base.rfind('/') + 1));
+  return (always || !i || i->side.empty()) ? hand + " " + name : name;
+}
+
+std::string Page::yourWords(const std::string& id) const {
+  const Profile* p = lib_.profile(yours_.type);
+  const std::string who = p ? handedName(*p, id, false) : baseOf(id), part = partOf(id);
+  if (isDirection(part)) return "pushing your " + who + " " + directionName(part);
+  if (part == "click") return "pressing your " + who;
+  if (part == "touch") return "touching your " + who;
+  return "your " + who;
+}
+
+std::string Page::theirWords(const std::string& id) const {
+  const Profile* p = lib_.profile(ref_.type);
+  const std::string part = partOf(id);
+  std::string out = "the " + shortName(ref_) + "'s " + (p ? handedName(*p, id, false) : baseOf(id));
+  if (!part.empty()) out += " " + directionName(part);
+  return out;
+}
+
+bool Page::wire(std::string mine, std::string their) {
+  const std::string pair = ref_.type + ">" + yours_.type;
+  Wiring& changes = wiringChanges[pair];
+  const bool had = changes.count(mine);
+  const std::string was = had ? changes[mine] : "";
+  changes[mine] = their;
+  armed_.clear();
+  target_.clear();
+  const bool parts = mine.find('#') != std::string::npos || their.find('#') != std::string::npos;
+  // With the game's binding to hand, a part that wouldn't set anything off in it isn't kept. Better to say so now than
+  // for it to quietly do nothing in the game.
+  const Profile* theirP = lib_.profile(ref_.type);
+  const Profile* mineP = lib_.profile(yours_.type);
+  if (parts && !their.empty() && !gameKey_.empty() && theirP && mineP && binding(ref_.type).ok) {
+    std::map<std::string, int> hits;
+    translate(binding(ref_.type).json, wiring(ref_.type, yours_.type), *theirP, *mineP, &hits);
+    if (!hits[mine]) {
+      if (had) changes[mine] = was;
+      else changes.erase(mine);
+      if (changes.empty()) wiringChanges.erase(pair);
+      bool usesIt = false;
+      for (const auto& rows : {rowsOn(*theirP, "left", &binding(ref_.type)), rowsOn(*theirP, "right", &binding(ref_.type))})
+        for (const RowText& r : rows) usesIt = usesIt || (r.id == baseOf(their) && r.bound);
+      std::string why;
+      if (!usesIt) why = gameName_ + " doesn't use that.";
+      else if (isDirection(partOf(mine))) why = "A push of a stick can only press a button, and " + gameName_ + " reads that as a stick.";
+      else why = gameName_ + "'s bindings have nothing there for it to do.";
+      say("Not changed. " + why, 2);
+      return false;
+    }
+  }
+  if (!gameKey_.empty() && binding(ref_.type).ok) {
+    GameChoice& c = games[choiceKey()];
+    c.from = ref_.type;
+    c.explicitly = true;
+    applyNow(ref_.type);
+  } else reapply();
+  std::string what;
+  if (!parts) what = !gameKey_.empty() && binding(ref_.type).ok ? "Rewired, and this game is on that layout now." : "Rewired.";
+  else {
+    std::string who = yourWords(mine);
+    who[0] = char(std::toupper(static_cast<unsigned char>(who[0])));
+    if (their.empty()) what = who + " now does nothing.";
+    else what = who + (isDirection(partOf(their)) && !isDirection(partOf(mine)) ? " now pushes " : " now does ") + theirWords(their) + ".";
+  }
+  say(what + afterChange(), 1);
+  savePrefs();
+  return true;
 }
 
 void Page::clickGreyed(const std::string& id) {
@@ -1825,7 +2130,26 @@ void Page::click(const std::string& id) {
   }
   if (id == "bind_scope_game") { saveForGame_ = true; say("Saving for this game only."); return; }
   if (id == "bind_scope_global") { saveForGame_ = false; say("Saving for all games."); return; }
-  if (id == "bind_cancel") { armed_.clear(); return; }
+  if (id == "bind_cancel") {
+    if (!target_.empty()) target_.clear();  // back to choosing what it should do
+    else armed_.clear();
+    return;
+  }
+  if (id == "bind_dirs_compass" || id == "bind_dirs_axes") {
+    stickAxes = id == "bind_dirs_axes";
+    savePrefs();
+    return;
+  }
+  if (id.rfind("bind_part_", 0) == 0 && !armed_.empty()) {  // one part of yours, or all of it again
+    const std::string part = id.substr(10);
+    armed_ = baseOf(armed_) + (part == "all" ? "" : "#" + part);
+    target_.clear();
+    return;
+  }
+  if (id.rfind("bind_way_", 0) == 0 && !armed_.empty() && !target_.empty()) {
+    wire(armed_, target_ + "#" + id.substr(9));
+    return;
+  }
   if (id == "bind_controls_prev" || id == "bind_controls_next") {
     const Found& basis = binding(ref_.type).ok ? binding(ref_.type) : binding(yours_.type);
     const std::vector<ControlGroup> groups = controlGroups(basis);
@@ -1837,8 +2161,10 @@ void Page::click(const std::string& id) {
     return;
   }
   if (id == "bind_nothing" && !armed_.empty()) {
+    if (!partOf(armed_).empty()) { wire(armed_, ""); return; }
     wiringChanges[ref_.type + ">" + yours_.type][armed_] = "";
     armed_.clear();
+    target_.clear();
     reapply();
     saved("That button now does nothing.");
     return;
@@ -1884,23 +2210,25 @@ void Page::click(const std::string& id) {
     return;
   }
   if (id.rfind("y:", 0) == 0) {
-    armed_ = armed_ == id.substr(2) ? "" : id.substr(2);
+    armed_ = baseOf(armed_) == id.substr(2) ? "" : id.substr(2);
+    target_.clear();
     return;
   }
   if (id.rfind("t:", 0) == 0) {
     if (armed_.empty()) { say("To change what a button does, tap it on your own controller first."); return; }
-    wiringChanges[ref_.type + ">" + yours_.type][armed_] = id.substr(2);
-    armed_.clear();
-    if (!gameKey_.empty() && binding(ref_.type).ok) {
-      GameChoice& c = games[choiceKey()];
-      c.from = ref_.type;
-      c.explicitly = true;
-      applyNow(ref_.type);
-      saved("Rewired, and this game is on that layout now.");
-    } else {
-      reapply();
-      saved("Rewired.");
+    const std::string their = id.substr(2);
+    // A stick of theirs has parts: which way to push it, or its press. Your whole stick on it is just a stick, though.
+    const Profile* theirP = lib_.profile(ref_.type);
+    const Profile* mineP = lib_.profile(yours_.type);
+    const size_t ts = their.find('/'), ms = armed_.find('/');
+    const Input* t = theirP && ts != std::string::npos ? theirP->find(their.substr(0, ts), their.substr(ts)) : nullptr;
+    const Input* mi = mineP && ms != std::string::npos ? mineP->find(armed_.substr(0, ms), baseOf(armed_).substr(ms)) : nullptr;
+    const bool wholeStick = partOf(armed_).empty() && mi && is2D(*mi);
+    if (t && is2D(*t) && !wholeStick) {
+      target_ = their;
+      return;
     }
+    wire(armed_, their);
     return;
   }
 }
@@ -2196,13 +2524,23 @@ std::vector<Page::LiveRoute> Page::liveRoutes(bool* allOfIt) const {
     if (allOfIt) *allOfIt = false;  // a whole other layout
     return out;
   }
-  for (const auto& [input, their] : wiring(from, yours_.type)) {
+  const Wiring now = wiring(from, yours_.type);
+  for (const auto& [input, their] : before) {  // a part's own job taken away again: the game still has it until it launches
+    auto still = now.find(input);
+    if (input.find('#') != std::string::npos && (still == now.end() || still->second != their) && allOfIt) *allOfIt = false;
+  }
+  for (const auto& [input, their] : now) {
     auto was = before.find(input);
     if (was != before.end() && was->second == their) continue;
+    // A stick direction, a press or a touch on its own isn't one button standing in for another, so it waits.
+    if (input.find('#') != std::string::npos || their.find('#') != std::string::npos) {
+      if (allOfIt) *allOfIt = false;
+      continue;
+    }
     if (their.empty()) { out.push_back({input, ""}); continue; }
     std::string carrier;
     for (const auto& [other, itsJob] : before) {
-      if (itsJob == their) { carrier = other; break; }
+      if (itsJob == their && other.find('#') == std::string::npos) { carrier = other; break; }
     }
     if (carrier.empty()) {
       if (allOfIt) *allOfIt = false;
