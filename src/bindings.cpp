@@ -2423,8 +2423,8 @@ ComboModel Page::comboModel(const std::string& hover, const std::string& down) {
       if (s->touch) m.chips.push_back({"combo_part_touch", "Touch", now == "touch"});
       if (s->click || s->value || s->force) m.chips.push_back({"combo_part_click", "Press", now == "click"});
       // Round the compass, or up and down the Y axis first, as on the Bindings tab.
-      for (const char* way : stickAxes ? std::initializer_list<const char*>{"north", "south", "east", "west"} : std::initializer_list<const char*>{"north", "east", "south", "west"})
-        m.chips.push_back({std::string("combo_part_") + way, directionName(way), now == way});
+      const std::vector<std::string> ways = stickAxes ? std::vector<std::string>{"north", "south", "east", "west"} : std::vector<std::string>{"north", "east", "south", "west"};
+      for (const std::string& way : ways) m.chips.push_back({"combo_part_" + way, directionName(way), now == way});
     }
   }
   if (comboStep_ == 2) {

@@ -665,7 +665,7 @@ static void testFixture(const std::string& work, const std::string& out) {
     page.comboClick(choiceNamed(page.comboModel("", ""), "Reload"));
     check(page.status.find("next time") != std::string::npos, "a push waits for the next launch, since live combos only know touch and press");
     Json::Value w = readFile(namedFile);
-    const Json::Value& set = w["bindings"]["/actions/main"];
+    const Json::Value set = w["bindings"]["/actions/main"];  // a copy: w is read again further down
     check(set["chords"].size() == 1 && chordText(set["chords"][0]) == "/actions/main/in/Reload <- /user/hand/left/input/thumbstick:north /user/hand/right/input/a:touch", "the chord names the way, as SteamVR's binding screen does");
     int pad = -1, stick = -1;
     for (Json::ArrayIndex i = 0; i < set["sources"].size(); ++i) {
