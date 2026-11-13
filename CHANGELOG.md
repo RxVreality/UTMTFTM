@@ -10,6 +10,8 @@ A button's press and its touch can do different things now, or one of them nothi
 
 These change the game's binding file, so they take effect the next time the game launches. I've checked them against the bindings of 40 games on my PC, but haven't tried them in a game yet.
 
+Fixed: a game that binds X or Y on a Quest's right hand, which has no X or Y, lost those on the Frame's layout. Budget Cuts 2 does this, and the Frame's right X lost Inventory. SteamVR keeps them on your buttons of the same name, and now so does this.
+
 ## 0.5.0
 
 Macros, under Advanced on the Combos tab: one button plays back a sequence you record yourself, the way a Logitech mouse macro does. Tap Record new, close the dashboard, do it, then pick the button. Each press is one tile, which you can move around or delete, and it works with no game restart. It plays at the pace you did it unless you pick Quick. There's an Interview switch that asks one question at a time instead, and a Capacitive touches switch for when resting a thumb should count too. [MMeNDtal](https://github.com/MMeNDtal) co-authored the Combos tab, both combos and macros, and asked for macros in the first place.

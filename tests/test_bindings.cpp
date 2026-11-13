@@ -4,6 +4,7 @@
 // Usage: test_bindings <folder for pictures>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -168,6 +169,25 @@ static void testFixture(const std::string& work, const std::string& out) {
     check(got.count(in + "trigger button click " + act + "fire"), "the trigger fires as a press at a set pull");
     check(got.count(in + "trigger trigger click " + act + "fire") && got.count(in + "trigger trigger pull " + act + "visual"), "and keeps what it had");
     check(got.size() == 5, "and that's all of it");
+  }
+
+  // Budget Cuts 2 binds X and Y on a Quest's right hand, which has no X or Y. SteamVR keeps those on the Frame's right X and
+  // Y, as well as what they act as. Seen on J4's Frame, 11 November: right X lost Inventory.
+  {
+    Json::Value from;
+    Json::CharReaderBuilder b;
+    std::string errs;
+    std::stringstream text("{\"bindings\": {\"/actions/default\": {\"sources\": [{\"path\": \"/user/hand/right/input/x\", \"mode\": \"button\", "
+                           "\"inputs\": {\"click\": {\"output\": \"/actions/default/in/inventory\"}}}, {\"path\": \"/user/hand/right/input/b\", \"mode\": \"button\", "
+                           "\"inputs\": {\"click\": {\"output\": \"/actions/default/in/toolselect\"}}}]}}}");
+    Json::parseFromStream(b, text, &from, &errs);
+    std::set<std::string> got = sourcesOf(translate(from, w, *lib.profile("oculus_touch"), *lib.profile("frame_controller")));
+    check(got.count("/user/hand/right/input/x button click /actions/default/in/inventory"), "a button the Quest doesn't have on that hand stays on yours");
+    check(got.count("/user/hand/right/input/x button click /actions/default/in/toolselect"), "and yours still does what it acts as");
+    Wiring off = w;
+    off["right/input/x"] = "";
+    got = sourcesOf(translate(from, off, *lib.profile("oculus_touch"), *lib.profile("frame_controller")));
+    check(!got.count("/user/hand/right/input/x button click /actions/default/in/inventory"), "unless you've set that button to do nothing");
   }
 
   // A game that reads its stick as a trackpad keeps that mode, as SteamVR's own translation does. Seen on a Frame, 7 November.
@@ -1710,8 +1730,11 @@ static void testReal(const std::string& work, const std::string& out) {
     shot(m, out + "/ref_" + safe + ".png");
   }
 
-  // SteamVR leaves its last translation on disk. Doing the same one must give the same result.
-  for (const std::string& dir : d.config) {
+  // SteamVR leaves its last translation on disk. Doing the same one must give the same result. UTMTFTM_REMAP_DIR adds a
+  // folder with an openxr folder in it, holding a headset's two auto-remapping files, to check that one here first.
+  std::vector<std::string> remapDirs = d.config;
+  if (const char* extra = std::getenv("UTMTFTM_REMAP_DIR")) remapDirs.insert(remapDirs.begin(), extra);
+  for (const std::string& dir : remapDirs) {
     Json::Value from, to;
     Json::CharReaderBuilder b;
     std::string errs;

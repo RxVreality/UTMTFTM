@@ -751,7 +751,12 @@ Json::Value translate(const Json::Value& from, const Wiring& wiring, const Profi
     auto it = onto.find(row.empty() ? path : row);
     if (it != onto.end()) return it->second;
     std::vector<std::string>& s = same[path];
-    if (s.empty() && yourInput(path) && !wiring.count(path)) s.push_back(path);
+    if (s.empty() && yourInput(path)) {
+      // A button their controller doesn't have on that hand, like Budget Cuts 2's X and Y on a Quest's right hand: SteamVR
+      // leaves it on your button of the same name, so this does too. Not if you've set that button to nothing, or to a part.
+      auto w = wiring.find(path);
+      if (w == wiring.end() || (row.empty() && !w->second.empty() && w->second.find('#') == std::string::npos)) s.push_back(path);
+    }
     return s;
   };
 
