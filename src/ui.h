@@ -118,7 +118,8 @@ struct BindRow {
   bool unused = false;  // a game's binding is showing, and this button isn't on it
   double x = -1, y = -1;  // where it sits on the picture, 0..1. Negative: nowhere known
   bool behind = false;    // it's round the back from this angle, so the mark is drawn hollow
-  int mark = 0;           // part of a combo: 1 touch, 2 press
+  int mark = 0;           // part of a combo: 1 touch, 2 press, or pushed one way
+  std::string markText;   // what it says while marked, when that isn't "Press" or "Touch" and its name: "Thumbstick North"
 };
 struct BindSide {
   std::string title, note;
@@ -173,6 +174,10 @@ struct ComboModel {
   std::vector<ComboIdea> ideas;
   std::string picked;    // "Touch A + Touch B"
   std::string note;      // anything worth knowing about what's picked
+  // Under what's picked: the parts of the stick last tapped, touch, press and each way of pushing it. Empty otherwise.
+  std::string chipsLabel;  // "Right Thumbstick"
+  std::vector<BindModel::Chip> chips;
+  bool stickAxes = false;  // Y+ Y- X+ X-, not North East South West
   std::string controls;  // which of the game's sets of controls the list is from, when it has several
   std::vector<ComboChoice> choices;  // this page of them
   int pageNo = 0, pages = 1;

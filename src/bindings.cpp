@@ -1181,6 +1181,33 @@ static std::string sourceMode(const Input* i) {
   return "button";
 }
 
+// The d-pad on a stick that a combo pushes one way reads, one that goes off with a push rather than a click. With way, one
+// with that way still free. Made if there isn't one, ahead of anything else on that stick, so that whichever way SteamVR
+// looks through them it finds a d-pad.
+static Json::Value& padFor(Json::Value& sources, const std::string& path, const std::string& way) {
+  for (Json::Value& s : sources)
+    if (s["path"].asString() == path && s["mode"].asString() == "dpad" && s.get("parameters", Json::Value()).get("sub_mode", "touch").asString() == "touch" &&
+        (way.empty() || !s["inputs"].isMember(way)))
+      return s;
+  Json::Value pad;
+  pad["path"] = path;
+  pad["mode"] = "dpad";
+  pad["parameters"]["sub_mode"] = "touch";
+  pad["inputs"] = Json::objectValue;
+  Json::Value out(Json::arrayValue);
+  Json::ArrayIndex at = sources.size();
+  for (Json::ArrayIndex i = 0; i < sources.size(); ++i) {
+    if (at == sources.size() && sources[i]["path"].asString() == path) {
+      at = out.size();
+      out.append(pad);
+    }
+    out.append(sources[i]);
+  }
+  if (at == sources.size()) out.append(pad);
+  sources = out;
+  return sources[at];
+}
+
 void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Profile& yours) {
   if (!binding["bindings"].isObject()) binding["bindings"] = Json::objectValue;
   for (const Combo& combo : combos) {
@@ -1189,6 +1216,10 @@ void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Pro
     if (!set["sources"].isArray()) set["sources"] = Json::arrayValue;
     if (combo.inputs.size() == 1) {
       const ComboInput& only = combo.inputs[0];
+      if (isDirection(only.state)) {
+        padFor(set["sources"], "/user/hand/" + only.path, only.state)["inputs"][only.state]["output"] = combo.output;
+        continue;
+      }
       Json::Value src;
       src["path"] = "/user/hand/" + only.path;
       src["mode"] = sourceMode(inputAt(yours, only.path));
@@ -1205,6 +1236,12 @@ void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Pro
       pair.append(path);
       pair.append(in.state);
       chord["inputs"].append(pair);
+      // A push one way is something a d-pad has: SteamVR's binding screen only offers west, east, north, south and center
+      // in a chord for a control in a d-pad mode, and SteamVR checks each control in a chord against its modes.
+      if (isDirection(in.state)) {
+        padFor(set["sources"], path, "");
+        continue;
+      }
       // Every chord in the files SteamVR and the Workshop keep is on controls that have a source in that set, even one with
       // nothing on it. SteamVR's own files have those too.
       bool has = false;
@@ -1222,14 +1259,16 @@ void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Pro
   }
 }
 
-std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours) {
+std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours, bool axes) {
   std::string out;
   for (const ComboInput& in : inputs) {
     const Input* i = inputAt(yours, in.path);
     if (!out.empty()) out += " + ";
-    out += in.state == "touch" ? "Touch " : "Press ";
+    const bool push = isDirection(in.state);
+    out += in.state == "touch" ? "Touch " : push ? "Push " : "Press ";
     if (i && i->side.empty()) out += in.path.rfind("left/", 0) == 0 ? "left " : "right ";
     out += i ? i->name : titleCase(in.path.substr(in.path.rfind('/') + 1));
+    if (push) out += " " + wayName(in.state, axes);
   }
   return out;
 }
@@ -2024,15 +2063,17 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
 }
 
 // ---------------------------------------------------------------- rewiring one part of a control
-std::string Page::directionName(const std::string& part) const {
+std::string wayName(const std::string& part, bool axes) {
   // J4, 9 November: some players think of a stick in compass points and some in axes, so it's their choice. Axes go the
   // way a graph does: Y+ is pushed away from you, X+ is to the right.
   static const std::map<std::string, std::pair<std::string, std::string>> names = {
       {"north", {"North", "Y+"}}, {"east", {"East", "X+"}}, {"south", {"South", "Y-"}}, {"west", {"West", "X-"}}, {"click", {"press", "press"}}, {"touch", {"touch", "touch"}}};
   auto it = names.find(part);
   if (it == names.end()) return part;
-  return stickAxes ? it->second.second : it->second.first;
+  return axes ? it->second.second : it->second.first;
 }
+
+std::string Page::directionName(const std::string& part) const { return wayName(part, stickAxes); }
 
 // A control's name, with which hand when the controller has one on each.
 std::string Page::handedName(const Profile& p, const std::string& id, bool always) const {
@@ -2344,28 +2385,47 @@ ComboModel Page::comboModel(const std::string& hover, const std::string& down) {
   for (int hand = 0; hand < 2; ++hand)
     for (BindRow& r : m.yours.rows[hand]) {
       auto it = showing.find(r.id.substr(2));
-      if (it != showing.end()) r.mark = it->second == "touch" ? 1 : 2;
+      if (it == showing.end()) continue;
+      r.mark = it->second == "touch" ? 1 : 2;
+      if (isDirection(it->second)) r.markText = r.name + " " + directionName(it->second);
     }
 
-  for (const Combo& c : saved) m.saved.push_back({comboText(c.inputs, *mine), c.label});
+  m.stickAxes = stickAxes;
+  for (const Combo& c : saved) m.saved.push_back({comboText(c.inputs, *mine, stickAxes), c.label});
 
   std::vector<ComboInput> picked;
   for (const auto& [path, state] : picked_) picked.push_back({path, state});
-  m.picked = comboText(picked, *mine);
+  m.picked = comboText(picked, *mine, stickAxes);
 
   if (comboStep_ == 1) {
     const auto ideas = comboIdeas(*mine);
     for (size_t i = 0; i < ideas.size(); ++i) m.ideas.push_back({"combo_idea_" + std::to_string(i), ideas[i].name});
     // Anything worth knowing about what's picked.
     for (const auto& [path, state] : picked_) {
-      if (state == "click")
+      if (state == "click" || isDirection(state))
         for (int hand = 0; hand < 2; ++hand)
           for (const RowText& r : rows[hand])
-            if (r.id == path && !r.action.empty() && m.note.empty()) m.note = "Pressing " + r.name + " also does " + r.action + " on its own, so this may set off both. Touch wouldn't.";
+            if (r.id == path && !r.action.empty() && m.note.empty())
+              m.note = state == "click" ? "Pressing " + r.name + " also does " + r.action + " on its own, so this may set off both. Touch wouldn't."
+                                        : "Pushing " + r.name + " " + directionName(state) + " also does " + r.action + " on its own, so this may do both.";
     }
     for (const auto& [path, state] : picked_)
       if (m.note.empty() && state == "touch" && path.find("/input/grip") != std::string::npos) m.note = "Just holding the controller usually counts as touching the grip, so Press is probably what you want there.";
     if (m.note.empty() && picked_.size() == 1 && picked_.begin()->second == "touch") m.note = "With only one touch, this goes off whenever your thumb or finger brushes it.";
+    if (m.note.empty() && picked_.size() == 1 && isDirection(picked_.begin()->second)) m.note = "On its own, this goes off every time you push that way.";
+
+    // The stick last tapped: touch it, press it, or push it one way.
+    const Input* s = comboStick_.empty() ? nullptr : inputAt(*mine, comboStick_);
+    if (s && is2D(*s)) {
+      auto it = picked_.find(comboStick_);
+      const std::string now = it == picked_.end() ? "" : it->second;
+      m.chipsLabel = (s->side.empty() ? (comboStick_.rfind("left/", 0) == 0 ? "Left " : "Right ") : "") + s->name;
+      if (s->touch) m.chips.push_back({"combo_part_touch", "Touch", now == "touch"});
+      if (s->click || s->value || s->force) m.chips.push_back({"combo_part_click", "Press", now == "click"});
+      // Round the compass, or up and down the Y axis first, as on the Bindings tab.
+      for (const char* way : stickAxes ? std::initializer_list<const char*>{"north", "south", "east", "west"} : std::initializer_list<const char*>{"north", "east", "south", "west"})
+        m.chips.push_back({std::string("combo_part_") + way, directionName(way), now == way});
+    }
   }
   if (comboStep_ == 2) {
     const std::vector<GameAction> actions = namedActions(active, *mine);
@@ -2418,10 +2478,27 @@ void Page::comboClick(const std::string& id) {
   if (id == "combo_new") {
     if (combosHere().size() >= 6) { say("Six combos per game for now, because that's what fits. Remove one first."); return; }
     picked_.clear();
+    comboStick_.clear();
     comboStep_ = 1;
     return;
   }
-  if (id == "combo_cancel") { picked_.clear(); comboStep_ = 0; return; }
+  if (id == "combo_cancel") { picked_.clear(); comboStick_.clear(); comboStep_ = 0; return; }
+  if (id == "combo_dirs_compass" || id == "combo_dirs_axes") {  // the same switch as the Bindings tab's
+    stickAxes = id == "combo_dirs_axes";
+    savePrefs();
+    return;
+  }
+  if (id.rfind("combo_part_", 0) == 0) {  // one part of the stick last tapped. Again turns it off
+    if (comboStep_ != 1 || comboStick_.empty()) return;
+    const std::string part = id.substr(11);
+    const Input* s = inputAt(*mine, comboStick_);
+    const bool has = s && (isDirection(part) ? is2D(*s) : part == "touch" ? s->touch : part == "click" && (s->click || s->value || s->force));
+    if (!has) return;
+    auto it = picked_.find(comboStick_);
+    if (it != picked_.end() && it->second == part) picked_.erase(it);
+    else picked_[comboStick_] = part;
+    return;
+  }
   if (id == "combo_next") { if (!picked_.empty()) { comboStep_ = 2; comboPage_ = 0; } return; }
   if (id == "combo_back") { comboStep_ = 1; return; }
   if (id.rfind("c:", 0) == 0) {
@@ -2430,13 +2507,16 @@ void Page::comboClick(const std::string& id) {
       if (comboBase().empty()) { comboClickGreyed("combo_new"); return; }
       if (combosHere().size() >= 6) { say("Six combos per game for now, because that's what fits. Remove one first."); return; }
       picked_.clear();
+      comboStick_.clear();
       comboStep_ = 1;
     }
     if (comboStep_ != 1) return;
-    // Touch first, because that's the point of this page. Then press, then off. A control can only do what it has.
+    // Touch first, because that's the point of this page. Then press, then off. A control can only do what it has. A stick
+    // or pad also offers its directions underneath, so a push one way is one tap away rather than a long way round.
     const std::string path = id.substr(2);
     const Input* i = inputAt(*mine, path);
     if (!i) return;
+    if (is2D(*i)) comboStick_ = path;
     const bool canPress = i->click || i->value || i->force;
     auto it = picked_.find(path);
     if (it == picked_.end()) picked_[path] = i->touch ? "touch" : "click";
@@ -2449,7 +2529,12 @@ void Page::comboClick(const std::string& id) {
     const size_t at = size_t(std::atoi(id.c_str() + 11));
     if (at >= ideas.size()) return;
     picked_.clear();
-    for (const ComboInput& in : ideas[at].inputs) picked_[in.path] = in.state;
+    comboStick_.clear();
+    for (const ComboInput& in : ideas[at].inputs) {
+      picked_[in.path] = in.state;
+      const Input* i = inputAt(*mine, in.path);
+      if (i && is2D(*i)) comboStick_ = in.path;
+    }
     return;
   }
   if (id == "combo_page_next") { ++comboPage_; return; }
@@ -2486,9 +2571,10 @@ void Page::comboClick(const std::string& id) {
       for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
       return true;
     }), list.end());
-    const std::string what = comboText(c.inputs, *mine) + " does " + c.label + ".";
+    const std::string what = comboText(c.inputs, *mine, stickAxes) + " does " + c.label + ".";
     list.push_back(c);
     picked_.clear();
+    comboStick_.clear();
     comboStep_ = 0;
     saved(what, reapply());
     return;
@@ -2578,7 +2664,9 @@ std::vector<Combo> Page::liveCombos(bool* allOfIt) {
       haveActions = true;
     }
     auto it = std::find_if(actions.begin(), actions.end(), [&](const GameAction& a) { return lowered(a.output) == lowered(c.output) && !a.row.empty(); });
-    if (it == actions.end() || c.inputs.size() > fhlive::kMaxChordInputs) {
+    // The driver's live combos know a touch and a press, not a stick pushed one way, so those wait for the next launch.
+    const bool pushes = std::any_of(c.inputs.begin(), c.inputs.end(), [](const ComboInput& in) { return isDirection(in.state); });
+    if (it == actions.end() || pushes || c.inputs.size() > fhlive::kMaxChordInputs) {
       if (allOfIt) *allOfIt = false;
       continue;
     }

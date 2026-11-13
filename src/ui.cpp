@@ -906,7 +906,7 @@ static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& ar
       const int align = a == 0 ? 2 : 0;
       const double tx = a == 0 ? cx + cellW - 10 : cx + 12, tw = cellW - 18;
       if (r.mark) {
-        caps(c, tx, mid + 6, 17, (r.mark == 2 ? "Press " : "Touch ") + r.name, armed ? INK : SIGNAL, 1, align, 1.2, tw);
+        caps(c, tx, mid + 6, 17, r.markText.empty() ? (r.mark == 2 ? "Press " : "Touch ") + r.name : r.markText, armed ? INK : SIGNAL, 1, align, 1.2, tw);
       } else if (r.unused) {
         label(c, tx, cy + 14, 13, r.name, armed ? INK : DIM, align);
         text(c, tx, cy + 31, 17, "Not used", false, armed ? INK : FAINT, 1, align, tw);
@@ -1031,8 +1031,10 @@ std::string comboKey(const ComboModel& m) {
                   std::to_string(m.pageNo) + "/" + std::to_string(m.pages) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + m.yours.title + "," + m.yours.note;
   for (int h = 0; h < 2; ++h) {
     k += m.yours.pic[h] ? "p" : "-";
-    for (const BindRow& r : m.yours.rows[h]) k += r.id + "=" + r.action + "," + std::to_string(r.mark) + ";";
+    for (const BindRow& r : m.yours.rows[h]) k += r.id + "=" + r.action + "," + std::to_string(r.mark) + r.markText + ";";
   }
+  k += "|" + m.chipsLabel + std::to_string(m.stickAxes);
+  for (const auto& ch : m.chips) k += ch.id + "=" + ch.text + std::to_string(ch.on) + ";";
   for (const ComboEntry& e : m.saved) k += e.inputs + ">" + e.action + ";";
   for (const ComboIdea& e : m.ideas) k += e.id + ";";
   for (const ComboChoice& e : m.choices) k += e.id + "=" + e.name + "," + e.where + ";";
@@ -1079,10 +1081,24 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
     }
   } else if (m.step == 1) {
     text(c, L, headY, 27, "What do you do?", true, PAPER);
-    text(c, L, subY, 18, "Tap a control once for touch, again for press, and again to clear.", false, DIM, 1, 0, R - L - 120);
+    text(c, L, subY, 18, "Tap a control once for touch, again for press, and again to clear. A stick can be pushed one way too.", false, DIM, 1, 0, R - L - 120);
     caps(c, R, headY, 19, "1 of 2", DIM, 1, 2);
     pictures();
     const double barH = 64;
+    // The stick last tapped, under what's picked: touch it, press it, or push it one way. How the ways are named is a switch
+    // at the end, the same one as on the Bindings tab.
+    double extra = 0;
+    if (!m.chips.empty()) {
+      const double chipY = belowY + barH + 12, chipH = 40, switchW = 290;
+      const double lw = label(c, L, chipY + 26, 16, m.chipsLabel);
+      const double x0 = L + lw + 16, x1 = R - switchW - 24;
+      std::vector<Segment> list;
+      for (const BindModel::Chip& ch : m.chips) list.push_back({ch.id, ch.text, ch.on, true});
+      segments(c, btn, x0, chipY, std::min(x1 - x0, 112.0 * list.size()), chipH, list, 16);
+      const double sw = label(c, R - switchW, chipY + 26, 16, "Names");
+      segments(c, btn, R - switchW + sw + 14, chipY, switchW - sw - 14, chipH, {{"combo_dirs_compass", "N E S W", !m.stickAxes, true}, {"combo_dirs_axes", "Y+ X+", m.stickAxes, true}}, 16);
+      extra = chipH + 12;
+    }
     if (!m.picked.empty()) {
       slab(c, L, belowY, R - L, barH, SIGNAL);
       caps(c, L + 30, belowY + 41, 23, m.picked, INK, 1, 0, 1.4, R - L - 340);
@@ -1093,9 +1109,9 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
       text(c, L + 30, belowY + 41, 21, "Nothing picked yet", false, DIM);
       button(c, btn, R - 160, belowY + 10, 134, 44, "combo_cancel", "Cancel", Outline);
     }
-    if (!m.note.empty()) text(c, L, belowY + barH + 34, 19, m.note, false, PAPER, 1, 0, R - L);
+    if (!m.note.empty()) text(c, L, belowY + barH + extra + 34, 19, m.note, false, PAPER, 1, 0, R - L);
     if (!m.ideas.empty()) {
-      const double y = belowY + barH + 58, h = 50, d = h * kLean;
+      const double y = belowY + barH + extra + 58, h = 50, d = h * kLean;
       label(c, L, y + 32, 15, "Or try");
       const double x0 = L + 76, each = (R - x0 + d * (m.ideas.size() - 1) - 8.0 * (m.ideas.size() - 1)) / m.ideas.size();
       for (size_t i = 0; i < m.ideas.size(); ++i) {

@@ -6,6 +6,8 @@ Stick directions on the Bindings tab, which [MMeNDtal](https://github.com/MMeNDt
 
 Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, whichever you think in. The Names switch at the end of that row changes it, and it's remembered.
 
+Combos can push a stick one way too. Tap a stick while making a combo and a row under it offers Touch, Press and each of its four ways, with the same Names switch. A combo with a push in it takes effect the next time the game launches, because live combos only know touches and presses so far.
+
 A button's press and its touch can do different things now, or one of them nothing. Anything that can't work in the game you're in, like a stick push onto a stick the game reads as a stick, gets turned down with the reason, rather than saved and quietly doing nothing.
 
 These change the game's binding file, so they take effect the next time the game launches. I've checked them against the bindings of 40 games on my PC, but haven't tried them in a game yet.

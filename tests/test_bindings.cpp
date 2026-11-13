@@ -629,6 +629,83 @@ static void testFixture(const std::string& work, const std::string& out) {
   for (int i = 0; i < 6; ++i) page.comboClick("combo_del_0");
   check(!fake.values.count(namedKey), "and they all come off again");
 
+  // A stick pushed one way (J4, 13 November): tapping a stick offers touch, press and its four ways under what's picked,
+  // named round the compass or along the axes, with the same switch as the Bindings tab.
+  {
+    page.comboClick("combo_new");
+    page.comboClick("c:right/input/a");
+    check(page.comboModel("", "").chips.empty(), "a button has no parts to offer");
+    page.comboClick("c:left/input/thumbstick");
+    cm = page.comboModel("", "");
+    check(cm.chips.size() == 6 && cm.chipsLabel == "Left Stick", "tapping a stick offers its parts under it");
+    check(cm.chips.size() == 6 && cm.chips[0].id == "combo_part_touch" && cm.chips[0].on && cm.chips[1].text == "Press" && cm.chips[2].text == "North" && cm.chips[3].text == "East" && cm.chips[5].text == "West",
+          "touch first, the way a tap picked it, then press and round the compass");
+    page.comboClick("combo_part_north");
+    cm = page.comboModel("", "");
+    check(cm.picked == "Push left Stick North + Touch A", "a way of pushing it reads as a push");
+    check(markOf(cm, "c:left/input/thumbstick") == 2, "it's marked solid on the controller, like a press");
+    check(cm.note.find("Move") != std::string::npos, "and says the stick moves you too");
+    shotCombo(cm, out + "/fixture_combos_stick.png");
+    page.comboClick("combo_dirs_axes");
+    cm = page.comboModel("", "");
+    check(cm.stickAxes && cm.picked == "Push left Stick Y+ + Touch A", "the switch names it along the axes");
+    check(cm.chips.size() == 6 && cm.chips[2].text == "Y+" && cm.chips[3].text == "Y-" && cm.chips[4].text == "X+" && cm.chips[5].text == "X-", "up and down first, then across");
+    check(page.model("", "").stickAxes, "and it's the same switch as the Bindings tab's");
+    shotCombo(cm, out + "/fixture_combos_stick_axes.png");
+    page.comboClick("combo_part_west");
+    check(page.comboModel("", "").picked == "Push left Stick X- + Touch A", "another way replaces it");
+    page.comboClick("combo_part_west");
+    check(page.comboModel("", "").picked == "Touch A", "the same way again takes the stick off");
+    page.comboClick("c:left/input/thumbstick");
+    page.comboClick("c:left/input/thumbstick");
+    page.comboClick("c:left/input/thumbstick");
+    check(page.comboModel("", "").picked == "Touch A" && page.comboModel("", "").chips.size() == 6, "tapping still goes touch, press, off, and the parts stay offered");
+    page.comboClick("combo_part_north");
+    page.comboClick("combo_next");
+    page.comboClick(choiceNamed(page.comboModel("", ""), "Reload"));
+    check(page.status.find("next time") != std::string::npos, "a push waits for the next launch, since live combos only know touch and press");
+    Json::Value w = readFile(namedFile);
+    const Json::Value& set = w["bindings"]["/actions/main"];
+    check(set["chords"].size() == 1 && chordText(set["chords"][0]) == "/actions/main/in/Reload <- /user/hand/left/input/thumbstick:north /user/hand/right/input/a:touch", "the chord names the way, as SteamVR's binding screen does");
+    int pad = -1, stick = -1;
+    for (Json::ArrayIndex i = 0; i < set["sources"].size(); ++i) {
+      const Json::Value& s = set["sources"][i];
+      if (s["path"].asString() != "/user/hand/left/input/thumbstick") continue;
+      if (s["mode"].asString() == "dpad" && pad < 0) pad = int(i);
+      if (s["mode"].asString() == "joystick") stick = int(i);
+    }
+    check(pad >= 0 && set["sources"][pad]["parameters"]["sub_mode"].asString() == "touch" && set["sources"][pad]["inputs"].empty(), "the stick gets an empty d-pad that goes off with a push");
+    check(stick >= 0 && pad < stick, "ahead of the stick's own Move, which stays");
+    check(sourcesOf(w).count("/user/hand/left/input/thumbstick joystick position /actions/main/in/Move"), "Move is untouched");
+    // One stick pushed one way, on its own, is a d-pad binding.
+    page.comboClick("combo_new");
+    page.comboClick("c:right/input/thumbstick");
+    page.comboClick("combo_part_east");
+    check(page.comboModel("", "").note.find("every time") != std::string::npos, "a push on its own says it goes off every time");
+    page.comboClick("combo_next");
+    page.comboClick(choiceNamed(page.comboModel("", ""), "Fire the gun"));
+    w = readFile(namedFile);
+    check(w["bindings"]["/actions/main"]["chords"].size() == 1, "one push isn't a chord");
+    check(sourcesOf(w).count("/user/hand/right/input/thumbstick dpad east /actions/main/in/Fire"), "it's the east of a d-pad");
+    cm = page.comboModel("combo_row_1", "");
+    check(cm.saved.size() == 2 && cm.saved[1].inputs == "Push right Stick X+", "the list names it the chosen way");
+    check(markOf(cm, "c:right/input/thumbstick") == 2, "and pointing at it lights it up");
+    {
+      FakeSettings other = fake;
+      Page again(d, other.make());
+      again.load();
+      again.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+      again.setGame("steam.app.777", "", "Named Game");
+      const ComboModel back = again.comboModel("", "");
+      check(back.saved.size() == 2 && back.saved[0].inputs == "Push left Stick Y+ + Touch A", "pushes survive a restart, and so does the switch");
+    }
+    page.comboClick("combo_dirs_compass");
+    check(page.comboModel("", "").saved[1].inputs == "Push right Stick East", "and the switch back names them round the compass");
+    page.comboClick("combo_del_0");
+    page.comboClick("combo_del_0");
+    check(!fake.values.count(namedKey), "and they come off like any other");
+  }
+
   // A game SteamVR's translating for you: it goes on top of the same translation, and says it's the other controller's profile.
   page.setGame("steam.app.12345", "", "Fixture Game");
   cm = page.comboModel("", "");

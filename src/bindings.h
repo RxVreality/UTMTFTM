@@ -155,8 +155,8 @@ std::vector<std::string> partsFor(const std::string& key);
 
 // A combo: controls held together that do one thing in one game. SteamVR does the work: it goes in the game's binding as a
 // chord, the same thing its own binding screen makes, so nothing runs for it at all while you play. A single control goes in
-// as an ordinary binding of its touch or press.
-struct ComboInput { std::string path, state; };  // "right/input/a", and "touch" or "click"
+// as an ordinary binding of its touch or press. A stick or pad can also be pushed one way, which SteamVR reads off a d-pad on it.
+struct ComboInput { std::string path, state; };  // "right/input/a", and "touch", "click", or "north" "east" "south" "west"
 struct Combo {
   std::vector<ComboInput> inputs;
   std::string output;  // "/actions/main/in/Jump"
@@ -164,8 +164,11 @@ struct Combo {
 };
 void addCombos(Json::Value& binding, const std::vector<Combo>& combos, const Profile& yours);
 
-// "Touch A + Press Right Grip". A control that's only on one hand doesn't need to say which.
-std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours);
+// "Touch A + Press Right Grip + Push left Thumbstick North". A control that's only on one hand doesn't need to say which.
+// axes: directions read Y+ Y- X+ X-.
+std::string comboText(const std::vector<ComboInput>& inputs, const Profile& yours, bool axes = false);
+// "North" or "Y+", for a direction. Anything else comes back as it was.
+std::string wayName(const std::string& part, bool axes);
 
 // Everything in a binding a combo could set off: what's on a button now first, in the file's order, then anything else in the
 // game's action file. Sticks and half-pulls aren't on or off, so they aren't in it.
@@ -308,7 +311,8 @@ class Page {
   std::string handedName(const Profile& p, const std::string& id, bool always) const;  // "left Stick", "Y"
   std::string group_;  // which of the game's sets of controls is showing
   int comboStep_ = 0;  // 0 what's saved, 1 what you do, 2 what it does
-  std::map<std::string, std::string> picked_;  // the combo being made: "right/input/a" -> "touch" or "click"
+  std::map<std::string, std::string> picked_;  // the combo being made: "right/input/a" -> "touch", "click" or a direction
+  std::string comboStick_;  // the stick or pad last tapped while making one, whose parts are offered under it
   bool launchKnown_ = false;
   std::string launchFrom_;
   Wiring launchWiring_;
