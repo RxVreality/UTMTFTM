@@ -160,6 +160,7 @@ struct App {
   std::map<std::string, int> recHeard;  // what a take heard, for the log: "R/input/a/touch" and how many reports said it was on
   uint64_t recReports = 0, recLostAtStart = 0;
   uint64_t hookReports = 0, hookTicksSeen = 0, hookUnknown = 0;
+  uint32_t hookFeatures = 0;
   bool hookLogged = false;
   Clock::time_point clockStart = Clock::now();
   Clock::time_point dashSettleAt{};
@@ -296,6 +297,13 @@ struct App {
     const bool ready = Store::inputReady();
     const uint64_t reports = Store::inputReports(), ticks = Store::inputTicks(), unknown = Store::inputUnknown();
     bindings.setHookState(ready, reports > 0, reports == 0 && unknown > 0);
+    const uint32_t features = Store::inputFeatures();
+    bindings.setHookFeatures(features);
+    if (features != hookFeatures) {  // what can go live depends on it, so the driver's table has to be worked out again
+      hookFeatures = features;
+      logf("button hook: can do %s", features & fhlive::kFeatureLinks ? "links and stick pushes" : "swaps only, from an older driver");
+      syncInput();
+    }
     if (!hookLogged && (reports > 0 || unknown > 0)) {
       hookLogged = true;
       logf("button hook: %s, %llu reports recognised, %llu unknown, driver called %llu times", ready ? "ready" : "not the driver this needs",
@@ -362,7 +370,7 @@ struct App {
       if (bindings.recordedReopen(&title, &sub)) {
         logf("macros: done with the dashboard shut (%s), opening it again", title.c_str());
         vr::VROverlay()->ShowDashboard("utmtftm.dashboard");
-        page = DashPage::Recorded;
+        page = bindings.guideMacroHere() ? DashPage::Combos : DashPage::Recorded;  // a guided macro comes back to its walkthrough
         dashForce = true;
         // In case SteamVR doesn't open it from here, say where the steps went. It goes as soon as the dashboard's up.
         showMessage(title, sub, title == "Got it");
@@ -741,10 +749,29 @@ struct App {
     dashPoke = false;
     std::string key;
     bool drawn = false;
-    if (page == DashPage::Bindings)
+    if ((page == DashPage::Bindings || page == DashPage::Combos) && bindings.loaded() && bindings.guided(page))
+      guarded([&] {
+        syncBindings();
+        // Flashing buttons: six steps round each 1.2 s, and only while it's on screen with something flashing.
+        double phase = 0;
+        if (bindings.guideFlashing(page)) {
+          const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - clockStart).count();
+          phase = double((ms % 1200) / 200) / 6.0;
+        }
+        GuideModel m = bindings.guideModel(page, fx.hover, fx.down, phase);
+        m.live = sceneKey.empty() ? LiveState::NoGame : sceneLive() ? LiveState::Live : LiveState::NextLaunch;
+        m.confirmClose = Clock::now() < confirmUntil;
+        if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+        key = guideKey(m);
+        if (!dashForce && key == dashDrawn) { drawn = true; return; }
+        drawGuide(dashCv, m, buttons);
+        drawn = true;
+      });
+    else if (page == DashPage::Bindings)
       guarded([&] {
         syncBindings();
         BindModel m = bindings.model(fx.hover, fx.down);
+        m.canGuide = true;
         m.live = sceneKey.empty() ? LiveState::NoGame : sceneLive() ? LiveState::Live : LiveState::NextLaunch;
         m.confirmClose = Clock::now() < confirmUntil;
         m.status.clear();
@@ -759,6 +786,7 @@ struct App {
       guarded([&] {
         syncBindings();
         ComboModel m = bindings.comboModel(fx.hover, fx.down);
+        m.canGuide = true;
         m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::NextLaunch;
         m.confirmClose = Clock::now() < confirmUntil;
         m.status.clear();
@@ -826,8 +854,11 @@ struct App {
       }
       if (page != DashPage::Hands && page != DashPage::Decaf && id != "close" && id.rfind("page_", 0) != 0) {
         const bool combos = page == DashPage::Combos, rec = page == DashPage::Recorded;
+        const bool guide = (page == DashPage::Bindings || combos) && bindings.loaded() && bindings.guided(page);
         guarded([&] {
-          if (rec) { if (hb->enabled) bindings.recordedClick(id); else bindings.recordedClickGreyed(id); }
+          if (id == "guide_on") bindings.setGuided(page == DashPage::Recorded ? DashPage::Combos : page, true);
+          else if (guide) { if (hb->enabled) bindings.guideClick(page, id); }
+          else if (rec) { if (hb->enabled) bindings.recordedClick(id); else bindings.recordedClickGreyed(id); }
           else if (combos) { if (hb->enabled) bindings.comboClick(id); else bindings.comboClickGreyed(id); }
           else if (hb->enabled) bindings.click(id);
           else bindings.clickGreyed(id);

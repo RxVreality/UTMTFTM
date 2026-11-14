@@ -658,6 +658,32 @@ void clickBindings(const std::string& id) {
   check(false, ("there's no button called " + id + " on the bindings page").c_str());
 }
 
+// And on a walkthrough, the same way.
+void clickGuide(fh::DashPage tab, const std::string& id) {
+  fh::bind::Page& page = *g_pageForClicks;
+  for (const std::string& name : page.modelsWanted()) {
+    fh::Mesh mesh;
+    std::vector<fh::ModelPart> parts;
+    if (fh::modelFromFiles(fh::platform::steamvrDir(), name, mesh, parts)) page.give(name, mesh, parts);
+  }
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::drawGuide(cv, page.guideModel(tab, "", "", 0), buttons);
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    page.guideClick(tab, id);
+    return;
+  }
+  check(false, ("there's no button called " + id + " on the walkthrough").c_str());
+}
+
 // And on the combos page, the same way.
 void clickCombos(const std::string& id) {
   fh::bind::Page& page = *g_pageForClicks;
@@ -904,6 +930,18 @@ void scenarioBindings() {
   check(logHas("bindings page: oculus_quest_plus_controller_right loaded, 7 parts"), "and the other controller's");
   check(settingNow(setting).empty(), "just looking changes nothing");
 
+  // The tab opens on the walkthrough. Swapping two buttons there puts the game on our file, and Undo takes it off again.
+  clickGuide(fh::DashPage::Bindings, "g:right/input/a");
+  wait(300);
+  clickGuide(fh::DashPage::Bindings, "g:right/input/b");
+  wait(600);
+  check(settingNow(setting).rfind("file:///", 0) == 0, "swapping A and B on the walkthrough points the game's setting at a file");
+  clickGuide(fh::DashPage::Bindings, "guide_bind_undo");
+  wait(600);
+  check(settingNow(setting).empty(), "and Undo puts it back");
+  clickGuide(fh::DashPage::Bindings, "guide_advanced");
+  wait(400);
+
   clickBindings("bind_layout");
   wait(600);
   const std::string url = settingNow(setting);
@@ -1007,6 +1045,8 @@ void scenarioRecorded() {
 
   click("page_combos");
   wait(800);
+  clickGuide(fh::DashPage::Combos, "guide_advanced");
+  wait(400);
   clickCombos("page_recorded");
   wait(800);
 
@@ -1255,6 +1295,8 @@ void scenarioCombos() {
   wait(1500);
   check(g_dashUploads > before, "opening the page sends SteamVR a new picture", g_dashUploads - before);
   check(settingNow(setting).empty(), "just looking changes nothing");
+  clickGuide(fh::DashPage::Combos, "guide_advanced");
+  wait(400);
   clickCombos("combo_new");
   wait(300);
   clickCombos("c:left/input/dpad_up");

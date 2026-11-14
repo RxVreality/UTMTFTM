@@ -179,6 +179,14 @@ struct GameAction {
 };
 std::vector<GameAction> comboActions(const Found& binding, const Profile& yours);
 
+// What changed between the binding a game launched with and the one it would load now, as parts of your controller doing
+// what other parts did at launch. The driver can do that with no restart. Parts are "click", "touch", "value" (how far a
+// trigger's pulled), "move" (a whole stick's movement) and "north" "east" "south" "west" (a stick pushed one way). to empty:
+// that part does nothing now. allOfIt: false when something changed that no part of the launch binding did, like a job
+// the game had on no button, so that waits for the next launch.
+struct LiveLink { std::string from, fromPart, to, toPart; float amount = 1; };
+std::vector<LiveLink> liveLinks(const Json::Value& launched, const Json::Value& now, bool* allOfIt);
+
 class Page {
  public:
   Page(Dirs dirs, Settings settings) : d_(std::move(dirs)), s_(std::move(settings)) {}
@@ -222,11 +230,21 @@ class Page {
   // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. late: it's hearing buttons it never
   // saw being set up, so it can't tell which is which. Any of those says why on the page.
   void setHookState(bool hookOk, bool heard, bool late = false) { hookOk_ = hookOk; hookHeard_ = heard; hookLate_ = late; }
+  // fhlive::kFeature bits from the driver that's loaded. With links, almost any change works with no restart.
+  void setHookFeatures(uint32_t f) { hookFeatures_ = f; }
   // Everything for the driver about the game that's running: macros, plus whatever's changed since it launched that
   // can work now. Empty with no game.
   void fillInputTable(fhlive::InputTable& t);
   bool recordedWantsName(std::string* current) const;  // Rename was tapped: show a keyboard
   void recordedSetName(const std::string& name);
+
+  // The guided walkthroughs (guide.cpp): what the Bindings and Combos tabs open on. Advanced goes to the full pages.
+  bool guided(DashPage tab) const { return tab == DashPage::Bindings ? guideBind_ : tab == DashPage::Combos ? guideCombo_ : false; }
+  void setGuided(DashPage tab, bool on);
+  GuideModel guideModel(DashPage tab, const std::string& hover, const std::string& down, double phase);
+  void guideClick(DashPage tab, const std::string& id);
+  bool guideFlashing(DashPage tab) const;  // something on it flashes, so it wants drawing again now and then
+  bool guideMacroHere() const { return gcStep_ >= 11; }  // a macro's being made here, so the dashboard comes back to it
 
   std::map<std::string, std::vector<macro::Recorded>> recorded;  // "<game>|<your controller_type>"
   bool macroTouches = false;    // resting a thumb on something can count, as well as pressing it. Off, only presses do
@@ -253,13 +271,14 @@ class Page {
   std::map<std::string, Wiring> wiringChanges;   // "<their type>><your type>" -> only what's been changed
   std::map<std::string, std::vector<Combo>> combos;  // "<game>|<your controller_type>"
   std::string fileFor(const std::string& game, const std::string& yourType) const;
+  // Which of their inputs each of yours acts as: SteamVR's translation, then your rewiring for every game, then this game's own.
+  Wiring wiring(const std::string& theirs, const std::string& yours) const;
 
  private:
   void say(const std::string& text, int kind = 0);
   void loadPrefs();
   void savePrefs() const;
   const Found& binding(const std::string& type);
-  Wiring wiring(const std::string& theirs, const std::string& yours) const;
   std::string effectiveFrom() const;  // which controller's bindings this game is on, "" = the developer's
   bool applyNow(const std::string& from);
   void revertNow();
@@ -277,6 +296,8 @@ class Page {
   void noteLaunch();
   struct LiveRoute { std::string from, to; };  // "right/input/a", "right/input/b". to empty: as nothing
   std::vector<LiveRoute> liveRoutes(bool* allOfIt) const;
+  std::vector<LiveLink> linksNow(bool* allOfIt);  // liveLinks, from what the game launched with to what it would load now
+  bool linking() const { return (hookFeatures_ & fhlive::kFeatureLinks) != 0 && launchJsonOk_; }
   std::vector<Combo> liveCombos(bool* allOfIt);
   std::string afterChange();  // how to finish "It takes effect...": right now, or the next launch
   std::string controlName(int hand, const std::string& path) const;
@@ -293,6 +314,9 @@ class Page {
   void fillRows(BindSide& side, const std::string& prefix, const Headset& h, const std::vector<RowText> rows[2]);
   const Headset* byModel(const std::string& model) const;
   std::string choiceKey() const { return gameKey_ + "|" + yours_.type; }
+  // Rewiring made on the guided pages is this game's alone, kept under "<their>><your>|<game>".
+  std::string gameWiringKey(const std::string& from) const { return from + ">" + yours_.type + "|" + gameKey_; }
+  bool rewired(const std::string& from) const;  // anything rewired from that controller's bindings, for this game or all of them
   static std::string shortName(const Headset& h);
 
   Dirs d_;
@@ -317,6 +341,9 @@ class Page {
   std::string launchFrom_;
   Wiring launchWiring_;
   std::vector<Combo> launchCombos_;
+  Json::Value launchJson_;  // the binding it launched with, before combos
+  bool launchJsonOk_ = false;
+  uint32_t hookFeatures_ = 0;
   int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button, 5 the interview
   int recAsk_ = 0;   // which question the interview is on
   bool recGuided_ = false;  // this one's being made by interview
@@ -344,9 +371,43 @@ class Page {
   int comboPage_ = 0;
   std::map<std::string, Found> found_;
   std::vector<GameGuide> guides_;
-  struct Held { Mesh mesh; std::vector<ModelPart> parts; bool have = false; std::shared_ptr<ControllerPicture> pic; };
+  struct Held { Mesh mesh; std::vector<ModelPart> parts; bool have = false; std::shared_ptr<ControllerPicture> pic, big; };
   std::map<std::string, Held> models_;
   std::string savedRef_;
+
+  // ---- the guided walkthroughs (guide.cpp)
+  bool guideBind_ = true, guideCombo_ = true;  // which way each tab's showing. They open guided
+  int gbStep_ = 1;            // bindings: 1 which button, 2 what it should do, 3 done, 4 jobs on no button
+  std::string gbButton_;      // your control being changed, "right/input/a"
+  std::string gbDoneTitle_, gbDoneSub_;
+  std::vector<std::string> gbChanged_;  // the controls the last change moved, lit on the done page
+  int gbListPage_ = 0;
+  struct GuideUndo {
+    bool have = false;
+    std::map<std::string, Wiring> wiring;
+    std::map<std::string, GameChoice> games;
+    std::map<std::string, std::vector<Combo>> combos;
+    std::map<std::string, std::vector<macro::Recorded>> recorded;
+  } gUndo_;
+  int gcStep_ = 0;  // combos: 0 combo or macro, 1 what it should do, 2 which controls, 3 done, 4 jobs on no button,
+                    // 11 which button plays the macro, 12 ready to record, 13 recording, 14 keep it, 15 done
+  std::string gcJob_, gcJobName_;  // the action a combo sets off, and what it's called
+  std::string gcDoneTitle_, gcDoneSub_;
+  int gcListPage_ = 0;
+  std::string gmButton_;     // the control that plays the macro being made
+  void guideRemember();      // keeps everything a guided change touches, for its Undo
+  void guideUndo();
+  std::string guideBase();   // the binding the guided pages change: the one the game's on
+  BindSide guideSide();      // your controller as the game has it now
+  void guideRows(GuideModel& m, const std::function<void(GuideRow&, const BindRow&)>& look);
+  std::vector<GameAction> guideJobs();       // what this game can do, in the set of controls it's mostly in
+  std::string jobOn(const std::string& control);  // what a control of yours does, in words
+  void guideBindModel(GuideModel& m);
+  void guideComboModel(GuideModel& m);
+  void guideBindClick(const std::string& id);
+  void guideComboClick(const std::string& id);
+  std::string liveWords();   // how a change just made takes effect, for the bottom of a done page
+  bool liveNow();
 };
 
 }  // namespace bind

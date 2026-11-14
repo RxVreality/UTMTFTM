@@ -666,9 +666,19 @@ struct Macro {
   Playing play;
 };
 struct Route { Comp* from; Comp* to; };
-struct ChordIn { Comp* source; };
+// Something to watch: a press or a touch, or a stick pushed one way (sign +1 or -1 along x or y).
+struct Probe { Comp* c = nullptr; int sign = 0; };
 struct Chord {
-  std::vector<Comp*> sources;
+  std::vector<Probe> sources;
+  std::vector<Set> set;
+  std::vector<Comp*> held;
+  bool on = false;
+};
+// One part of a control doing another's job, when that isn't simply one report sent as another's: a stick pushed one way
+// pressing a button, a button pushing a stick, or one press doing several things. Its own reports stop reaching the game.
+struct Link {
+  Probe test;
+  std::vector<Comp*> taken;
   std::vector<Set> set;
   std::vector<Comp*> held;
   bool on = false;
@@ -677,6 +687,7 @@ struct Compiled {
   std::vector<Macro> macros;
   std::vector<Route> routes;
   std::vector<Chord> chords;
+  std::vector<Link> links;
 };
 Compiled g_run;
 bool g_armed = false;
@@ -735,6 +746,57 @@ bool isActive(const Comp* c, bool was) {
   if (!c->scalar) return v > 0.5f;
   return was ? v > 0.4f : v > 0.75f;
 }
+bool probeOn(const Probe& p, bool was) {
+  if (!p.c) return false;
+  if (!p.sign) return isActive(p.c, was);
+  const float v = p.c->phys.load(std::memory_order_relaxed) * float(p.sign);
+  return was ? v > 0.4f : v > 0.6f;  // SteamVR's own d-pad goes off a little past halfway
+}
+// North is up the y axis, east along x, south down y, west back along x.
+Probe wayProbe(int hand, const char* path, int way) {
+  Probe p;
+  p.c = compAt(hand, path, way == 1 || way == 3 ? "x" : "y");
+  p.sign = way == 0 || way == 1 ? 1 : -1;
+  return p;
+}
+
+// ---------------- the parts of a control a link names
+bool isWay(uint8_t part) { return part >= fhlive::LinkNorth && part <= fhlive::LinkWest; }
+// Its own reports, which stop reaching the game while another part does its job. A stick pushed one way only shares them.
+void reportsOf(int hand, const char* path, uint8_t part, std::vector<Comp*>& out) {
+  switch (part) {
+    case fhlive::LinkClick:
+      if (Comp* c = compAt(hand, path, "click")) out.push_back(c);
+      else
+        for (const char* n : {"value", "force"})
+          if (Comp* v = compAt(hand, path, n)) out.push_back(v);
+      break;
+    case fhlive::LinkTouch:
+      if (Comp* c = compAt(hand, path, "touch")) out.push_back(c);
+      break;
+    case fhlive::LinkValue:
+      if (Comp* c = compAt(hand, path, "value")) out.push_back(c);
+      else if (Comp* f = compAt(hand, path, "force")) out.push_back(f);
+      break;
+    case fhlive::LinkMove:
+      for (const char* n : {"x", "y"})
+        if (Comp* c = compAt(hand, path, n)) out.push_back(c);
+      break;
+    default: break;
+  }
+}
+// What makes the game think that part's doing its thing.
+void doing(int hand, const char* path, uint8_t part, float amount, std::vector<Set>& out) {
+  if (isWay(part)) {
+    const int way = part - fhlive::LinkNorth;
+    if (Comp* c = compAt(hand, path, way == 1 || way == 3 ? "x" : "y")) out.push_back({c, way == 0 || way == 1 ? 1.f : -1.f});
+    if (Comp* c = compAt(hand, path, "touch")) out.push_back({c, 1.f});  // a thumb pushing a stick is on it
+    return;
+  }
+  std::vector<Comp*> comps;
+  reportsOf(hand, path, part, comps);
+  for (Comp* c : comps) out.push_back({c, part == fhlive::LinkValue ? amount : 1.f});
+}
 
 void stopPlaying(Playing& p) {
   for (Comp* c : p.held) letGo(c);
@@ -789,6 +851,18 @@ void standDown() {
     ch.held.clear();
     ch.on = false;
   }
+  for (Link& l : g_run.links) {
+    for (Comp* c : l.held) letGo(c);
+    l.held.clear();
+    l.on = false;
+    for (Comp* c : l.taken) {
+      c->mine = false;
+      if (c->holds == 0) {
+        c->flags.fetch_and(~kTaken, std::memory_order_acq_rel);
+        sendRaw(c, c->phys.load(std::memory_order_relaxed));
+      }
+    }
+  }
   for (Route& r : g_run.routes) {
     r.from->route.store(nullptr, std::memory_order_release);
     r.from->flags.fetch_and(~(kTaken | kRouted), std::memory_order_acq_rel);
@@ -814,6 +888,12 @@ void arm() {
     r.from->flags.fetch_or(kTaken | kRouted, std::memory_order_acq_rel);
     if (r.from->phys.load(std::memory_order_relaxed) != 0.f) sendRaw(r.from, 0.f);
   }
+  for (Link& l : g_run.links)
+    for (Comp* c : l.taken) {
+      c->mine = true;
+      takeOver(c);
+      if (c->phys.load(std::memory_order_relaxed) != 0.f) sendRaw(c, 0.f);
+    }
   g_armed = true;
 }
 
@@ -871,12 +951,67 @@ void compile(const fhlive::InputTable& t) {
     Chord ch;
     bool complete = w.count > 0;
     for (uint32_t k = 0; k < w.count && k < fhlive::kMaxChordInputs; ++k) {
-      Comp* s = sourceOf(w.in[k].hand, w.in[k].path, w.in[k].onTouch != 0);
-      if (!s) complete = false;
-      else ch.sources.push_back(s);
+      const uint8_t state = w.in[k].onTouch;
+      Probe p;
+      if (state >= fhlive::ChordNorth && state <= fhlive::ChordWest) p = wayProbe(w.in[k].hand, w.in[k].path, state - fhlive::ChordNorth);
+      else p.c = sourceOf(w.in[k].hand, w.in[k].path, state != 0);
+      if (!p.c) complete = false;
+      else ch.sources.push_back(p);
     }
     pressInto(w.targetHand, w.target, ch.set);
     if (complete && !ch.set.empty()) g_run.chords.push_back(std::move(ch));
+  }
+
+  // Links, gathered by the part they come from: several from one part all happen together.
+  const uint32_t links = std::min(t.links, fhlive::kMaxLinks);
+  bool done[fhlive::kMaxLinks] = {false};
+  for (uint32_t i = 0; i < links; ++i) {
+    if (done[i]) continue;
+    const fhlive::WireLink& w = t.link[i];
+    std::vector<const fhlive::WireLink*> group;
+    for (uint32_t k = i; k < links; ++k) {
+      const fhlive::WireLink& o = t.link[k];
+      if (!done[k] && o.fromHand == w.fromHand && o.fromPart == w.fromPart && !strncmp(o.from, w.from, sizeof o.from)) {
+        group.push_back(&o);
+        done[k] = true;
+      }
+    }
+    char from[sizeof w.from + 1] = {0};
+    memcpy(from, w.from, sizeof w.from);
+    std::vector<Comp*> own;
+    reportsOf(w.fromHand, from, w.fromPart, own);
+    // One report sent as another's of the same kind happens in the hook as it arrives, the way a swap does.
+    const fhlive::WireLink& g = *group[0];
+    char to[sizeof g.to + 1] = {0};
+    memcpy(to, g.to, sizeof g.to);
+    const bool nothing = g.toHand == fhlive::kNoHand;
+    const bool sameKind = group.size() == 1 && !isWay(w.fromPart) && (nothing || (g.toPart == w.fromPart && (g.toPart != fhlive::LinkValue || g.amount == 1.f)));
+    if (sameKind) {
+      if (w.fromPart == fhlive::LinkMove) {
+        for (const char* n : {"x", "y"})  // across to across and up to up
+          if (Comp* f = compAt(w.fromHand, from, n)) g_run.routes.push_back({f, nothing ? nullptr : compAt(g.toHand, to, n)});
+      } else {
+        std::vector<Comp*> theirs;
+        if (!nothing) reportsOf(g.toHand, to, g.toPart, theirs);
+        for (size_t k = 0; k < own.size(); ++k) g_run.routes.push_back({own[k], theirs.empty() ? nullptr : theirs[std::min(k, theirs.size() - 1)]});
+      }
+      continue;
+    }
+    if (w.fromPart == fhlive::LinkMove) continue;  // a whole stick's movement only goes onto another's
+    Link l;
+    if (isWay(w.fromPart)) l.test = wayProbe(w.fromHand, from, w.fromPart - fhlive::LinkNorth);
+    else {
+      l.test.c = own.empty() ? nullptr : own[0];
+      l.taken = own;
+    }
+    if (!l.test.c) continue;  // that controller isn't on yet
+    for (const fhlive::WireLink* o : group) {
+      if (o->toHand == fhlive::kNoHand) continue;
+      char there[sizeof o->to + 1] = {0};
+      memcpy(there, o->to, sizeof o->to);
+      doing(o->toHand, there, o->toPart, o->amount, l.set);
+    }
+    g_run.links.push_back(std::move(l));
   }
 }
 
@@ -937,7 +1072,7 @@ void tickInput() {
     g_seenSeq = read;
     g_seenComps = comps;
     compile(table);
-    logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size());
+    logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos, %zu links", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size(), g_run.links.size());
   }
 
   const bool wanted = in->enabled.load(std::memory_order_relaxed) != 0 && !recording;
@@ -963,9 +1098,23 @@ void tickInput() {
     if (m.repeat && pressed && !m.play.running && m.fresh) startPlaying(m.play, now + 50);
     m.was = pressed;
   }
+  for (Link& l : g_run.links) {
+    const bool on = probeOn(l.test, l.on);
+    if (on == l.on) continue;
+    l.on = on;
+    if (on) {
+      for (const Set& a : l.set) {
+        hold(a.c, a.v);
+        l.held.push_back(a.c);
+      }
+    } else {
+      for (Comp* c : l.held) letGo(c);
+      l.held.clear();
+    }
+  }
   for (Chord& ch2 : g_run.chords) {
     bool all = true;
-    for (Comp* s : ch2.sources) all = all && isActive(s, ch2.on);
+    for (const Probe& s : ch2.sources) all = all && probeOn(s, ch2.on);
     if (all == ch2.on) continue;
     ch2.on = all;
     if (all) {
@@ -993,17 +1142,21 @@ void startInput(vr::IVRDriverContext* ctx, fhlive::InputChannel* in) {
   in->evWrite.store(0, std::memory_order_relaxed);
   in->nowMs.store(0, std::memory_order_relaxed);
   fhlive::seqWriteBegin(in->tableSeq);
-  in->table.macros = in->table.routes = in->table.chords = 0;
+  in->table.macros = in->table.routes = in->table.chords = in->table.links = 0;
   fhlive::seqWriteEnd(in->tableSeq);
   g_in.store(in, std::memory_order_release);
   installInputHooks(ctx);
+  in->features.store(g_inputMain >= 0 ? fhlive::kFeatureLinks | fhlive::kFeatureWays : 0, std::memory_order_relaxed);
   if (g_inputMain >= 0) in->magic.store(fhlive::kInputMagic, std::memory_order_release);
 }
 
 void stopInput() {
   standDown();
   g_recording.store(false, std::memory_order_relaxed);
-  if (fhlive::InputChannel* in = g_in.load(std::memory_order_relaxed)) in->magic.store(0, std::memory_order_release);
+  if (fhlive::InputChannel* in = g_in.load(std::memory_order_relaxed)) {
+    in->magic.store(0, std::memory_order_release);
+    in->features.store(0, std::memory_order_relaxed);
+  }
   removeInputHooks();
   g_in.store(nullptr, std::memory_order_release);
   g_run = Compiled{};
