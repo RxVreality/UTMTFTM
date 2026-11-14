@@ -508,6 +508,88 @@ int main() {
   }
   ch.wantTrue.store(0);
 
+  // H2. Placing with the driver moving the held hand itself (J4, 14 November: over Virtual Desktop the overlay could only
+  // send a new offset about 18 times a second, and placing lagged badly). Here the overlay sends nothing at all while the
+  // hand's held: the game's grip has to stay on the grabbing hand anyway, the grab mustn't make it jump, and letting go has
+  // to leave it exactly where the driver had it.
+  {
+    CHECK(shm->drag.magic.load() == fhlive::kDragMagic, "the overlay can see this driver moves a held hand itself");
+    Rigid world{randQ(), {U(-1, 1), U(-1, 1), U(-1, 1)}}, head{randQ(), {U(-0.05, 0.05), U(-0.05, 0.05), U(-0.05, 0.05)}};
+    Rigid gripL{axisTurn(1, 0, 0, 2.81), {-0.0031, -0.0043, 0.0995}}, gripR{axisTurn(1, 0, 0, 2.81), {0.0031, -0.0043, 0.0995}};
+    Rigid fit0{randQ(), {0.2, 1.1, -0.3}}, grabber0{randQ(), {-0.2, 1.15, -0.3}};
+    const Rigid start = asRigid(randOffset());  // the hand already has an offset when it's taken
+    const fhlive::DeviceOffset startDev = asOffset(compose(compose(gripL, start), inverse(gripL)));
+    publish(ch, 3, 4, startDev, kNone);
+    vr::DriverPose_t gr = reportFor(grabber0, world, head), fr = reportFor(fit0, world, head);
+    api->TrackedDevicePoseUpdated(4, gr, sizeof gr);
+    api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+    const Rigid before = compose(devicePose(host.pose()), gripL);
+    // The overlay grabs it: which hand, by which, and the offset it has now. Then it goes quiet.
+    fhlive::seqWriteBegin(shm->drag.seq);
+    shm->drag.held = 0;
+    shm->drag.by = 1;
+    shm->drag.start = startDev;
+    shm->drag.active = 1;
+    fhlive::seqWriteEnd(shm->drag.seq);
+    const uint64_t moved0 = shm->drag.moved.load();
+    Rigid taken{}, gameGrip{}, target{};
+    double worstMetres = 0, worstDegrees = 0;
+    const int moves = 400;
+    for (int step = 0; step <= moves; ++step) {
+      const double a = step / double(moves), w = a * (1 - a) * 4;
+      const Rigid fit = compose(fit0, Rigid{axisTurn(0, 1, 0, 8 * std::sin(a * 9)), {0.03 * std::sin(a * 7), 0, 0.02 * a}});
+      const Rigid grabber = compose(grabber0, Rigid{axisTurn(1, 0.4, -0.2, 70 * a + 10 * w), {0.25 * a + 0.05 * w, -0.12 * a, 0.2 * a}});
+      gr = reportFor(grabber, world, head);
+      fr = reportFor(fit, world, head);
+      api->TrackedDevicePoseUpdated(4, gr, sizeof gr);
+      api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+      gameGrip = compose(devicePose(host.pose()), gripL);
+      const Rigid grabGrip = compose(devicePose(gr), gripR);
+      if (step == 0) {
+        CHECK(gapMetres(gameGrip, before) < 1e-4 && gapDegrees(gameGrip, before) < 0.05, "taking hold doesn't move the hand (%.3f mm)", gapMetres(gameGrip, before) * 1000);
+        taken = compose(inverse(grabGrip), gameGrip);
+        continue;
+      }
+      target = compose(grabGrip, taken);
+      worstMetres = std::max(worstMetres, gapMetres(gameGrip, target));
+      worstDegrees = std::max(worstDegrees, gapDegrees(gameGrip, target));
+    }
+    printf("placing by the driver, with the overlay silent: %.3f mm and %.3f deg from the grabbing hand at worst\n", worstMetres * 1000, worstDegrees);
+    CHECK(worstMetres < 0.0005 && worstDegrees < 0.1, "the held hand stays on the grabbing hand on every pose (%.3f mm, %.3f deg)", worstMetres * 1000, worstDegrees);
+    CHECK(shm->drag.moved.load() - moved0 >= uint64_t(moves), "and the driver says it moved it (%llu poses)", (unsigned long long)(shm->drag.moved.load() - moved0));
+    // Streamed, a report is already old when it comes, and SteamVR moves it along by its controller's speed. The held hand
+    // carries the holding hand's speed and age, so SteamVR moves the two together.
+    {
+      vr::DriverPose_t moving = gr;
+      moving.vecVelocity[0] = 0.4; moving.vecVelocity[1] = -0.2; moving.vecVelocity[2] = 0.1;
+      moving.vecAngularVelocity[1] = 1.5;
+      moving.poseTimeOffset = -0.08;
+      api->TrackedDevicePoseUpdated(4, moving, sizeof moving);
+      api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+      const vr::DriverPose_t& seen = host.pose();
+      CHECK(seen.vecVelocity[0] == 0.4 && seen.vecVelocity[1] == -0.2 && seen.vecAngularVelocity[1] == 1.5 && seen.poseTimeOffset == -0.08,
+            "the held hand moves with the holding hand's speed and age, so SteamVR predicts them together");
+      CHECK(gapMetres(compose(devicePose(seen), gripL), compose(compose(devicePose(moving), gripR), taken)) < 1e-4, "and it's still where it's held");
+      api->TrackedDevicePoseUpdated(4, gr, sizeof gr);
+      api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+    }
+    // Letting go: the overlay keeps the offset the driver last applied, then ends the hold.
+    fhlive::DeviceOffset kept = ch.applied[0];
+    publish(ch, 3, 4, kept, kNone);
+    fhlive::seqWriteBegin(shm->drag.seq);
+    shm->drag.active = 0;
+    fhlive::seqWriteEnd(shm->drag.seq);
+    api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+    const Rigid after = compose(devicePose(host.pose()), gripL);
+    CHECK(gapMetres(after, gameGrip) < 1e-4 && gapDegrees(after, gameGrip) < 0.05, "letting go leaves it where it was (%.3f mm)", gapMetres(after, gameGrip) * 1000);
+    // A hold that's ended, or never started, moves nothing.
+    gr = reportFor(compose(grabber0, Rigid{axisTurn(0, 0, 1, 30), {0.1, 0.1, 0.1}}), world, head);
+    api->TrackedDevicePoseUpdated(4, gr, sizeof gr);
+    api->TrackedDevicePoseUpdated(3, fr, sizeof fr);
+    CHECK(gapMetres(compose(devicePose(host.pose()), gripL), after) < 1e-4, "once let go, the other hand moving doesn't move it");
+    publish(ch, 3, 4, kNone, kNone);
+  }
+
   // I. Never a torn report while the driver writes flat out.
   {
     ch.wantTrue.store(1);

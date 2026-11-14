@@ -100,6 +100,11 @@ struct Store {
   static uint64_t driverPoseUpdates();  // the driver's running count of poses it has seen
   static uint64_t driverHandUpdates();  // how many of those were from the two hands
   static M appliedDeviceOffset(int hand);  // what the driver has put in the poses being reported now
+  // Placing a hand (live.h, DragChannel): the driver moves the held hand itself, from the holding hand, on every pose.
+  static bool dragReady();                                       // the driver that's loaded can
+  static void startDrag(int held, int by, const M& startOffset);  // startOffset: the held hand's device offset now
+  static void endDrag();
+  static uint64_t dragMoved();                                   // poses it has moved that way
   static void askTruePoses(bool on);  // while placing, have the driver report where the controllers really are
   static bool driverTruePose(int hand, M* out);  // that report, in SteamVR's raw tracking space. False until there is one
 

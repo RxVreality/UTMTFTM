@@ -195,6 +195,8 @@ struct App {
   bool startMatched[2] = {false, false}, workMatched[2] = {false, false};
   bool anyPlace = false, anyMatch = false;
   bool held = false, movedOnce = false;
+  bool dragByDriver = false;  // the driver is moving the held hand itself (Store::startDrag)
+  uint64_t dragMoved0 = 0;
   M taken = ident();
   bool animating = false;
   Offset animFrom, animTo;
@@ -679,8 +681,9 @@ struct App {
     if (s <= 0 || drag.loops < 2) return;
     const uint64_t poses = Store::driverHandUpdates() - drag.poses0;
     logf("while held, %.1f s: %d updates (%.0f a second, longest gap %.0f ms); the hand was drawn %.1f cm from where it was held on average, %.1f cm at worst; "
-         "the controllers reported %.0f poses a second between them; drawing the bubble took %.1f ms a frame",
-         s, drag.loops, drag.loops / s, drag.worstGapMs, drag.trailSum / (drag.loops - 1), drag.trailMax, poses / s, renderN ? renderMs / renderN : 0.0);
+         "the controllers reported %.0f poses a second between them; drawing the bubble took %.1f ms a frame; the driver moved it itself on %llu poses",
+         s, drag.loops, drag.loops / s, drag.worstGapMs, drag.trailSum / (drag.loops - 1), drag.trailMax, poses / s, renderN ? renderMs / renderN : 0.0,
+         (unsigned long long)(Store::dragMoved() - dragMoved0));
   }
 
   void logPlacing(const char* what) {
@@ -1176,6 +1179,7 @@ struct App {
 
   void finishSession(bool save) {
     vr::VROverlay()->HideOverlay(ghost);
+    if (dragByDriver) { Store::endDrag(); dragByDriver = false; }
     mode = Mode::Idle;
     dashForce = true;
     in.release();
@@ -1218,6 +1222,8 @@ struct App {
       mode = Mode::Placing;
       startStep();
     }
+    // The driver only moves a hand while it's really held, in a placing session.
+    if (dragByDriver && !(mode == Mode::Placing && held)) { Store::endDrag(); dragByDriver = false; }
     if (mode != Mode::Placing) return;
     int f = fit(), o = other();
     bool match = step().match;
@@ -1241,6 +1247,15 @@ struct App {
     if (held) {
       if (!Ot.grab) {  // let go: it stays; past the distance limit it's pulled back (rotation is never limited)
         held = false; movedOnce = true;
+        if (dragByDriver) {
+          // Where the driver left it, exactly, as the offset to keep: grip' = grip * O and grip = raw * C, so O = C^-1 * device * C.
+          const M C = store.gripFromRaw[f];
+          const Offset there = toOffset(mul(mul(inv(C), Store::appliedDeviceOffset(f)), C));
+          if (finite(there) && posLen(there) < kLostHand) cur() = there;
+          store.publishLive(&work);
+          Store::endDrag();
+          dragByDriver = false;
+        }
         logPlacing("let go of");
         logDrag();
         if (!match && beyond(cur(), store.max_pos, store.max_rot)) {
@@ -1287,6 +1302,12 @@ struct App {
         drag = DragStats{};
         drag.start = drag.last = Clock::now();
         drag.poses0 = Store::driverHandUpdates();
+        // The driver moves it from here on, on every pose, whatever this program's drawing is doing.
+        if (live && driverOn && !match && Store::dragReady()) {
+          Store::startDrag(f, o, Store::appliedDeviceOffset(f));
+          dragByDriver = true;
+          dragMoved0 = Store::dragMoved();
+        }
         taken = mul(inv(Ot.grip), W);
         in.buzz(o, 0.5f);
         logPlacing("grabbed");
@@ -1600,6 +1621,7 @@ struct App {
       platform::sleepMs(busy ? 11 : 100);  // in the background (dashboard shut, not placing): 10 wakeups/s
     }
     // closing: leave the game exactly as saved
+    Store::endDrag();
     vr::VROverlay()->HideOverlay(ghost);
     vr::VROverlay()->HideOverlay(hint);
     Store::stopRecording();

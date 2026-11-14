@@ -86,8 +86,36 @@ static void testHandSkin() {
   if (gap > 0.022f) CHECK(f((j[10] + j[15]) * 0.5f) > 0, "fingers must not melt together (tips %.1f mm apart)", gap * 1000);
 }
 
+// How long one frame of the bubble takes to draw, the way the program draws it while a hand's being placed: the two dots,
+// the tether and the glass sphere, for both eyes. J4, 14 November: with a 30 cm limit his log said 43.6 ms a frame with
+// the upload, and placing lagged badly. Time is the drawing alone, no upload.
+static void timeBubble() {
+  GhostRenderer g{432, 432};
+  const Mesh anchor = buildSphere(0.012f, 8, 12), centre = buildSphere(0.007f, 6, 10);
+  const V3 eyes[2] = {{-0.032f, 1.6f, 0}, {0.032f, 1.6f, 0}};
+  for (float r : {0.15f, 0.30f}) {
+    const Mesh bubble = buildSphere(r);
+    const V3 c{0.2f, 1.2f, -0.4f}, a{0.25f, 1.25f, -0.45f};
+    const V3 N = norm((eyes[0] + eyes[1]) * 0.5f - c), up{0, 1, 0};
+    const V3 X = norm(cross(up, N)), Y = cross(N, X);
+    const GhostRenderer::Plane pl{c, X, Y, N, bubblePlaneSize(r)};
+    const int frames = 120;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < frames; ++i) {
+      g.clear();
+      g.drawMesh(centre, translate(c.x, c.y, c.z), pl, eyes, 2, 1.6f);
+      g.drawMesh(anchor, translate(a.x, a.y, a.z), pl, eyes, 2, 3.0f);
+      g.drawTether(pl, eyes, 2, c, a, 0.6f);
+      g.drawMesh(bubble, translate(c.x, c.y, c.z), pl, eyes, 2, 0.85f, true);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / frames;
+    printf("bubble at %.0f cm: %.2f ms a frame to draw\n", r * 100, ms);
+  }
+}
+
 int main() {
   testHandSkin();
+  timeBubble();
 
   // 1. Any orientation survives the offset round trip (incl. gimbal-ish pitch near +-90).
   for (int i = 0; i < 5000; ++i) {

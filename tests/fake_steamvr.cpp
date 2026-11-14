@@ -93,6 +93,9 @@ struct World {
 } g;
 
 std::atomic<int> g_dashUploads{0}, g_otherUploads{0}, g_rawUploads{0}, g_savedShots{0};
+// How long handing SteamVR an image other than the dashboard takes. J4's log over Virtual Desktop: 43.6 ms a frame for the
+// bubble, against about 7 to draw it, so most of it was the handover.
+std::atomic<int> g_slowHandoverMs{0};
 std::atomic<bool> g_manifestRead{false};
 std::thread g_scenario;
 std::string g_scenarioName;
@@ -320,6 +323,7 @@ void saveTexture(const vr::VRVulkanTextureData_t& t, const std::string& name) {
 }
 
 vr::EVROverlayError ovTexture(void*, vr::VROverlayHandle_t h, const vr::Texture_t* tex) {
+  if (h != kOverlayDash && g_slowHandoverMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(g_slowHandoverMs.load()));
   if (tex->eType != vr::TextureType_Vulkan) {
     ++g_failures;
     say("FAIL a texture that isn't Vulkan");
@@ -816,6 +820,7 @@ void scenarioPlace() {
   // controller's report is 80 ms old and SteamVR predicts it forward, so measure where the game draws both hands: the
   // dragged one should stay with the one dragging it. A quarter of a metre a second, a quick but ordinary drag.
   fakeserver::setStreamDelay(0.08);
+  g_slowHandoverMs = 40;  // and the bubble's image takes 40 ms to hand over, as J4's did, so the program only gets round ~20 times a second
   const double d[3] = {0.05, 0.03, -0.02};
   Pose right = kRightStart;
   Pose wanted = kLeftStart;
@@ -838,6 +843,7 @@ void scenarioPlace() {
   fakeserver::setDevicePose(kRight, right);
   wait(300);
   fakeserver::setStreamDelay(0);
+  g_slowHandoverMs = 0;
   say("while dragging, as the game draws it, the left hand trailed by %.1f mm on average and %.1f mm at worst (it was about 25 mm before)",
       samples ? sum / samples * 1000 : 0.0, worstWhileMoving * 1000);
   check(worstWhileMoving < 0.012, "the hand being dragged stays with the hand dragging it, as the game draws them (mm)", worstWhileMoving * 1000);

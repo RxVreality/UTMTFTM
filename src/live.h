@@ -165,12 +165,31 @@ struct DecafChannel {
 // with zeros: off.
 constexpr size_t kDecafAt = 64 * 1024;
 
+// ---------------------------------------------------------------- placing a hand
+// While one hand drags the other's in-game hand, the driver moves the held one itself, on each of its own poses, from where
+// the holding hand is right then. Nothing waits on the overlay, whose drawing took 40 ms a frame over Virtual Desktop and
+// made placing lag (J4, 14 November). The overlay still works the offset out for itself, to show and to save.
+constexpr uint32_t kDragMagic = 0x31475244;  // "DRG1": the driver that's loaded can do this
+
+struct DragChannel {
+  std::atomic<uint32_t> magic;  // the driver writes this
+  std::atomic<uint32_t> seq;    // the overlay writes the next four. Seqlock
+  uint32_t active;              // 1 while a hand is held. All zeros, as in a new file: nothing is
+  uint32_t held, by;            // the hand being placed and the hand holding it: 0 left, 1 right
+  DeviceOffset start;           // the held hand's device offset when it was grabbed. On its first pose after that, the driver
+                                // works out where it sits in the holding hand's frame, and keeps it there
+  std::atomic<uint64_t> moved;  // the driver writes: poses it has moved this way. A moving count means it's doing it
+};
+constexpr size_t kDragAt = kDecafAt + 256;
+
 struct Shared {
   DriverChannel driver;
   // After driver, so an older driver that's still loaded never sees it. Its magic says whether this one is really there.
   InputChannel input;
   unsigned char room[kDecafAt - sizeof(DriverChannel) - sizeof(InputChannel)];  // for input to grow into. Nothing reads it
   DecafChannel decaf;
+  unsigned char room2[kDragAt - kDecafAt - sizeof(DecafChannel)];  // for Decaffeinate to grow into
+  DragChannel drag;
 };
 
 // Two programs read this file, and a torn or misaligned atomic faults on ARM rather than just misbehaving.
@@ -179,6 +198,8 @@ static_assert(sizeof(DeviceOffset) == 28 && offsetof(DriverChannel, poseUpdates)
 static_assert(sizeof(InputEvent) == 48 && sizeof(WireStep) == 32 && sizeof(WireRoute) == 56 && sizeof(WireChord) == 140 && alignof(InputChannel) == 8, "the file layout changed");
 static_assert(sizeof(DecafSettings) == 20 && offsetof(DecafChannel, measure) == 48 && offsetof(DecafChannel, smoothed) == 88 && sizeof(DecafChannel) == 104 &&
               offsetof(Shared, input) == sizeof(DriverChannel) && offsetof(Shared, decaf) == kDecafAt, "the file layout changed");
+static_assert(offsetof(DragChannel, start) == 20 && offsetof(DragChannel, moved) == 48 && sizeof(DragChannel) == 56 && offsetof(Shared, drag) == kDragAt,
+              "the file layout changed");
 static_assert(sizeof(WireLink) == 56 && offsetof(InputTable, link) == 16 + sizeof(WireMacro) * kMaxMacros + sizeof(WireRoute) * kMaxRoutes + sizeof(WireChord) * kMaxChords, "links go after everything that was there before");
 static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "features sits where a plain number was");
 

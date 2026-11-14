@@ -455,6 +455,38 @@ M Store::appliedDeviceOffset(int hand) {
   return ident();
 }
 
+bool Store::dragReady() {
+  fhlive::Shared* m = platform::mapLive();
+  return m && m->drag.magic.load(std::memory_order_acquire) == fhlive::kDragMagic;
+}
+
+void Store::startDrag(int held, int by, const M& startOffset) {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m) return;
+  fhlive::DeviceOffset o;
+  for (int i = 0; i < 3; ++i) o.pos[i] = startOffset.m[i][3];
+  toQuat(startOffset, o.rot);
+  fhlive::seqWriteBegin(m->drag.seq);
+  m->drag.held = uint32_t(held);
+  m->drag.by = uint32_t(by);
+  m->drag.start = o;
+  m->drag.active = 1;
+  fhlive::seqWriteEnd(m->drag.seq);
+}
+
+void Store::endDrag() {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m || !m->drag.active) return;
+  fhlive::seqWriteBegin(m->drag.seq);
+  m->drag.active = 0;
+  fhlive::seqWriteEnd(m->drag.seq);
+}
+
+uint64_t Store::dragMoved() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->drag.moved.load(std::memory_order_relaxed) : 0;
+}
+
 void Store::askTruePoses(bool on) {
   fhlive::Shared* m = platform::mapLive();
   if (m) m->driver.wantTrue.store(on ? 1 : 0, std::memory_order_relaxed);

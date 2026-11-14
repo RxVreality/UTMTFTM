@@ -230,6 +230,105 @@ void qrot(const vr::HmdQuaternion_t& q, const double v[3], double out[3]) {
   out[2] = v[2] + 2 * (q.w * cz + q.x * cy - q.y * cx);
 }
 
+// ---------------------------------------------------------------- placing a hand (live.h, DragChannel)
+// A rigid transform in doubles: rotation w x y z, then translation.
+struct Rig {
+  vr::HmdQuaternion_t q{1, 0, 0, 0};
+  double t[3] = {0, 0, 0};
+};
+Rig compose(const Rig& a, const Rig& b) {
+  Rig r;
+  r.q = qmul(a.q, b.q);
+  qrot(a.q, b.t, r.t);
+  for (int i = 0; i < 3; ++i) r.t[i] += a.t[i];
+  return r;
+}
+Rig inverse(const Rig& a) {
+  Rig r;
+  r.q = {a.q.w, -a.q.x, -a.q.y, -a.q.z};
+  qrot(r.q, a.t, r.t);
+  for (double& x : r.t) x = -x;
+  return r;
+}
+// The controller itself, in SteamVR's raw tracking space, before any offset: world * pose * driverFromHead.
+Rig trueOf(const vr::DriverPose_t& p) {
+  Rig world, pose, head;
+  world.q = p.qWorldFromDriverRotation;
+  pose.q = p.qRotation;
+  head.q = p.qDriverFromHeadRotation;
+  for (int i = 0; i < 3; ++i) {
+    world.t[i] = p.vecWorldFromDriverTranslation[i];
+    pose.t[i] = p.vecPosition[i];
+    head.t[i] = p.vecDriverFromHeadTranslation[i];
+  }
+  return compose(compose(world, pose), head);
+}
+fhlive::DeviceOffset offsetOf(const Rig& r) {
+  fhlive::DeviceOffset o;
+  for (int i = 0; i < 3; ++i) o.pos[i] = float(r.t[i]);
+  o.rot[0] = float(r.q.x); o.rot[1] = float(r.q.y); o.rot[2] = float(r.q.z); o.rot[3] = float(r.q.w);
+  return o;
+}
+Rig rigOf(const fhlive::DeviceOffset& o) {
+  Rig r;
+  r.q = {o.rot[3], o.rot[0], o.rot[1], o.rot[2]};
+  for (int i = 0; i < 3; ++i) r.t[i] = o.pos[i];
+  return r;
+}
+
+std::atomic<fhlive::DragChannel*> g_drag{nullptr};
+struct DragCache {
+  uint32_t seq = 1;  // odd: never matches
+  bool active = false;
+  int held = -1, by = -1;
+  Rig start;          // the held hand's offset when it was grabbed
+  bool haveK = false;
+  Rig k;              // held true * offset = holder true * k, fixed on the held hand's first pose after the grab
+};
+thread_local DragCache t_drag;
+void refreshDrag(fhlive::DragChannel* ch, DragCache& c) {
+  for (int tries = 0; tries < 8; ++tries) {
+    const uint32_t s0 = ch->seq.load(std::memory_order_acquire);
+    if (s0 & 1) { spinPause(); continue; }
+    const uint32_t active = ch->active, held = ch->held, by = ch->by;
+    fhlive::DeviceOffset start = ch->start;
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (ch->seq.load(std::memory_order_acquire) != s0) continue;
+    c.seq = s0;
+    c.active = active == 1 && held < 2 && by < 2 && held != by && usable(start);
+    c.held = c.active ? int(held) : -1;
+    c.by = c.active ? int(by) : -1;
+    c.start = rigOf(start);
+    c.haveK = false;
+    return;
+  }
+}
+// Each hand's latest report while a hand is held, smoothed if Decaffeinate's on but before any offset, for the other to ride on.
+struct Latest {
+  std::atomic_flag busy = ATOMIC_FLAG_INIT;
+  vr::DriverPose_t pose{};
+  uint64_t at = 0;  // steady clock, microseconds. 0: none yet
+};
+Latest g_latest[2];
+uint64_t nowUs() {
+  return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+void keepLatest(int hand, const vr::DriverPose_t& p) {
+  Latest& l = g_latest[hand];
+  if (l.busy.test_and_set(std::memory_order_acquire)) return;
+  l.pose = p;
+  l.at = nowUs();
+  l.busy.clear(std::memory_order_release);
+}
+bool latestOf(int hand, vr::DriverPose_t& out) {
+  Latest& l = g_latest[hand];
+  if (l.busy.test_and_set(std::memory_order_acquire)) return false;
+  const bool fresh = l.at && nowUs() - l.at < 100000;  // a holding hand that's gone quiet for 0.1 s isn't followed
+  if (fresh) out = l.pose;
+  l.busy.clear(std::memory_order_release);
+  return fresh;
+}
+
 // device' = world * pose * driverFromHead * offset. Only the last transform changes, so SteamVR's prediction
 // and velocities keep working as if the controller were simply built with the hand in that place.
 void applyOffset(vr::DriverPose_t& p, const fhlive::DeviceOffset& o) {
@@ -376,12 +475,54 @@ void onPose(PoseFn next, void* self, uint32_t which, const vr::DriverPose_t& pos
     measure = dc->measure.load(std::memory_order_relaxed) != 0;
     smooth = d.p[hand].on();
   }
-  if (hand >= 0 && known && size <= kMaxPose && (c.on[hand] || smooth || measure)) {
+  // Placing a hand: the held one follows the holding one here, on every pose (DragChannel).
+  fhlive::DragChannel* dg = g_drag.load(std::memory_order_relaxed);
+  bool dragging = false;
+  if (dg && hand >= 0) {
+    DragCache& g = t_drag;
+    if (dg->seq.load(std::memory_order_acquire) != g.seq) refreshDrag(dg, g);
+    dragging = g.active && pose.poseIsValid;
+  }
+  if (hand >= 0 && known && size <= kMaxPose && (c.on[hand] || smooth || measure || dragging)) {
     memcpy(copy, &pose, size);
     vr::DriverPose_t& moved = *reinterpret_cast<vr::DriverPose_t*>(copy);
     bool changed = false;
     if (smooth || measure) changed = smoothHand(dc, hand, which, t_decaf.p[hand], measure, moved);
-    if (c.on[hand]) { applyOffset(moved, c.o[hand]); changed = true; }
+    bool followed = false;
+    if (dragging) {
+      DragCache& g = t_drag;
+      keepLatest(hand, moved);
+      vr::DriverPose_t hp;
+      if (hand == g.held && latestOf(g.by, hp) && hp.poseIsValid) {
+        const Rig me = trueOf(moved), holder = trueOf(hp);
+        // held true * offset = holder true * k. Fixed from the offset it had when grabbed, so nothing jumps.
+        if (!g.haveK) {
+          g.k = compose(compose(inverse(holder), me), g.start);
+          g.haveK = true;
+        }
+        fhlive::DeviceOffset o = offsetOf(compose(compose(inverse(me), holder), g.k));
+        if (usable(o)) {
+          // The held hand rides on the holding one: the holder's own pose, speed and age, with k after its driverFromHead.
+          // SteamVR then predicts the two together. A streamed pose is already old when it arrives (Virtual Desktop), and
+          // predicted with its own controller's speed, which is nothing while it's held still, it would trail the holder.
+          Rig head;
+          head.q = hp.qDriverFromHeadRotation;
+          for (int i = 0; i < 3; ++i) head.t[i] = hp.vecDriverFromHeadTranslation[i];
+          const Rig rideHead = compose(head, g.k);
+          const vr::ETrackingResult result = moved.result;
+          memcpy(&moved, &hp, sizeof(vr::DriverPose_t));  // anything a newer SDK put after it stays the held hand's own
+          moved.qDriverFromHeadRotation = rideHead.q;
+          for (int i = 0; i < 3; ++i) moved.vecDriverFromHeadTranslation[i] = rideHead.t[i];
+          moved.result = result;
+          changed = followed = true;
+          fhlive::DeviceOffset now[2] = {c.o[0], c.o[1]};
+          now[hand] = o;
+          publishApplied(ch, now);
+          dg->moved.store(dg->moved.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+        }
+      }
+    }
+    if (!followed && c.on[hand]) { applyOffset(moved, c.o[hand]); changed = true; }
     if (changed) out = &moved;
   }
   // Switched off and on again later, a filter starts from where the hand is then: the gap since its last pose is too long to glide over.
@@ -1217,16 +1358,24 @@ class Provider : public vr::IServerTrackedDeviceProvider {
     // Decaffeinate's settings stay from last time, like the offsets: they only act once the overlay says which devices are the hands.
     for (int h = 0; h < 2; ++h) shm->decaf.smoothed[h].store(0, std::memory_order_relaxed);
     g_dc.store(&shm->decaf, std::memory_order_release);
+    // A hand left held from before, by an overlay that's gone, mustn't follow anything now.
+    fhlive::seqWriteBegin(shm->drag.seq);
+    shm->drag.active = 0;
+    fhlive::seqWriteEnd(shm->drag.seq);
+    g_drag.store(&shm->drag, std::memory_order_release);
     installHooks(ctx);
     startInput(ctx, &shm->input);
     shm->decaf.magic.store(fhlive::kDecafMagic, std::memory_order_release);
+    shm->drag.magic.store(fhlive::kDragMagic, std::memory_order_release);
     logf("loaded");
     return vr::VRInitError_None;
   }
   void Cleanup() override {
     stopInput();
     if (fhlive::DecafChannel* dc = g_dc.load(std::memory_order_relaxed)) dc->magic.store(0, std::memory_order_release);
+    if (fhlive::DragChannel* dg = g_drag.load(std::memory_order_relaxed)) dg->magic.store(0, std::memory_order_release);
     removeHooks();
+    g_drag.store(nullptr, std::memory_order_release);
     g_dc.store(nullptr, std::memory_order_release);
     closeShared();
     VR_CLEANUP_SERVER_DRIVER_CONTEXT();
