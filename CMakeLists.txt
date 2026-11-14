@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
-project(utmtftm VERSION 0.6.0 LANGUAGES CXX)
+project(utmtftm VERSION 0.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist)
+# The program knows its own version, so it can tell when GitHub has a newer one (src/update.h).
+add_compile_definitions(UTMTFTM_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
@@ -81,8 +83,8 @@ if(NOT WIN32)
   target_link_options(driver_utmtftm PRIVATE -Wl,-z,defs -Wl,--exclude-libs,ALL)
 endif()
 
-add_executable(utmtftm src/main.cpp src/store.cpp src/bindings.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
-target_link_libraries(utmtftm PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS})
+add_executable(utmtftm src/main.cpp src/store.cpp src/bindings.cpp src/update.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
+target_link_libraries(utmtftm PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS} ${THREAD_LIBS})
 add_custom_command(TARGET utmtftm POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/input ${CMAKE_SOURCE_DIR}/dist/input
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/driver ${CMAKE_SOURCE_DIR}/dist/driver
@@ -111,6 +113,10 @@ add_dependencies(utmtftm driver_utmtftm)
 add_executable(test_ghost tests/test_ghost.cpp)
 
 add_executable(test_macro tests/test_macro.cpp)
+
+# The updater: versions, what GitHub says, the checksum, and a whole check and install against a pretend GitHub.
+add_executable(test_update tests/test_update.cpp src/update.cpp ${PLATFORM_SRC})
+target_link_libraries(test_update PRIVATE ${JSON_LIBS} ${THREAD_LIBS})
 
 # Decaffeinate's filter on made-up hands: how much shake it takes out and how late it makes a moving hand.
 add_executable(test_decaf tests/test_decaf.cpp)

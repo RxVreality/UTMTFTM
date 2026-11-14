@@ -116,6 +116,66 @@ int main(int argc, char** argv) {
       CHECK(inBounds(b, cv));
       CHECK(decafKey(pointing) != decafKey(m));
 
+      // ---- a newer version: the two places J4 picks between, and the Update page (14 November)
+      {
+        DashModel hands;
+        hands.game = "Pavlov";
+        hands.live = LiveState::Live;
+        for (int spot = 0; spot < 2; ++spot) {
+          g_updateSpot = spot;
+          for (int needed = 0; needed < 2; ++needed) {
+            setUpdateNote({needed ? UpdateNote::Needed : UpdateNote::Ready, "0.6.2"});
+            std::vector<Button> hb;
+            drawDashboard(cv, hands, hb);
+            cv.savePNG(out + "/update_spot" + std::to_string(spot) + (needed ? "_needed" : "_ready") + ".png");
+            CHECK(inBounds(hb, cv) && has(hb, "update_open"));
+          }
+        }
+        g_updateSpot = 0;
+        setUpdateNote({UpdateNote::Ready, "0.6.2"});
+        UpdateModel u;
+        u.game = "Pavlov";
+        u.live = LiveState::Live;
+        u.current = "0.6.1";
+        u.latest = "0.6.2";
+        u.summary = "Fixes from MMeNDtal's testing on PC VR: the D-pad's left and right, the Guided button hiding Focus 3, a stick pushed one way set to nothing, and where a new macro takes you. The Decaf tab says why the hand pointing at it isn't steadied, and it has a slider for how strong each step is.";
+        std::vector<Button> ub;
+        drawUpdate(cv, u, ub);
+        cv.savePNG(out + "/update_page_ready.png");
+        CHECK(inBounds(ub, cv) && has(ub, "update_go") && has(ub, "update_close"));
+        UpdateModel need = u;
+        need.needed = true;
+        need.why = "SteamVR's last update changed how bindings reload. Live changes need 0.6.2.";
+        drawUpdate(cv, need, ub);
+        cv.savePNG(out + "/update_page_needed.png");
+        UpdateModel busy = u;
+        busy.step = UpdateModel::Downloading;
+        drawUpdate(cv, busy, ub);
+        cv.savePNG(out + "/update_page_downloading.png");
+        UpdateModel failed = u;
+        failed.error = "The download didn't match what GitHub lists, so it wasn't installed. Try again.";
+        drawUpdate(cv, failed, ub);
+        cv.savePNG(out + "/update_page_failed.png");
+        UpdateModel done = u;
+        done.step = UpdateModel::Installed;
+        setUpdateNote({UpdateNote::Installed, "0.6.2"});
+        drawUpdate(cv, done, ub);
+        cv.savePNG(out + "/update_page_installed.png");
+        CHECK(updateKey(done) != updateKey(u));
+        setUpdateNote({});
+      }
+
+      {
+        // DRAFT for J4: the strength row, at 50% of Tuned.
+        DecafModel strong = m;
+        strong.level = 1;
+        strong.strength = 50;
+        std::vector<Button> sb;
+        drawDecaf(cv, strong, sb);
+        cv.savePNG(out + "/decaf_strength_draft.png");
+        CHECK(inBounds(sb, cv) && has(sb, "decaf_strength_50"));
+      }
+
       DecafModel offM = m;
       offM.level = 0;
       offM.hands[1] = {};

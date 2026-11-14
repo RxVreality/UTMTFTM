@@ -7,6 +7,7 @@ cmake --build build
 [ "${1:-}" = notest ] && exit 0
 dist/test_ghost
 dist/test_macro
+dist/test_update
 mkdir -p build/decaf
 dist/test_decaf build/decaf
 dist/test_session

@@ -1,6 +1,8 @@
 #!/bin/sh
 # Installs UTMTFTM on a Steam Frame, in your home folder. No sudo. Run it from the unpacked folder.
 # It finishes by restarting SteamVR, which is what loads the add-on, unless you add --no-restart.
+# --update: started by UTMTFTM's own Update button. The running copy keeps going and SteamVR isn't restarted: the new
+# files go in beside the old ones, and SteamVR uses them from its next start.
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -8,7 +10,9 @@ APP=$HOME/.local/share/UTMTFTM/app
 LAUNCHER=$HOME/.local/share/applications/utmtftm.desktop
 STEAMVR=${UTMTFTM_STEAMVR:-/opt/steamvr}
 RESTART=1
+UPDATE=0
 [ "${1:-}" = --no-restart ] && RESTART=0
+[ "${1:-}" = --update ] && RESTART=0 && UPDATE=1
 
 die() {
   echo "$1" >&2
@@ -22,13 +26,15 @@ die() {
 # Desktop Mode's terminal points this at a nested folder where systemctl --user can't find systemd.
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 
-# Save and close a running copy before replacing it.
-pkill -x utmtftm 2>/dev/null || true
-tries=0
-while pgrep -x utmtftm >/dev/null 2>&1 && [ "$tries" -lt 30 ]; do
-  sleep 0.1
-  tries=$((tries + 1))
-done
+# Save and close a running copy before replacing it. Not when it's the one asking for the update.
+if [ "$UPDATE" = 0 ]; then
+  pkill -x utmtftm 2>/dev/null || true
+  tries=0
+  while pgrep -x utmtftm >/dev/null 2>&1 && [ "$tries" -lt 30 ]; do
+    sleep 0.1
+    tries=$((tries + 1))
+  done
+fi
 
 mkdir -p "$APP/driver/bin/linuxarm64" "$APP/driver/resources/settings" "$(dirname "$LAUNCHER")"
 

@@ -23,6 +23,7 @@
 #include "platform.h"
 #include "store.h"
 #include "ui.h"
+#include "update.h"
 #include "xform.h"
 
 using namespace fh;
@@ -148,6 +149,10 @@ struct App {
   bool fineAdjust = false, fineBig = false;  // the arrows on the Hands page, and how far they go
   bool decafMeter = false;  // the driver's measuring the shake for the Decaf page
   bind::Page bindings{bindDirs(), bindSettings()};
+  // A newer version from GitHub (J4, 14 November): checked at start and every few hours, installed from the Update page.
+  update::Updater updater{platform::dataDir()};
+  uint32_t updateSeen = 0;
+  DashPage beforeUpdate = DashPage::Hands;
   ModelLoader bindLoader;
   std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
   uint32_t bindStatusSeen = 0;
@@ -293,6 +298,51 @@ struct App {
   }
 
   // Once a second: is it there, and has it heard anything? Worth having in the log, because it's the first thing to check.
+  void checkUpdate() {
+    updater.tick(uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - clockStart).count()));
+    const update::Status s = updater.status();
+    if (s.serial == updateSeen) return;
+    updateSeen = s.serial;
+    UpdateNote n;
+    n.version = s.latest.version;
+    switch (s.state) {
+      case update::State::Available: n.kind = s.needed ? UpdateNote::Needed : UpdateNote::Ready; break;
+      case update::State::Downloading:
+      case update::State::Installing: n.kind = UpdateNote::Busy; break;
+      case update::State::Installed: n.kind = UpdateNote::Installed; break;
+      default: break;
+    }
+    setUpdateNote(n);
+    logf("update: %s, this is %s, the newest is %s%s%s", s.state == update::State::Available ? "one's ready" : s.state == update::State::UpToDate ? "up to date"
+         : s.state == update::State::Checking ? "checking" : s.state == update::State::Downloading ? "downloading" : s.state == update::State::Installing ? "installing"
+         : s.state == update::State::Installed ? "installed" : s.state == update::State::Off ? "off" : "couldn't check",
+         update::thisVersion(), s.latest.version.empty() ? "unknown" : s.latest.version.c_str(), s.needed ? ", and this one may not work properly any more" : "",
+         s.error.empty() ? "" : (" (" + s.error + ")").c_str());
+    dashForce = true;
+  }
+
+  UpdateModel updateModel() {
+    const update::Status s = updater.status();
+    UpdateModel m;
+    m.game = sceneKey.empty() ? "" : sceneName;
+    m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::Live;
+    m.confirmClose = Clock::now() < confirmUntil;
+    m.current = update::thisVersion();
+    m.latest = s.latest.version;
+    m.summary = s.latest.summary;
+    m.needed = s.needed;
+    m.why = s.latest.why;
+    m.error = s.error;
+    m.step = s.state == update::State::Downloading ? UpdateModel::Downloading : s.state == update::State::Installing ? UpdateModel::Installing
+           : s.state == update::State::Installed ? UpdateModel::Installed : UpdateModel::Ready;
+#ifndef _WIN32
+    m.windows = false;
+#endif
+    m.hover = fx.hover;
+    m.down = fx.down;
+    return m;
+  }
+
   void checkHook() {
     const bool ready = Store::inputReady();
     const uint64_t reports = Store::inputReports(), ticks = Store::inputTicks(), unknown = Store::inputUnknown();
@@ -612,6 +662,7 @@ struct App {
     refreshDriver();
     checkBindings();
     checkHook();
+    checkUpdate();
     if (pid != lastPid) {
       logf("scene pid %u key '%s' -> '%s'", pid, key, k.c_str());
       lastPid = pid;
@@ -810,6 +861,13 @@ struct App {
         drawRecorded(dashCv, m, buttons);
         drawn = true;
       });
+    else if (page == DashPage::Update) {
+      UpdateModel m = updateModel();
+      key = updateKey(m);
+      if (!dashForce && key == dashDrawn) return;
+      drawUpdate(dashCv, m, buttons);
+      drawn = true;
+    }
     else if (page == DashPage::Decaf) {
       DecafModel m = decafModel();
       key = decafKey(m);
@@ -845,6 +903,19 @@ struct App {
     if (const Button* hb = hitButton(buttons, x, y)) {
       const std::string id = hb->id;  // copy: buttons are rebuilt on the next draw
       logf("click %s%s", id.c_str(), hb->enabled ? "" : " (greyed)");
+      // A newer version: its page, from any page's header, and back to where you were.
+      if (id == "update_open") {
+        if (page != DashPage::Update) beforeUpdate = page;
+        page = DashPage::Update;
+        statusUntil = {};
+        dashForce = true;
+        return;
+      }
+      if (page == DashPage::Update) {
+        if (id == "update_go" && hb->enabled) updater.install();
+        else if (id == "update_close") page = beforeUpdate;
+        if (id == "update_go" || id == "update_close") { dashForce = true; return; }
+      }
       if (id == "macro_back") {
         page = DashPage::Combos;
         statusUntil = {};

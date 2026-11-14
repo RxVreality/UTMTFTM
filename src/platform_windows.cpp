@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "platform.h"
+#include "update.h"
 
 namespace fs = std::filesystem;
 
@@ -153,4 +154,69 @@ bool setDriverRegistered(bool on, const std::string& driverDir) {
 }
 
 }  // namespace platform
+
+// ---------------------------------------------------------------- for the updater (update.h)
+namespace update {
+
+// One argument as CommandLineToArgvW reads it back: quoted, with quotes and the backslashes before them escaped.
+static std::wstring argQuoted(const std::wstring& a) {
+  std::wstring out = L"\"";
+  size_t slashes = 0;
+  for (wchar_t ch : a) {
+    if (ch == L'\\') { ++slashes; continue; }
+    if (ch == L'"') out.append(slashes * 2 + 1, L'\\');
+    else out.append(slashes, L'\\');
+    slashes = 0;
+    out += ch;
+  }
+  out.append(slashes * 2, L'\\');
+  return out + L"\"";
+}
+
+static bool launch(const std::vector<std::string>& args, DWORD flags, PROCESS_INFORMATION& pi) {
+  if (args.empty()) return false;
+  std::wstring exe = platform::wide(args[0]);
+  std::replace(exe.begin(), exe.end(), L'/', L'\\');
+  std::wstring cmd;
+  for (size_t i = 0; i < args.size(); ++i) {
+    std::wstring a = i == 0 ? exe : platform::wide(args[i]);
+    if (i) cmd += L" ";
+    cmd += argQuoted(a);
+  }
+  STARTUPINFOW si{};
+  si.cb = sizeof si;
+  pi = PROCESS_INFORMATION{};
+  return CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &si, &pi) != 0;
+}
+
+int runHidden(const std::vector<std::string>& args, int timeoutMs) {
+  PROCESS_INFORMATION pi;
+  if (!launch(args, CREATE_NO_WINDOW, pi)) return -1;
+  DWORD code = DWORD(-1);
+  if (WaitForSingleObject(pi.hProcess, DWORD(timeoutMs)) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+  else TerminateProcess(pi.hProcess, 1);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return int(code);
+}
+
+bool startDetached(const std::vector<std::string>& args) {
+  PROCESS_INFORMATION pi;
+  if (!launch(args, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, pi)) return false;
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return true;
+}
+
+// Windows 10 and 11 have had it since 2018.
+std::string curlPath() {
+  wchar_t sys[MAX_PATH];
+  const UINT n = GetSystemDirectoryW(sys, MAX_PATH);
+  if (!n || n >= MAX_PATH) return "";
+  const std::string path = platform::utf8(sys) + "\\curl.exe";
+  std::error_code ec;
+  return fs::exists(fs::u8path(path), ec) ? path : "";
+}
+
+}  // namespace update
 }  // namespace fh

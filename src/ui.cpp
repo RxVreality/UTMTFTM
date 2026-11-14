@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <sstream>
 
 #ifndef _WIN32
 #include <cairo-ft.h>
@@ -434,11 +435,48 @@ void drawHandPreview(Canvas& cv, double x, double y, double size, bool left, con
 
 // ---------------------------------------------------------------- dashboard
 // The top of both pages: the mark and name, which page this is, what's running and how it's connected, and Close.
+static UpdateNote g_update;
+int g_updateSpot = 0;
+void setUpdateNote(const UpdateNote& n) { g_update = n; }
+std::string updateNoteKey() { return "u" + std::to_string(int(g_update.kind)) + g_update.version + std::to_string(g_updateSpot); }
+
+static std::string updateWords(bool shortForm) {
+  switch (g_update.kind) {
+    case UpdateNote::Ready: return shortForm ? "Update ready: " + g_update.version : "UTMTFTM " + g_update.version + " is ready to install.";
+    case UpdateNote::Needed: return shortForm ? "Update needed: " + g_update.version : "Update to " + g_update.version + ": this version may not work properly with today's SteamVR.";
+    case UpdateNote::Busy: return shortForm ? "Updating to " + g_update.version : "Fetching UTMTFTM " + g_update.version + "...";
+    case UpdateNote::Installed: return shortForm ? g_update.version + ": restart SteamVR" : "UTMTFTM " + g_update.version + " is installed. Restart SteamVR to start using it.";
+    default: return "";
+  }
+}
+
+// Draft 1: the line along the bottom of a page, in place of its usual words.
+static bool updateLine(cairo_t* c, std::vector<Button>& btn, double L, double R, double baseY) {
+  if (g_updateSpot != 1 || g_update.kind == UpdateNote::None) return false;
+  const bool warn = g_update.kind == UpdateNote::Needed;
+  lamp(c, L, baseY - 14, 14, warn ? ALERT : g_update.kind == UpdateNote::Installed ? LIVE : SIGNAL);
+  const bool canTap = g_update.kind == UpdateNote::Ready || warn;
+  text(c, L + 28, baseY, 20, updateWords(false), true, PAPER, 1, 0, R - L - 28 - (canTap ? 190 : 0));
+  if (canTap) button(c, btn, R - 170, baseY - 30, 170, 42, "update_open", "Update", warn ? Danger : Primary);
+  return true;
+}
+
 static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const std::string& game, LiveState live, bool confirmClose, DashPage page) {
   const double L = 44, R = width - 44;
   markTile(c, L, 20, 80, 64);
   caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
-  label(c, L + 95, 82, 15, "Use the medium to fix the medium");
+  // Draft 0: a newer version takes the place of the motto, as a strip you can tap.
+  if (g_updateSpot == 0 && g_update.kind != UpdateNote::None && page != DashPage::Update) {
+    const bool warn = g_update.kind == UpdateNote::Needed, done = g_update.kind == UpdateNote::Installed;
+    const std::string words = updateWords(true);
+    const double w = capsW(c, upper(words), 15, 1.4) + 46 + 26 * kLean;
+    slab(c, L + 92, 66, w, 26, warn ? ALERT : done ? LIVE : SIGNAL);
+    fxOver(c, L + 92, 66, w, 26, "update_open", true, true);
+    caps(c, L + 92 + 18, 85, 15, words + "  >", INK, 1, 0, 1.4);
+    btn.push_back({L + 92, 60, w, 34, "update_open"});
+  } else {
+    label(c, L + 95, 82, 15, "Use the medium to fix the medium");
+  }
   const int nTabs = 4;
   const double tabX = 456, tabY = 34, tabH = 42, tabW = 104, tabD = tabH * kLean;
   const struct { DashPage p; const char* id; const char* name; } tabs[4] = {
@@ -716,7 +754,8 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   hline(c, L, R, 700);
   const double baseY = 734;
   std::string st = m.status;
-  if (!st.empty()) {
+  if (st.empty() && updateLine(c, btn, L, R, baseY)) {
+  } else if (!st.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, R - L - 28);
   } else if (!m.hint.empty()) {
@@ -837,8 +876,28 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   segments(c, btn, sx + saveW + 18, ay, R - (sx + saveW + 18), ah,
            {{"scope_game", "This game", m.saveForGame && !m.game.empty(), !m.game.empty()}, {"scope_global", "All games", !m.saveForGame || m.game.empty(), true}}, 21);
 
-  text(c, L, 664, 17, "Some games have smoothing or steadying of their own. Try one at a time: two at once can feel late.",
-       false, DIM, 1, 0, R - L);
+  if (m.strength > 0 && m.level > 0) {
+    // DRAFT: how strong the chosen step is, in the Max distance strip's style. MMeNDtal: even Tuned resisted small corrections.
+    const double fy = 640, fh = 44;
+    const double sw = label(c, L, fy + 29, 16, std::string("Strength of ") + decafName(m.level));
+    const int pcts[5] = {25, 50, 75, 100, 125};
+    const double rx = L + sw + 16, rd = fh * kLean, rw = 92;
+    hline(c, rx, rx + 5 * rw, fy + fh - 1, PAPER, 0.45);
+    for (int i = 0; i < 5; ++i) {
+      const double bx = rx + i * rw;
+      const bool on = m.strength == pcts[i];
+      const std::string id = "decaf_strength_" + std::to_string(pcts[i]);
+      if (on) slab(c, bx, fy, rw + rd, fh, PAPER);
+      fxOver(c, bx, fy, rw + rd, fh, id, true, on);
+      caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(pcts[i]) + "%", on ? INK : PAPER, 1, 1, 1);
+      btn.push_back({bx + rd / 2, fy, rw, fh, id});
+    }
+    text(c, rx + 5 * rw + rd + 20, fy + 20, 16, "100% is the step as tested.", false, DIM, 1, 0, R - (rx + 5 * rw + rd + 20));
+    text(c, rx + 5 * rw + rd + 20, fy + 40, 16, "Lower lets small moves through.", false, DIM, 1, 0, R - (rx + 5 * rw + rd + 20));
+  } else {
+    text(c, L, 664, 17, "Some games have smoothing or steadying of their own. Try one at a time: two at once can feel late.",
+         false, DIM, 1, 0, R - L);
+  }
 
   hline(c, L, R, 700);
   const double baseY = 734;
@@ -1928,6 +1987,85 @@ void drawMessage(Canvas& cv, const std::string& title, const std::string& sub, b
 void drawIcon(Canvas& cv) {
   cv.clear();
   markTile(cv.c, 0, 0, cv.w, cv.h);
+}
+
+// ---------------------------------------------------------------- the Update page
+std::string updateKey(const UpdateModel& m) {
+  return m.game + "|" + std::to_string(int(m.live)) + std::to_string(m.confirmClose) + "|" + m.current + "|" + m.latest + "|" +
+         std::to_string(m.needed) + m.why + "|" + std::to_string(int(m.step)) + "|" + m.error + "|fx:" + m.hover + "," + m.down;
+}
+
+// Words broken into lines that fit, at most a few of them, the last one cut short if there's more.
+static std::vector<std::string> wrapped(cairo_t* c, const std::string& words, double size, double maxW, size_t most) {
+  std::vector<std::string> lines;
+  std::string line, word;
+  std::istringstream in(words);
+  while (in >> word) {
+    const std::string next = line.empty() ? word : line + " " + word;
+    if (textW(c, next, size, false) <= maxW) { line = next; continue; }
+    if (!line.empty()) lines.push_back(line);
+    line = word;
+    if (lines.size() == most) break;
+  }
+  if (!line.empty() && lines.size() < most) lines.push_back(line);
+  if (lines.size() == most && in >> word) lines.back() += " ...";
+  return lines;
+}
+
+void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Update);
+
+  const bool done = m.step == UpdateModel::Installed;
+  text(c, L, 138, 27, done ? "UTMTFTM " + m.latest + " is installed" : m.needed ? "Update UTMTFTM to keep it working" : "UTMTFTM " + m.latest + " is ready", true, PAPER);
+  text(c, L, 164, 18, done ? "It starts the next time SteamVR does. Your settings, layouts and macros stay as they are."
+                           : "You have " + m.current + ". It takes about a minute, and your settings, layouts and macros stay as they are.",
+       false, DIM, 1, 0, R - L);
+
+  double y = 200;
+  if (m.needed && !done) {
+    slab(c, L, y, R - L, 54, RAISED);
+    lamp(c, L + 18, y + 20, 14, ALERT);
+    text(c, L + 48, y + 34, 20, m.why.empty() ? "The newest version says this one may not work properly any more." : m.why, true, PAPER, 1, 0, R - L - 66);
+    y += 70;
+  }
+  hline(c, L, R, y + 8);
+  label(c, L, y + 44, 16, "What's new in " + m.latest);
+  const std::vector<std::string> lines = wrapped(c, m.summary.empty() ? "See the release page on GitHub." : m.summary, 21, R - L, m.needed ? 6 : 8);
+  for (size_t i = 0; i < lines.size(); ++i) text(c, L, y + 82 + i * 30.0, 21, lines[i], false, PAPER, 1, 0, R - L);
+
+  // One thing to do. What happens next is said under it, before it happens.
+  const double by = 572, bh = 64;
+  hline(c, L, R, by - 16);
+  if (done) {
+    lamp(c, L, by + 22, 16, LIVE);
+    text(c, L + 32, by + 38, 22, "Restart SteamVR when you're ready, and " + m.latest + " starts with it.", true, PAPER, 1, 0, R - L - 290);
+    button(c, btn, R - 240, by, 240, bh, "update_close", "Done", Outline);
+  } else {
+    const bool busy = m.step == UpdateModel::Downloading || m.step == UpdateModel::Installing;
+    const std::string go = m.step == UpdateModel::Downloading ? "Downloading..." : m.step == UpdateModel::Installing ? "Installing..." : !m.error.empty() ? "Try again" : "Update now";
+    button(c, btn, L, by, 380, bh, "update_go", go, m.needed ? Danger : Primary, !busy);
+    button(c, btn, L + 400, by, 220, bh, "update_close", "Not now", Outline, !busy);
+    const std::string after = m.windows ? "SteamVR keeps running. The new version starts the next time you start SteamVR."
+                                        : "SteamVR keeps running. Restart SteamVR or the headset to start the new version.";
+    text(c, L + 650, by + 26, 17, after.substr(0, after.find('.') + 1), false, DIM, 1, 0, R - L - 650);
+    text(c, L + 650, by + 50, 17, after.substr(after.find('.') + 2), false, DIM, 1, 0, R - L - 650);
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.error.empty() && !done) {
+    lamp(c, L, baseY - 14, 14, ALERT);
+    text(c, L + 28, baseY, 20, m.error, true, PAPER, 1, 0, R - L - 28);
+  } else {
+    text(c, L, baseY, 19, "Now and then it asks GitHub which version is newest, the way a browser opens a page. No account, and nothing else.", false, DIM, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
 }
 
 }  // namespace fh

@@ -2,6 +2,7 @@
 ; make-release.ps1 builds it and passes VERSION, STAGE, OUTFILE and ICON.
 Unicode true
 !include "MUI2.nsh"
+!include "FileFunc.nsh"
 
 !define ARP "Software\Microsoft\Windows\CurrentVersion\Uninstall\UTMTFTM"
 
@@ -38,15 +39,46 @@ FunctionEnd
 !insertmacro WaitForSteamVR ""
 !insertmacro WaitForSteamVR "un."
 
+; /UPDATE: started by UTMTFTM's own Update button, with SteamVR running and the add-on loaded. Windows lets a file that's
+; in use be renamed, so the running ones move aside and the new ones go in where they were. SteamVR uses them from its next
+; start, and nothing is closed. /NOREGISTER leaves SteamVR's lists alone, for the tests.
+Var Update
+Var NoRegister
 Function .onInit
-  Call WaitForSteamVR
+  StrCpy $Update ""
+  StrCpy $NoRegister ""
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/UPDATE" $R1
+  IfErrors +2
+    StrCpy $Update "1"
+  ClearErrors
+  ${GetOptions} $R0 "/NOREGISTER" $R1
+  IfErrors +2
+    StrCpy $NoRegister "1"
+  StrCmp $Update "1" +2
+    Call WaitForSteamVR
 FunctionEnd
+
+; Moves a file that may be in use out of the way, under a name no earlier update used, after clearing earlier ones that
+; nothing holds any more. $2 is the clock when this install started.
+!macro MoveAside FILE
+  Delete "${FILE}.old*"
+  IfFileExists "${FILE}" 0 +2
+    Rename "${FILE}" "${FILE}.old$2"
+!macroend
 
 Function un.onInit
   Call un.WaitForSteamVR
 FunctionEnd
 
 Section
+  StrCmp $Update "1" 0 fresh
+    System::Call 'kernel32::GetTickCount() i .r2'
+    !insertmacro MoveAside "$INSTDIR\utmtftm.exe"
+    !insertmacro MoveAside "$INSTDIR\openvr_api.dll"
+    !insertmacro MoveAside "$INSTDIR\driver\bin\win64\driver_utmtftm.dll"
+  fresh:
   SetOutPath "$INSTDIR"
   File /r /x install.cmd /x uninstall.cmd "${STAGE}\*.*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -61,10 +93,16 @@ Section
   WriteRegDWORD HKCU "${ARP}" "NoModify" 1
   WriteRegDWORD HKCU "${ARP}" "NoRepair" 1
 
-  ExecWait '"$INSTDIR\utmtftm.exe" --install' $0
-  ; --install starts SteamVR's server to register with it. SteamVR was closed when we began, so that copy can go.
-  nsExec::Exec 'taskkill /f /im vrserver.exe'
-  Pop $1
+  StrCpy $0 "0"
+  StrCmp $NoRegister "1" registered
+    ExecWait '"$INSTDIR\utmtftm.exe" --install' $0
+  registered:
+  ; --install starts SteamVR's server to register with it. SteamVR was closed when we began, so that copy can go. Not when
+  ; updating: that's the SteamVR you're in.
+  StrCmp $Update "1" kept
+    nsExec::Exec 'taskkill /f /im vrserver.exe'
+    Pop $1
+  kept:
   StrCmp $0 "0" installed
     MessageBox MB_ICONEXCLAMATION "UTMTFTM couldn't register with SteamVR (code $0). Check SteamVR is installed, start it once, close it and run this again.$\r$\n$\r$\nDetails are in %LOCALAPPDATA%\UTMTFTM\utmtftm.log" /SD IDOK
     SetErrorLevel 3

@@ -64,7 +64,34 @@ struct DashModel {
 };
 
 // The pages share the dashboard panel. This says which one's showing.
-enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf };
+enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf, Update };
+
+// ---------------------------------------------------------------- a newer version (src/update.h)
+// Every page's header says when there's one, and tapping it ("update_open") opens the Update page (J4, 14 November).
+struct UpdateNote {
+  enum Kind { None, Ready, Needed, Busy, Installed } kind = None;
+  std::string version;  // the new one, "0.6.2"
+};
+void setUpdateNote(const UpdateNote& n);  // every page shows it from its next draw
+std::string updateNoteKey();              // goes in each page's redraw key
+// Drafts for J4 to pick from (14 November): 0, under the name at the top of every page. 1, the line along the bottom.
+extern int g_updateSpot;
+
+struct UpdateModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  bool confirmClose = false;
+  std::string current, latest;  // "0.6.1", "0.6.2"
+  std::string summary;          // the release notes' first paragraph
+  bool needed = false;          // the release says this version may not work properly any more
+  std::string why;              // and why, in its words
+  enum Step { Ready, Downloading, Installing, Installed } step = Ready;
+  std::string error;            // the last try failed, in words
+  bool windows = true;
+  std::string hover, down;
+};
+std::string updateKey(const UpdateModel& m);
+void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& buttons);
 
 // A fine adjust arrow: "nudge_<hand>_<axis>_<p or m>". axis as in nudged(), in placement.h.
 bool parseNudge(const std::string& id, int& hand, int& axis, int& dir);
@@ -254,6 +281,8 @@ struct DecafModel {
   bool ready = true;        // the driver that's loaded can smooth. If not, SteamVR needs a restart
   DecafHand hands[2];
   int pointHand = -1;       // the hand pointing at the dashboard, which is left as tracked so the laser stays sharp. -1: neither
+  // DRAFT for J4 (14 November, MMeNDtal's fine tune idea): how strong the chosen step is, in percent. 0: the row isn't shown.
+  int strength = 0;
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;

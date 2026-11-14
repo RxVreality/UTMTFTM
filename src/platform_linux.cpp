@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "platform.h"
+#include "update.h"
 
 namespace fs = std::filesystem;
 
@@ -185,4 +186,55 @@ bool setDriverRegistered(bool on, const std::string& driverDir) {
 }
 
 }  // namespace platform
+
+// ---------------------------------------------------------------- for the updater (update.h)
+namespace update {
+
+static pid_t spawn(const std::vector<std::string>& args) {
+  if (args.empty()) return -1;
+  std::vector<char*> argv;
+  for (const std::string& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+  argv.push_back(nullptr);
+  pid_t pid = fork();
+  if (pid != 0) return pid;
+  setsid();  // its own session, so it isn't stopped along with the overlay
+  int quiet = open("/dev/null", O_RDWR);
+  if (quiet >= 0) {
+    dup2(quiet, 0);
+    dup2(quiet, 1);
+    dup2(quiet, 2);
+  }
+  execv(argv[0], argv.data());
+  _exit(127);
+}
+
+int runHidden(const std::vector<std::string>& args, int timeoutMs) {
+  const pid_t pid = spawn(args);
+  if (pid < 0) return -1;
+  int status = 0;
+  for (int waited = 0; waited < timeoutMs; waited += 50) {
+    const pid_t done = waitpid(pid, &status, WNOHANG);
+    if (done == pid) return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (done < 0) return -1;
+    platform::sleepMs(50);
+  }
+  kill(pid, SIGKILL);
+  waitpid(pid, &status, 0);
+  return -1;
+}
+
+bool startDetached(const std::vector<std::string>& args) {
+  const pid_t pid = spawn(args);
+  if (pid < 0) return false;
+  signal(SIGCHLD, SIG_IGN);  // nobody waits for it, so don't leave it a zombie
+  return true;
+}
+
+std::string curlPath() {
+  for (const char* p : {"/usr/bin/curl", "/bin/curl", "/usr/local/bin/curl"})
+    if (access(p, X_OK) == 0) return p;
+  return "";
+}
+
+}  // namespace update
 }  // namespace fh
