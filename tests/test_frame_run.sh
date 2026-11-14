@@ -140,6 +140,7 @@ rm -f "$DATA/bindings.json"
 
 echo "--- Decaffeinate"
 : > "$FAKE_STEAMVR_LOG"
+rm -f "$DATA/profiles.json"  # the fine adjust run left the left hand turned 3 degrees, which this would count as shake
 FAKE_STEAMVR_SCENARIO=decaf timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-decaf.txt"
 code=$?
 cat "$FAKE_STEAMVR_LOG"
