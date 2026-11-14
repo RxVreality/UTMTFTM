@@ -88,7 +88,8 @@ struct Input {
 
   // exclusive: while placing, the grips, buttons and sticks belong to this tool and the game doesn't
   // see them (so you can't grab a door or walk off mid-placement). Poses still reach the game.
-  void poll(bool exclusive) {
+  // ahead: how far ahead SteamVR predicts the poses a game draws now, so these are the ones the game shows.
+  void poll(bool exclusive, float ahead) {
     if (!ok) return;
     vr::VRActiveActionSet_t as{}; as.ulActionSet = set;
     as.nPriority = exclusive ? vr::k_nActionSetOverlayGlobalPriorityMin : 0;
@@ -96,8 +97,8 @@ struct Input {
     for (int i = 0; i < 2; ++i) {
       Hand& H = h[i];
       vr::InputPoseActionData_t pr{}, pg{};
-      vr::VRInput()->GetPoseActionDataForNextFrame(aRaw, vr::TrackingUniverseStanding, &pr, sizeof pr, src[i]);
-      vr::VRInput()->GetPoseActionDataForNextFrame(aGrip, vr::TrackingUniverseStanding, &pg, sizeof pg, src[i]);
+      vr::VRInput()->GetPoseActionDataRelativeToNow(aRaw, vr::TrackingUniverseStanding, ahead, &pr, sizeof pr, src[i]);
+      vr::VRInput()->GetPoseActionDataRelativeToNow(aGrip, vr::TrackingUniverseStanding, ahead, &pg, sizeof pg, src[i]);
       H.valid = pr.bActive && pr.pose.bPoseIsValid;
       if (H.valid) {
         H.raw = pr.pose.mDeviceToAbsoluteTracking;
@@ -128,6 +129,7 @@ enum class Mode { Idle, Armed, Placing };
 struct Step { int hand; bool match; };
 
 static constexpr float kGhostS = 0.36f;    // metres covered by the stereo ghost quad
+static constexpr float kPanelHalfH = 0.36f * 300 / 820 / 2;  // half the instruction panel's height: 0.36 m wide, 820 x 300 pixels
 static constexpr float kGrabReach = 0.16f; // how close your hand must be to grab the hand being placed
 static constexpr float kLostHand = 1.0f;   // an offset this far out is a fault, not a placement: keep the last good one
 
@@ -625,25 +627,47 @@ struct App {
     if (mode == Mode::Idle) store.publishLive();
   }
 
+  // How far ahead SteamVR predicts the poses a game draws right now: to when that frame reaches your eyes. The sum is
+  // the one openvr.h gives with GetDeviceToAbsoluteTrackingPose.
+  static float secondsToPhotons() {
+    float since = 0;
+    if (!vr::VRSystem()->GetTimeSinceLastVsync(&since, nullptr)) since = 0;
+    float hz = vr::VRSystem()->GetFloatTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_DisplayFrequency_Float);
+    const float toPhotons = vr::VRSystem()->GetFloatTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_SecondsFromVsyncToPhotons_Float);
+    if (!(hz > 1 && hz < 1000)) hz = 90;
+    const float s = 1.f / hz - since + (std::isfinite(toPhotons) ? toPhotons : 0.f);
+    return std::clamp(s, 0.f, 0.2f);
+  }
+
+  // Each hand without its offset, where the game draws it this frame. J4, 14 November, on Virtual Desktop: a hand being
+  // placed trailed well behind the one dragging it. It came from the driver's own report, which has no prediction, while
+  // the game draws the grabbing hand where SteamVR predicts it'll be, so the dragged one lagged by the whole delay to
+  // the eyes, and streaming makes that long. Now both come from the same predicted poses as the game's, with only our
+  // offset taken off. The driver's report still says the hand's there, and how far the prediction moved it.
   void truePoses() {
     M standingFromRaw = vr::VRSystem()->GetRawZeroPoseToStandingAbsoluteTrackingPose();
     for (int h = 0; h < 2; ++h) {
       Hand& H = in.h[h];
       M seen = H.raw, report;
       truePoseSeen[h] = store.useDriver && Store::driverTruePose(h, &report);
-      trueControllerPoses(H, store.gripFromRaw[h], store.useDriver, truePoseSeen[h] ? &report : nullptr, standingFromRaw);
-      if (!truePoseSeen[h] || !H.valid) continue;
-      // Near zero when still means the offset reaches what apps see, exactly once, and the two spaces line up.
-      M d = mul(inv(mul(H.raw, Store::appliedDeviceOffset(h))), seen);
+      if (!store.useDriver) {
+        trueControllerPoses(H, store.gripFromRaw[h], false, nullptr, standingFromRaw);
+        continue;
+      }
+      if (!truePoseSeen[h]) { H.valid = false; continue; }
+      if (!H.valid) continue;
+      predictedTruePoses(H, store.gripFromRaw[h], seen, Store::appliedDeviceOffset(h));
+      // How far the prediction moved the hand from the driver's own report: near zero when still.
+      M d = mul(inv(mul(standingFromRaw, report)), H.raw);
       poseCheckCm[h] = dist(d, ident()) * 100;
       poseCheckDeg[h] = std::acos(std::clamp((d.m[0][0] + d.m[1][1] + d.m[2][2] - 1) * 0.5f, -1.f, 1.f)) / kDeg;
     }
   }
 
   void logPlacing(const char* what) {
-    logf("%s %s hand, offset %s | true poses L %s R %s, reported vs true+offset L %.2f cm %.1f deg, R %.2f cm %.1f deg, bad offsets ignored %d", what, fit() ? "right" : "left",
-         cur().zero() ? "none" : friendlyOffset(cur()).c_str(), truePoseSeen[0] ? "yes" : "no", truePoseSeen[1] ? "yes" : "no",
-         poseCheckCm[0], poseCheckDeg[0], poseCheckCm[1], poseCheckDeg[1], badOffsets);
+    logf("%s %s hand, offset %s | true poses L %s R %s, predicted %.0f ms ahead, which moved L %.2f cm %.1f deg, R %.2f cm %.1f deg from the driver's report, bad offsets ignored %d",
+         what, fit() ? "right" : "left", cur().zero() ? "none" : friendlyOffset(cur()).c_str(), truePoseSeen[0] ? "yes" : "no", truePoseSeen[1] ? "yes" : "no",
+         secondsToPhotons() * 1000, poseCheckCm[0], poseCheckDeg[0], poseCheckCm[1], poseCheckDeg[1], badOffsets);
   }
 
   void checkScene() {
@@ -1262,7 +1286,8 @@ struct App {
     else vr::VROverlay()->SetOverlayColor(ghost, 0.925f, 0.925f, 0.905f);
     if (live) {
       renderBubble(F.grip, G);
-      showPanel(panelFor(over), &G);
+      const V3 c = pos(F.grip);
+      showPanel(panelFor(over), &G, &c, store.max_pos);
     } else {
       M W = mul(G, fromOffset(baseFor(f)));
       renderGhost(W, F.grip, !match && !cur().zero());
@@ -1320,13 +1345,13 @@ struct App {
     return p;
   }
 
-  void showPanel(const PanelModel& p, const M* near) {
+  void showPanel(const PanelModel& p, const M* near, const V3* bubble = nullptr, float bubbleR = 0) {
     std::string key = panelKey(p);
     if (key != panelDrawn) {
       drawPanel(hintCv, p);
       if (upload(hint, hintCv)) panelDrawn = key;
     }
-    placePanel(near);
+    placePanel(near, bubble, bubbleR);
   }
 
   bool eyePositions(V3 eyes[2], V3* ahead = nullptr) {
@@ -1403,13 +1428,16 @@ struct App {
   }
 
   // Float the panel above the ghost (or in front of the eyes), turned to face the headset.
-  void placePanel(const M* near) {
+  // near: above that hand. bubble: and clear of the bubble around it, which is as wide as the distance limit. J4, 14 November:
+  // at 30 cm the panel sat inside it, and the bubble hid it.
+  void placePanel(const M* near, const V3* bubble = nullptr, float bubbleR = 0) {
     vr::TrackedDevicePose_t hmd{};
     vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, &hmd, 1);
     if (!hmd.bPoseIsValid) return;
     const auto& H = hmd.mDeviceToAbsoluteTracking;
     float p[3];
     if (near) { for (int i = 0; i < 3; ++i) p[i] = near->m[i][3]; p[1] += 0.22f; }
+    if (near && bubble) p[1] = std::max(p[1], bubble->y + bubbleR + kPanelHalfH + 0.03f);
     else for (int i = 0; i < 3; ++i) p[i] = H.m[i][3] - H.m[i][2] * 0.6f;  // 60 cm in front of the eyes
     float z[3] = {H.m[0][3] - p[0], 0, H.m[2][3] - p[2]};
     float zl = std::sqrt(z[0] * z[0] + z[2] * z[2]);
@@ -1523,7 +1551,7 @@ struct App {
       if (panelDrawn != "#message") messageGoesWithDash = false;
       bool wantTrue = mode != Mode::Idle && store.useDriver;
       if (wantTrue != askedTrue) { Store::askTruePoses(wantTrue); askedTrue = wantTrue; }
-      if (mode != Mode::Idle) { in.poll(mode == Mode::Placing); truePoses(); }  // controllers only matter while placing
+      if (mode != Mode::Idle) { in.poll(mode == Mode::Placing, secondsToPhotons()); truePoses(); }  // controllers only matter while placing
       checkScene();
       loadControllerModels();
       loadBindModels();

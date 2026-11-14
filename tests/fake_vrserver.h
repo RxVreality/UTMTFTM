@@ -28,5 +28,11 @@ void clearHeardButtons();
 
 void setDevicePose(uint32_t device, const Pose& pose);  // where a device really is
 Pose seenPose(uint32_t device);                         // where SteamVR, and so every game, sees it
+// Streaming, the way Virtual Desktop does it: each controller's report is this many seconds old by the time it arrives,
+// and says so (poseTimeOffset), with its velocity, so SteamVR can predict where it really is. 0: reports are current.
+void setStreamDelay(double seconds);
+// Where SteamVR predicts a device is, the given seconds from now: its last report moved along by its velocity, the way a
+// game sees it. Positions only: nothing turns while it's streaming in these runs.
+Pose predictedPose(uint32_t device, double secondsFromNow);
 
 }  // namespace fakeserver

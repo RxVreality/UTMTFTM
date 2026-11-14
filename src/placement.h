@@ -26,6 +26,14 @@ inline void trueControllerPoses(ControllerPoses& H, M& gripFromRaw, bool useDriv
   H.grip = mul(H.raw, gripFromRaw);
 }
 
+// The hand without our offset, from what SteamVR reports for it (offset, and prediction to the frame, included): take the
+// offset the driver applied back off. Placing from this keeps the hand being dragged with the one dragging it, both as
+// the game draws them. appliedOffset is in the device's own frame: device' = device * offset.
+inline void predictedTruePoses(ControllerPoses& H, const M& gripFromRaw, const M& seen, const M& appliedOffset) {
+  H.raw = mul(seen, inv(appliedOffset));
+  H.grip = mul(H.raw, gripFromRaw);
+}
+
 // Where a game draws this hand's grip once offset o is applied.
 //   live (driver add-on):  grip * O
 //   binding route:         SteamVR offsets the raw pose: raw * O * (raw^-1 * grip)

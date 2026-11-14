@@ -163,6 +163,10 @@ std::thread g_thread;
 std::atomic<bool> g_run{false};
 std::mutex g_poseLock;
 std::map<uint32_t, Pose> g_poses;
+// Each device's speed in the world, from the last two places it was put, and how stale reports are (setStreamDelay).
+struct Motion { double vel[3] = {0, 0, 0}; std::chrono::steady_clock::time_point at{}; };
+std::map<uint32_t, Motion> g_motion;
+double g_streamDelay = 0;
 bool g_hooked = true;
 
 void reportLoop() {
@@ -170,12 +174,25 @@ void reportLoop() {
   vr::IVRServerDriverHost* volatile api = &g_host;
   while (g_run.load()) {
     std::map<uint32_t, Pose> now;
+    std::map<uint32_t, Motion> moving;
+    double delay = 0;
     {
       std::lock_guard<std::mutex> lock(g_poseLock);
       now = g_poses;
+      moving = g_motion;
+      delay = g_streamDelay;
     }
-    for (const auto& [device, pose] : now) {
-      const vr::DriverPose_t report = reportFor(pose);
+    for (const auto& [device, real] : now) {
+      // A streamed report is where the device was `delay` ago, with its velocity in the driver's frame.
+      Pose pose = real;
+      const Motion& mv = moving[device];
+      for (int i = 0; i < 3; ++i) pose.pos[i] -= mv.vel[i] * delay;
+      vr::DriverPose_t report = reportFor(pose);
+      const Rigid toDriver = inverse(kWorld);
+      double v[3];
+      qrot(toDriver.q, mv.vel, v);
+      for (int i = 0; i < 3; ++i) report.vecVelocity[i] = v[i];
+      report.poseTimeOffset = -delay;
       // Qualified, this call skips the vtable, and so the hook.
       if (device != 0 && !g_hooked) g_host.Host::TrackedDevicePoseUpdated(device, report, sizeof report);
       else api->TrackedDevicePoseUpdated(device, report, sizeof report);
@@ -250,7 +267,36 @@ void clearHeardButtons() {
 
 void setDevicePose(uint32_t device, const Pose& pose) {
   std::lock_guard<std::mutex> lock(g_poseLock);
+  const auto t = std::chrono::steady_clock::now();
+  Motion& m = g_motion[device];
+  auto was = g_poses.find(device);
+  const double dt = std::chrono::duration<double>(t - m.at).count();
+  for (int i = 0; i < 3; ++i) m.vel[i] = was != g_poses.end() && dt > 0.001 && dt < 0.1 ? (pose.pos[i] - was->second.pos[i]) / dt : 0;
+  m.at = t;
   g_poses[device] = pose;
+}
+
+void setStreamDelay(double seconds) {
+  std::lock_guard<std::mutex> lock(g_poseLock);
+  g_streamDelay = seconds;
+}
+
+Pose predictedPose(uint32_t device, double secondsFromNow) {
+  vr::DriverPose_t d{};
+  {
+    std::lock_guard<std::mutex> lock(g_host.m);
+    auto it = g_host.seen.find(device);
+    if (it == g_host.seen.end()) return Pose{{0, 0, 0}, {1, 0, 0, 0}};
+    d = it->second;
+  }
+  Pose p = seenPose(device);
+  const double ahead = secondsFromNow - d.poseTimeOffset;
+  Rigid w;
+  fromHq(d.qWorldFromDriverRotation, w.q);
+  double v[3];
+  qrot(w.q, d.vecVelocity, v);
+  for (int i = 0; i < 3; ++i) p.pos[i] += v[i] * ahead;
+  return p;
 }
 
 Pose seenPose(uint32_t device) {

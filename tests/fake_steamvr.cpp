@@ -143,6 +143,22 @@ vr::TrackedDevicePose_t toTracked(const Pose& p) {
 }
 
 // ---------------------------------------------------------------- IVRSystem
+// A 90 Hz headset 11 ms from vsync to photons, with the vsync just gone: SteamVR predicts about 22 ms ahead.
+constexpr float kHz = 90, kVsyncToPhotons = 0.011f;
+float sysFloatProp(void*, vr::TrackedDeviceIndex_t, vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* err) {
+  if (err) *err = vr::TrackedProp_Success;
+  if (prop == vr::Prop_DisplayFrequency_Float) return kHz;
+  if (prop == vr::Prop_SecondsFromVsyncToPhotons_Float) return kVsyncToPhotons;
+  if (err) *err = vr::TrackedProp_UnknownProperty;
+  return 0;
+}
+bool sysSinceVsync(void*, float* seconds, uint64_t* frame) {
+  if (seconds) *seconds = 0;
+  if (frame) *frame = 0;
+  return true;
+}
+double photonsAhead() { return 1.0 / kHz + kVsyncToPhotons; }
+
 bool sysBoolProp(void*, vr::TrackedDeviceIndex_t, vr::ETrackedDeviceProperty prop, vr::ETrackedPropertyError* err) {
   if (err) *err = vr::TrackedProp_Success;
   return prop == vr::Prop_HasCamera_Bool;  // a Frame says it has one
@@ -371,6 +387,13 @@ vr::EVRInputError inPose(void*, vr::VRActionHandle_t, vr::ETrackingUniverseOrigi
   d->pose = toTracked(fakeserver::seenPose(source == kSourceLeft ? kLeft : kRight));
   return vr::VRInputError_None;
 }
+// The same, predicted the way SteamVR does for the time asked for.
+vr::EVRInputError inPoseNow(void*, vr::VRActionHandle_t, vr::ETrackingUniverseOrigin, float ahead, vr::InputPoseActionData_t* d, uint32_t, vr::VRInputValueHandle_t source) {
+  memset(d, 0, sizeof *d);
+  d->bActive = true;
+  d->pose = toTracked(fakeserver::predictedPose(source == kSourceLeft ? kLeft : kRight, ahead));
+  return vr::VRInputError_None;
+}
 
 // ---------------------------------------------------------------- IVRApplications
 vr::EVRApplicationError appAddManifest(void*, const char* path, bool) {
@@ -520,6 +543,8 @@ void fillInterfaces() {
   FILL(g_system, IVRSystem, GetEyeToHeadTransform, sysEye);
   FILL(g_system, IVRSystem, GetDeviceToAbsoluteTrackingPose, sysDevicePoses);
   FILL(g_system, IVRSystem, PollNextEvent, sysPollEvent);
+  FILL(g_system, IVRSystem, GetFloatTrackedDeviceProperty, sysFloatProp);
+  FILL(g_system, IVRSystem, GetTimeSinceLastVsync, sysSinceVsync);
 
   FILL(g_overlay, IVROverlay, CreateDashboardOverlay, ovDashboard);
   FILL(g_overlay, IVROverlay, CreateOverlay, ovCreate);
@@ -538,6 +563,7 @@ void fillInterfaces() {
   FILL(g_input, IVRInput, GetInputSourceHandle, inSource);
   FILL(g_input, IVRInput, GetDigitalActionData, inDigital);
   FILL(g_input, IVRInput, GetPoseActionDataForNextFrame, inPose);
+  FILL(g_input, IVRInput, GetPoseActionDataRelativeToNow, inPoseNow);
 
   FILL(g_apps, IVRApplications, AddApplicationManifest, appAddManifest);
   FILL(g_apps, IVRApplications, RemoveApplicationManifest, appRemoveManifest);
@@ -786,22 +812,35 @@ void scenarioPlace() {
     g.grab[1] = true;  // the right hand squeezes grip on the left hand
   }
   wait(250);
+  // J4, 14 November, on Virtual Desktop: the hand being dragged trailed well behind the hand dragging it. Streamed, each
+  // controller's report is 80 ms old and SteamVR predicts it forward, so measure where the game draws both hands: the
+  // dragged one should stay with the one dragging it. A quarter of a metre a second, a quick but ordinary drag.
+  fakeserver::setStreamDelay(0.08);
   const double d[3] = {0.05, 0.03, -0.02};
   Pose right = kRightStart;
   Pose wanted = kLeftStart;
   for (int i = 0; i < 3; ++i) wanted.pos[i] += d[i];
-  double worstWhileMoving = 0;
-  for (int step = 1; step <= 60; ++step) {
-    for (int i = 0; i < 3; ++i) right.pos[i] = kRightStart.pos[i] + d[i] * step / 60;
+  double worstWhileMoving = 0, sum = 0;
+  int samples = 0;
+  for (int step = 1; step <= 15; ++step) {
+    for (int i = 0; i < 3; ++i) right.pos[i] = kRightStart.pos[i] + d[i] * step / 15;
     fakeserver::setDevicePose(kRight, right);
     wait(16);
+    const Pose drawnRight = fakeserver::predictedPose(kRight, photonsAhead()), drawnLeft = fakeserver::predictedPose(kLeft, photonsAhead());
     Pose target = kLeftStart;
-    for (int i = 0; i < 3; ++i) target.pos[i] += d[i] * step / 60;
-    worstWhileMoving = std::max(worstWhileMoving, gap(fakeserver::seenPose(kLeft), target));
+    for (int i = 0; i < 3; ++i) target.pos[i] += drawnRight.pos[i] - kRightStart.pos[i];
+    const double trail = gap(drawnLeft, target);
+    if (step > 2) { worstWhileMoving = std::max(worstWhileMoving, trail); sum += trail; ++samples; }  // after it's had a moment to start
   }
+  // Still again: the next reports carry no speed.
+  fakeserver::setDevicePose(kRight, right);
+  wait(16);
+  fakeserver::setDevicePose(kRight, right);
   wait(300);
-  say("while dragging, the left hand trailed by %.1f mm at worst", worstWhileMoving * 1000);
-  check(worstWhileMoving < 0.03, "the hand follows the grab live (mm)", worstWhileMoving * 1000);
+  fakeserver::setStreamDelay(0);
+  say("while dragging, as the game draws it, the left hand trailed by %.1f mm on average and %.1f mm at worst (it was about 25 mm before)",
+      samples ? sum / samples * 1000 : 0.0, worstWhileMoving * 1000);
+  check(worstWhileMoving < 0.012, "the hand being dragged stays with the hand dragging it, as the game draws them (mm)", worstWhileMoving * 1000);
   check(gap(fakeserver::seenPose(kLeft), wanted) < 0.002, "the hand is where it was dragged to (mm)", gap(fakeserver::seenPose(kLeft), wanted) * 1000);
   {
     std::lock_guard<std::mutex> lock(g.m);

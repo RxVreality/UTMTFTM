@@ -313,6 +313,15 @@ int main() {
         trueControllerPoses(H, learned, false, nullptr, ident());
         CHECK(same(learned, grip, 1e-3f), "no driver: grip frame learned from the poses");
       }
+      {
+        // J4, 14 November: placing takes the offset back off SteamVR's own predicted pose, so the hand being dragged
+        // is where the game draws it, not where the driver last heard it was.
+        ControllerPoses H;
+        H.valid = H.gripValid = true;
+        const M truth = randPose(), O = fromOffset(randOff(0.1f, 40)), gripFrom = fromOffset(randOff(0.05f, 30));
+        predictedTruePoses(H, gripFrom, mul(truth, O), O);
+        CHECK(same(H.raw, truth, 1e-4f) && same(H.grip, mul(truth, gripFrom), 1e-4f), "the offset comes off what SteamVR reports, exactly");
+      }
     }
     // profile round trip, including the ghost resting pose
     Store s;
