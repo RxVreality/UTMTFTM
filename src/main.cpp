@@ -215,6 +215,15 @@ struct App {
   M planeXf = ident();
   bool planeValid = false;
   double renderMs = 0; int renderN = 0;
+  // While a hand is held: how it's keeping up, for the log when it's let go (J4, 14 November: placing lagged badly on
+  // Virtual Desktop, and the first guess at why was wrong). seenGrip is what SteamVR says the game draws, offset and all.
+  M seenGrip[2] = {ident(), ident()};
+  struct DragStats {
+    Clock::time_point start{}, last{};
+    int loops = 0;
+    double worstGapMs = 0, trailSum = 0, trailMax = 0, frameMsSum = 0, frameMsMax = 0;
+    uint64_t poses0 = 0;
+  } drag;
 
   OverlayUploader uploader;
   Clock::time_point lastRawStream{};
@@ -656,12 +665,22 @@ struct App {
       }
       if (!truePoseSeen[h]) { H.valid = false; continue; }
       if (!H.valid) continue;
+      seenGrip[h] = H.grip;
       predictedTruePoses(H, store.gripFromRaw[h], seen, Store::appliedDeviceOffset(h));
       // How far the prediction moved the hand from the driver's own report: near zero when still.
       M d = mul(inv(mul(standingFromRaw, report)), H.raw);
       poseCheckCm[h] = dist(d, ident()) * 100;
       poseCheckDeg[h] = std::acos(std::clamp((d.m[0][0] + d.m[1][1] + d.m[2][2] - 1) * 0.5f, -1.f, 1.f)) / kDeg;
     }
+  }
+
+  void logDrag() {
+    const double s = std::chrono::duration<double>(Clock::now() - drag.start).count();
+    if (s <= 0 || drag.loops < 2) return;
+    const uint64_t poses = Store::driverHandUpdates() - drag.poses0;
+    logf("while held, %.1f s: %d updates (%.0f a second, longest gap %.0f ms); the hand was drawn %.1f cm from where it was held on average, %.1f cm at worst; "
+         "the controllers reported %.0f poses a second between them; drawing the bubble took %.1f ms a frame",
+         s, drag.loops, drag.loops / s, drag.worstGapMs, drag.trailSum / (drag.loops - 1), drag.trailMax, poses / s, renderN ? renderMs / renderN : 0.0);
   }
 
   void logPlacing(const char* what) {
@@ -1223,6 +1242,7 @@ struct App {
       if (!Ot.grab) {  // let go: it stays; past the distance limit it's pulled back (rotation is never limited)
         held = false; movedOnce = true;
         logPlacing("let go of");
+        logDrag();
         if (!match && beyond(cur(), store.max_pos, store.max_rot)) {
           animFrom = cur(); animTo = clampOffset(cur(), store.max_pos, store.max_rot); animT = 0; animating = true;
           in.buzz(f, 0.8f, 0.08f);
@@ -1234,6 +1254,19 @@ struct App {
           workMatched[f] = true;
         } else {
           // live: you hold the in-game hand itself; otherwise the ghost (with its resting pose)
+          if (live) {
+            // Where the game draws the hand being placed, against where the other hand holds it: the lag you see.
+            const auto now = Clock::now();
+            const double gapMs = std::chrono::duration<double, std::milli>(now - drag.last).count();
+            const double trail = len(pos(seenGrip[f]) - pos(W)) * 100;
+            if (drag.loops > 0) {
+              drag.worstGapMs = std::max(drag.worstGapMs, gapMs);
+              drag.trailSum += trail;
+              drag.trailMax = std::max(drag.trailMax, trail);
+            }
+            drag.last = now;
+            ++drag.loops;
+          }
           Offset next = offsetFromHeld(live || driverOn, F.raw, F.grip, W, live ? Offset{} : baseFor(f));
           if (finite(next) && posLen(next) < kLostHand) cur() = next;
           else ++badOffsets;
@@ -1251,6 +1284,9 @@ struct App {
         if (match && !workMatched[f]) { base = baseFor(f); workMatched[f] = true; }
         held = true; animating = false;
         badOffsets = 0;
+        drag = DragStats{};
+        drag.start = drag.last = Clock::now();
+        drag.poses0 = Store::driverHandUpdates();
         taken = mul(inv(Ot.grip), W);
         in.buzz(o, 0.5f);
         logPlacing("grabbed");
