@@ -20,6 +20,7 @@ std::vector<std::string> configDirs();  // SteamVR's config folders, the ones in
 
 void sleepMs(int ms);        // accurate to about a millisecond below 50 ms, without changing the system timer
 uint32_t currentPid();
+double cpuSeconds();          // processor time this program has used so far, user and kernel, in seconds
 
 // "exe.<name>" for that process ("" if it can't be read): the key for games with no Steam app id.
 // On Linux a process Steam started says its app id even when SteamVR doesn't know it, giving "steam.app.<id>".

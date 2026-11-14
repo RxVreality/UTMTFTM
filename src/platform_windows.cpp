@@ -137,6 +137,13 @@ fhlive::Shared* mapLive() {
   return m = static_cast<fhlive::Shared*>(v);
 }
 
+double cpuSeconds() {
+  FILETIME created, exited, kernel, user;
+  if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0;
+  const auto secs = [](const FILETIME& f) { return double((uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime) / 1e7; };
+  return secs(kernel) + secs(user);
+}
+
 bool setDriverRegistered(bool on, const std::string& driverDir) {
   std::wstring exe = wide(steamvrDir() + "/bin/win64/vrpathreg.exe"), dir = wide(driverDir);
   std::replace(exe.begin(), exe.end(), L'/', L'\\');

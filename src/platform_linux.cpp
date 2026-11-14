@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -157,6 +158,12 @@ fhlive::Shared* mapLive() {
   close(f);
   if (v == MAP_FAILED) return nullptr;
   return m = static_cast<fhlive::Shared*>(v);
+}
+
+double cpuSeconds() {
+  rusage u{};
+  if (getrusage(RUSAGE_SELF, &u) != 0) return 0;
+  return double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6;
 }
 
 bool setDriverRegistered(bool on, const std::string& driverDir) {

@@ -217,6 +217,10 @@ struct App {
   M planeXf = ident();
   bool planeValid = false;
   double renderMs = 0; int renderN = 0;
+  // What this program costs, said in the log once a minute while a game runs (J4, 14 November: "the last thing you want
+  // to do is impact performance with this overlay mod"). images: pictures handed to SteamVR, each one work for the GPU.
+  struct Cost { Clock::time_point since = Clock::now(); double cpu0 = platform::cpuSeconds(); uint64_t images = 0; } cost;
+  Clock::time_point lastBubble{};
   // While a hand is held: how it's keeping up, for the log when it's let go (J4, 14 November: placing lagged badly on
   // Virtual Desktop, and the first guess at why was wrong). seenGrip is what SteamVR says the game draws, offset and all.
   M seenGrip[2] = {ident(), ident()};
@@ -257,6 +261,7 @@ struct App {
   // Overlay images go to SteamVR as GPU textures (see overlay_upload.h for why not SetOverlayRaw).
   // Returns false if SteamVR didn't take the image, so the caller redraws and retries.
   bool put(vr::VROverlayHandle_t o, const uint8_t* px, uint32_t w, uint32_t h, bool stream) {
+    ++cost.images;
     vr::EVROverlayError e = vr::VROverlayError_RequestFailed, raw = vr::VROverlayError_None;
     if (uploader.ready()) e = uploader.upload(o, px, w, h);
     if (e != vr::VROverlayError_None) {
@@ -315,6 +320,19 @@ struct App {
   }
 
   // Once a second: is it there, and has it heard anything? Worth having in the log, because it's the first thing to check.
+  void logCost() {
+    const auto now = Clock::now();
+    const double s = std::chrono::duration<double>(now - cost.since).count();
+    if (s < 60) return;
+    const double cpu = platform::cpuSeconds();
+    if (!sceneKey.empty())
+      logf("cost over the last %.0f s: %.2f%% of one processor core, %llu pictures handed to SteamVR (%.1f a second)%s", s, (cpu - cost.cpu0) / s * 100,
+           (unsigned long long)cost.images, cost.images / s, mode == Mode::Placing ? ", placing a hand" : panelShowing() ? ", menu open" : "");
+    cost = Cost{};
+    cost.since = now;
+    cost.cpu0 = cpu;
+  }
+
   void checkUpdate() {
     updater.tick(uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - clockStart).count()));
     const update::Status s = updater.status();
@@ -713,6 +731,7 @@ struct App {
     checkBindings();
     checkHook();
     checkUpdate();
+    logCost();
     if (pid != lastPid) {
       logf("scene pid %u key '%s' -> '%s'", pid, key, k.c_str());
       lastPid = pid;
@@ -1342,7 +1361,12 @@ struct App {
     else if (held) vr::VROverlay()->SetOverlayColor(ghost, 1.0f, 0.824f, 0.0f);
     else vr::VROverlay()->SetOverlayColor(ghost, 0.925f, 0.925f, 0.905f);
     if (live) {
-      renderBubble(F.grip, G);
+      // The driver moves the held hand itself, so the bubble only shows where things are: 30 frames a second is plenty, and
+      // each one is a picture SteamVR has to take while the game's drawing (43.6 ms a frame of it over Virtual Desktop).
+      if (Clock::now() - lastBubble >= std::chrono::milliseconds(33)) {
+        renderBubble(F.grip, G);
+        lastBubble = Clock::now();
+      }
       const V3 c = pos(F.grip);
       showPanel(panelFor(over), &G, &c, store.max_pos);
     } else {
