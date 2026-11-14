@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     CHECK(dashKey(m) != dashKey(m2));
   }
 
-  // Decaffeinate. Draft A: its own tab, with the shake meter. Draft B: one row on the Hands tab.
+  // Decaffeinate: its own tab, with the shake meter.
   {
     auto inBounds = [](const std::vector<Button>& b, const Canvas& cv) {
       bool ok = true;
@@ -91,7 +91,6 @@ int main(int argc, char** argv) {
       return false;
     };
     {
-      setTabCount(4);
       Canvas cv(1200, 760);
       DecafModel m;
       m.game = "Pavlov";
@@ -101,7 +100,7 @@ int main(int argc, char** argv) {
       m.hands[1] = {true, 0.27f, 0.035f};
       std::vector<Button> b;
       drawDecaf(cv, m, b);
-      cv.savePNG(out + "/decaf_A_strong.png");
+      cv.savePNG(out + "/decaf_strong.png");
       CHECK(inBounds(b, cv));
       for (int i = 0; i < kDecafSteps; ++i) CHECK(has(b, "decaf_" + std::to_string(i)));
       CHECK(has(b, "page_decaf") && has(b, "scope_game") && has(b, "scope_global"));
@@ -112,7 +111,7 @@ int main(int argc, char** argv) {
       offM.level = 0;
       offM.hands[1] = {};
       drawDecaf(cv, offM, b);
-      cv.savePNG(out + "/decaf_A_off.png");
+      cv.savePNG(out + "/decaf_off.png");
 
       DecafModel own = m;
       own.game = "H3VR";
@@ -120,14 +119,14 @@ int main(int argc, char** argv) {
       own.gameHasOwn = true;
       own.hover = "decaf_3";
       drawDecaf(cv, own, b);
-      cv.savePNG(out + "/decaf_A_own_hover.png");
+      cv.savePNG(out + "/decaf_own_hover.png");
       CHECK(has(b, "decaf_use_global"));
 
       DecafModel old = m;
       old.ready = false;
       old.hands[0] = old.hands[1] = {};
       drawDecaf(cv, old, b);
-      cv.savePNG(out + "/decaf_A_needs_restart.png");
+      cv.savePNG(out + "/decaf_needs_restart.png");
 
       DashModel d;
       d.game = "The Light Brigade: Definitive Edition";
@@ -136,31 +135,8 @@ int main(int argc, char** argv) {
       d.cards[1].badge = Badge::GameCustom;
       d.gameHasCustom = true;
       drawDashboard(cv, d, b);
-      cv.savePNG(out + "/decaf_A_hands_tab.png");
+      cv.savePNG(out + "/decaf_hands_tab.png");
       CHECK(inBounds(b, cv) && has(b, "page_decaf"));
-    }
-    {
-      setTabCount(3);
-      Canvas cv(1200, 760);
-      DashModel d;
-      d.game = "The Light Brigade: Definitive Edition";
-      d.live = LiveState::Live;
-      d.cards[0].applied = off(3.2f, -1.0f, 0.5f, 12, 0, -8); d.cards[0].badge = Badge::GameCustom;
-      d.cards[1].badge = Badge::GameCustom;
-      d.gameHasCustom = true;
-      d.decaf = 2;
-      std::vector<Button> b;
-      drawDashboard(cv, d, b);
-      cv.savePNG(out + "/decaf_B_row.png");
-      CHECK(inBounds(b, cv) && has(b, "decaf_0") && has(b, "decaf_3") && has(b, "use_global") && !has(b, "page_decaf"));
-      DashModel d2 = d; d2.decaf = 1;
-      CHECK(dashKey(d) != dashKey(d2));
-      d.gameHasCustom = false;
-      d.status = "Decaffeinate: Strong for this game. Your aim steadies straight away.";
-      d.statusGood = true;
-      drawDashboard(cv, d, b);
-      cv.savePNG(out + "/decaf_B_row_tapped.png");
-      setTabCount(kDecafOwnTab ? 4 : 3);
     }
   }
   // fine adjust: arrows either side of every number, on both hands, all on the panel, and each says what it does

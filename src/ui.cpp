@@ -434,16 +434,13 @@ void drawHandPreview(Canvas& cv, double x, double y, double size, bool left, con
 
 // ---------------------------------------------------------------- dashboard
 // The top of both pages: the mark and name, which page this is, what's running and how it's connected, and Close.
-static int g_tabs = kDecafOwnTab ? 4 : 3;
-void setTabCount(int n) { g_tabs = n == 4 ? 4 : 3; }
-
 static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const std::string& game, LiveState live, bool confirmClose, DashPage page) {
   const double L = 44, R = width - 44;
   markTile(c, L, 20, 80, 64);
   caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  const int nTabs = g_tabs;
-  const double tabX = 456, tabY = 34, tabH = 42, tabW = nTabs == 4 ? 104 : 112, tabD = tabH * kLean;
+  const int nTabs = 4;
+  const double tabX = 456, tabY = 34, tabH = 42, tabW = 104, tabD = tabH * kLean;
   const struct { DashPage p; const char* id; const char* name; } tabs[4] = {
       {DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}, {DashPage::Decaf, "page_decaf", "Decaf"}};
   for (int i = 0; i < nTabs; ++i) {
@@ -458,18 +455,11 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   if (confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
   else button(c, btn, R - 110, 30, 110, 46, "close", "Close", Outline);
   const double right = R - (confirmClose ? 234 : 130);
-  // The page's note has the whole name. Up here it has to stay big enough to read and clear of the tabs.
-  std::string shownName = game;
-  if (shownName.size() > 34) {
-    size_t cut = 32;
-    while (cut > 0 && (static_cast<unsigned char>(shownName[cut]) & 0xC0) == 0x80) --cut;
-    shownName = shownName.substr(0, cut) + "...";
-  }
+  // The page's note has the whole name. Up here it has to stay big enough to read and clear of the tabs, so it loses its end.
   const double nameW = right - (tabX + nTabs * tabW - (nTabs - 1) * tabD + 12);
-  if (nTabs == 4 && !game.empty()) {
-    // Less room with a fourth tab: the name stays big enough to read and loses its end instead.
+  if (!game.empty()) {
     double size = 21;
-    while (size > 17 && textW(c, shownName, size, false) > nameW) size -= 1;
+    while (size > 17 && textW(c, game, size, false) > nameW) size -= 1;
     auto chars = utf8Chars(game);
     std::string cut = game;
     for (size_t n = chars.size(); n > 1 && textW(c, cut, size, false) > nameW; --n) {
@@ -480,7 +470,7 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
     }
     text(c, right, 50, size, cut, false, PAPER, 1, 2);
   } else {
-    text(c, right, 50, 21, game.empty() ? "No game running" : shownName, false, game.empty() ? DIM : PAPER, 1, 2, nameW);
+    text(c, right, 50, 21, "No game running", false, DIM, 1, 2, nameW);
   }
   if (live == LiveState::Live || live == LiveState::NextLaunch) {
     const bool on = live == LiveState::Live;
@@ -504,7 +494,6 @@ std::string dashKey(const DashModel& m) {
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
   k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint;
-  k += "|decaf:" + std::to_string(m.decaf);
   return k;
 }
 
@@ -721,20 +710,7 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(lims[i]) + " cm", on ? INK : PAPER, 1, 1, 1);
     btn.push_back({bx + rd / 2, fy, rw, fh, id});
   }
-  // Decaffeinate's four steps share the row, and the all-games button drops down to the status line to make room.
-  double statusR = R;
-  if (m.decaf >= 0) {
-    const double dW = label(c, sx, fy + 29, 16, "Decaf");
-    std::vector<Segment> steps;
-    for (int i = 0; i < kDecafSteps; ++i) steps.push_back({"decaf_" + std::to_string(i), i == 3 ? "Max" : decafName(i), m.decaf == i, true});
-    segments(c, btn, sx + dW + 16, fy, R - (sx + dW + 16), fh, steps, 17);
-    if (m.gameHasCustom) {
-      button(c, btn, R - 300, 710, 300, 40, "use_global", "Use the all-games default", Outline);
-      statusR = R - 316;
-    }
-  } else if (m.gameHasCustom) {
-    button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
-  }
+  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
 
   // one line of status along the bottom edge
   hline(c, L, R, 700);
@@ -742,14 +718,14 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   std::string st = m.status;
   if (!st.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
-    text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, statusR - L - 28);
+    text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, R - L - 28);
   } else if (!m.hint.empty()) {
-    text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, statusR - L);
+    text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, R - L);
   } else {
     if (m.armed || m.live == LiveState::NoGame || m.fine) {}  // the line above the hands already says it
     else if (m.live == LiveState::Live) st = "Changes show on your in-game hands as you move them.";
     else st = "This game takes new offsets the next time it launches.";
-    if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, statusR - L);
+    if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;
 }

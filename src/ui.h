@@ -58,7 +58,6 @@ struct DashModel {
   bool fine = false;          // fine adjust: arrows either side of each number
   bool fineBig = false;       // and they go 1 cm and 5 degrees a tap, rather than 1 mm and 1 degree
   std::string hint;           // what's under the laser would do, when it isn't obvious
-  int decaf = -1;             // Decaffeinate's step, when it has a row on this page: 0 off to 3 Maximum. -1: no row
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;
@@ -66,11 +65,6 @@ struct DashModel {
 
 // The pages share the dashboard panel. This says which one's showing.
 enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf };
-// Decaffeinate's screen. J4 picks between two drafts: true, its own Decaf tab with a shake meter (A); false, one row of
-// steps on the Hands tab (B).
-constexpr bool kDecafOwnTab = true;
-// How many tabs the header shows: 4 with Decaffeinate's own, otherwise 3. Only the draft pictures change it.
-void setTabCount(int n);
 
 // A fine adjust arrow: "nudge_<hand>_<axis>_<p or m>". axis as in nudged(), in placement.h.
 bool parseNudge(const std::string& id, int& hand, int& axis, int& dir);

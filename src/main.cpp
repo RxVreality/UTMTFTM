@@ -126,7 +126,6 @@ struct Step { int hand; bool match; };
 static constexpr float kGhostS = 0.36f;    // metres covered by the stereo ghost quad
 static constexpr float kGrabReach = 0.16f; // how close your hand must be to grab the hand being placed
 static constexpr float kLostHand = 1.0f;   // an offset this far out is a fault, not a placement: keep the last good one
-static constexpr bool kDecafTab = kDecafOwnTab;  // see ui.h
 
 
 struct App {
@@ -677,7 +676,6 @@ struct App {
     m.fine = fineAdjust && mode == Mode::Idle;
     m.fineBig = fineBig;
     m.hint = nudgeHint(fx.hover, fineBig);
-    if (!kDecafTab) m.decaf = store.decafLevel(sceneKey);
     return m;
   }
 
@@ -700,7 +698,7 @@ struct App {
     return m;
   }
 
-  // A step tapped, on either draft. Saved the way the page's Save for says, and live straight away.
+  // A step tapped. Saved the way the page's Save for says, and live straight away.
   void setDecaf(int level) {
     const char* name = decafName(level);
     if (saveForGame && !sceneKey.empty()) {
@@ -728,7 +726,7 @@ struct App {
   // it's on screen, or the laser is on it.
   void refreshDashboard() {
     // The driver measures the shake only while the Decaf page is up to show it.
-    const bool meter = kDecafTab && page == DashPage::Decaf && panelShowing();
+    const bool meter = page == DashPage::Decaf && panelShowing();
     if (meter != decafMeter) { decafMeter = meter; Store::decafMeasure(meter); }
     bool first = dashDrawn.empty();
     if (!first && !dashPoke && !panelShowing()) { dashForce = true; return; }
