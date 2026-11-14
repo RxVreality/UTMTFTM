@@ -354,6 +354,10 @@ int main() {
     w.setDecafPct("steam.app.555160", "Pavlov", 60, false);
     CHECK(w.decafPctAll == 60 && w.decafPct("steam.app.555160") == 60 && w.decafPct("steam.app.629730") == 70, "and from another game it doesn't change that one");
     CHECK(w.handWeight("steam.app.843390") == "weighted" && w.handWeightSolid("steam.app.843390"), "Vertigo 2 is on the list as solid, from playing it");
+    CHECK(w.handWeight("steam.app.1579880") == "weighted" && !w.handWeightSolid("steam.app.1579880") && !w.decafLightStart("steam.app.1579880"),
+          "The Light Brigade is on it as players say it may: no lighter start");
+    CHECK(w.handWeight("steam.app.691320") == "smooths" && !w.handWeightSolid("steam.app.691320"), "Gun Club VR as players say it may smooth aim");
+    CHECK(w.handWeights.size() >= 33, "the whole list reads (%zu games' keys)", w.handWeights.size());
     // A game only players say may weight your hands: the yellow note, and no lighter start.
     w.handWeights["steam.app.999"] = Store::HandWeight{"weighted", false};
     CHECK(w.decafPct("steam.app.999") == 60 && !w.decafLightStart("steam.app.999") && !w.handWeightSolid("steam.app.999"), "a 'players' game keeps the all-games strength");
