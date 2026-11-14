@@ -325,7 +325,52 @@ int Store::decafLevel(const std::string& app) const {
 int Store::decafPct(const std::string& app) const {
   auto it = apps.find(app);
   if (it != apps.end() && it->second.decafPct >= 0) return it->second.decafPct;
+  if (handWeight(app) == "weighted") return std::min(decafPctAll, kLightStartPct);
   return decafPctAll;
+}
+
+void Store::setDecafPct(const std::string& app, const std::string& name, int pct, bool forGame) {
+  pct = std::clamp(pct, decaf::kMinPct, decaf::kMaxPct);
+  if (forGame && !app.empty()) {
+    AppProfile& p = apps[app];
+    if (p.name.empty()) p.name = name;
+    p.decafPct = pct;
+    return;
+  }
+  decafPctAll = pct;
+  // "All games" includes the game you're in, the same as offsets. A weighted game keeps it as its own, so it isn't lightened.
+  if (!app.empty() && handWeight(app) == "weighted") {
+    AppProfile& p = apps[app];
+    if (p.name.empty()) p.name = name;
+    p.decafPct = pct;
+  } else if (!app.empty() && apps.count(app)) {
+    apps[app].decafPct = -1;
+  }
+}
+
+std::map<std::string, std::string> Store::loadHandWeights(const std::string& file) {
+  std::map<std::string, std::string> out;
+  Json::Value v;
+  Json::CharReaderBuilder b;
+  std::string errs;
+  std::ifstream in(fs::u8path(file));
+  if (!in || !Json::parseFromStream(b, in, &v, &errs)) return out;
+  for (const Json::Value& g : v["games"]) {
+    const std::string kind = g.get("kind", "").asString();
+    if (kind != "weighted" && kind != "smooths") continue;
+    for (const Json::Value& k : g["keys"]) out[k.asString()] = kind;
+  }
+  return out;
+}
+
+std::string Store::handWeight(const std::string& app) const {
+  auto it = handWeights.find(app);
+  return it == handWeights.end() ? "" : it->second;
+}
+
+bool Store::decafLightStart(const std::string& app) const {
+  auto it = apps.find(app);
+  return handWeight(app) == "weighted" && (it == apps.end() || it->second.decafPct < 0);
 }
 
 bool Store::decafOwn(const std::string& app) const {

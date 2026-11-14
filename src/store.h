@@ -61,6 +61,18 @@ struct Store {
   int decafAll = 0;                                  // for every game that hasn't one of its own
   int decafPctAll = 100;                             // how much of the step, for every game that hasn't one of its own
   int decafPct(const std::string& app) const;        // what this game uses
+  // Saves a strength the way the page's Save for says. In a game that weights your hands itself, saving it for all games
+  // sets this game to it as well, or the game's lighter start would put the slider straight back.
+  void setDecafPct(const std::string& app, const std::string& name, int pct, bool forGame);
+
+  // Games that weight your hands themselves ("weighted") or can smooth or steady aim themselves ("smooths"), by game key,
+  // from input/hand_weights.json (J4, 14 November). Decaf's smoothing adds to theirs, so weighted games start at no more
+  // than 50% of the step until a strength is set for them, and the Decaf page says so.
+  std::map<std::string, std::string> handWeights;
+  static std::map<std::string, std::string> loadHandWeights(const std::string& file);
+  std::string handWeight(const std::string& app) const;   // "weighted", "smooths" or ""
+  bool decafLightStart(const std::string& app) const;     // weighted, with no strength of its own: it's on the lighter start
+  static constexpr int kLightStartPct = 50;
   int decafLevel(const std::string& app) const;      // what this game uses
   bool decafOwn(const std::string& app) const;       // it has one of its own
   void publishDecaf() const;                         // hand the running game's step to the driver. Off with no game

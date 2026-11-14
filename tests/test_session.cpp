@@ -336,6 +336,23 @@ int main() {
     CHECK(e.decafOwn("steam.app.555160") && !e.decafOwn("steam.app.1"), "a strength of its own counts as the game having its own");
     Store fresh;
     CHECK(fresh.decafPct("anything") == 100, "nothing saved: the step as tested");
+
+    // Games that weight your hands themselves start lighter (J4, 14 November), from the real list.
+    Store w;
+    w.handWeights = Store::loadHandWeights(std::string(UTMTFTM_SOURCE_DIR) + "/input/hand_weights.json");
+    CHECK(w.handWeight("steam.app.629730") == "weighted" && w.handWeight("steam.app.2981220") == "smooths" && w.handWeight("steam.app.555160").empty(),
+          "the list: Blade & Sorcery weights hands, Forefront smooths, Pavlov neither");
+    CHECK(w.decafPct("steam.app.629730") == 50 && w.decafLightStart("steam.app.629730") && w.decafPct("steam.app.555160") == 100, "a weighted game starts at 50%%, others as tested");
+    w.decafPctAll = 30;
+    CHECK(w.decafPct("steam.app.629730") == 30, "an all-games strength already lighter than that is kept");
+    w.decafPctAll = 100;
+    w.setDecafPct("steam.app.629730", "Blade & Sorcery", 80, true);
+    CHECK(w.decafPct("steam.app.629730") == 80 && !w.decafLightStart("steam.app.629730"), "your own strength for it wins");
+    w.apps["steam.app.629730"].decafPct = -1;
+    w.setDecafPct("steam.app.629730", "Blade & Sorcery", 70, false);
+    CHECK(w.decafPctAll == 70 && w.decafPct("steam.app.629730") == 70, "saved for all games from inside it, the slider stays where you put it");
+    w.setDecafPct("steam.app.555160", "Pavlov", 60, false);
+    CHECK(w.decafPctAll == 60 && w.decafPct("steam.app.555160") == 60 && w.decafPct("steam.app.629730") == 70, "and from another game it doesn't change that one");
   }
 
   // F. The name a game without a Steam app id is saved under.

@@ -1,0 +1,16 @@
+{
+ "about": "Games that give your hands weight of their own, or can smooth or steady your aim themselves, so Decaffeinate's smoothing would add to theirs. 'weighted': the in-game hands or held weapons lag behind your real hands, so Decaf starts at 50% of the step there until you set your own. 'smooths': the game has smoothing or steadying of its own, so the Decaf page says two at once can feel late. From reviews, developer notes and player reports, not tried with Decaf yet: headset_checked says when someone has. Corrections welcome.",
+ "games": [
+  {"game": "Blade & Sorcery", "keys": ["steam.app.629730"], "kind": "weighted", "says": "The hand follows yours on a spring, and weapons drag behind fast swings. The game's own spring and damper settings change it.", "source": "https://steamcommunity.com/app/629730/discussions/2/3362406825551877390"},
+  {"game": "BONEWORKS", "keys": ["steam.app.823500"], "kind": "weighted", "says": "A physics body: heavy things move slowly and need two hands.", "source": "https://www.mobygames.com/game/windows/boneworks/reviews/reviewerId,179990/"},
+  {"game": "BONELAB", "keys": ["steam.app.1592190"], "kind": "weighted", "says": "A physics body, and each avatar's strength sets how hard its hands can move things.", "source": "https://roadtovr.com/bonelab-custom-avatar-mod-levels-items-vehicles/"},
+  {"game": "Battle Talent", "keys": ["steam.app.1331510"], "kind": "weighted", "says": "Physics weapons, tip-heavy swords.", "source": "https://steamcommunity.com/app/1331510/discussions/0/3163209341706404305"},
+  {"game": "The Walking Dead: Saints & Sinners", "keys": ["steam.app.916840"], "kind": "weighted", "says": "Physics hands with a ghost hand showing where yours really are. Long guns wobble.", "source": "https://www.unrealengine.com/tech-blog/skydance-interactive-shows-how-it-injected-vr-physicality-and-melee-combat-in-the-walking-dead-saints-sinners"},
+  {"game": "The Walking Dead: Saints & Sinners - Chapter 2: Retribution", "keys": ["steam.app.1947500"], "kind": "weighted", "says": "The same physics hands. Heavy axes need two hands.", "source": "https://mixed-news.com/en/the-walking-dead-saints-and-sinners-chapter-two-review/"},
+  {"game": "Behemoth", "keys": ["steam.app.1707990"], "kind": "weighted", "says": "Weapons have weight: swing too fast and the tip lags.", "source": "https://roadtovr.com/?p=172236"},
+  {"game": "Grimlord", "keys": ["steam.app.1910860"], "kind": "weighted", "says": "Melee weapons have simulated weight.", "source": "https://steamcommunity.com/app/1910860/discussions/0/3396301606651855468"},
+  {"game": "Breachers", "keys": ["steam.app.1922010"], "kind": "smooths", "says": "A hand smoothing slider of its own.", "source": "https://app.betahub.io/projects/pr-6710818205/issues/117"},
+  {"game": "Forefront", "keys": ["steam.app.2981220"], "kind": "smooths", "says": "Smooths sniper rifles itself, with no way to turn it off, and steadies aim on the other hand's trigger.", "source": "https://app.betahub.io/projects/pr-7682550116/feature_requests/1172"},
+  {"game": "Hot Dogs, Horseshoes & Hand Grenades", "keys": ["steam.app.450540"], "kind": "smooths", "says": "Long Gun Stabilization steadies rifles while you hold the other hand's trigger, or always.", "source": "https://thunderstore.io/c/h3vr/p/invent60/HandStabilizer/"}
+ ]
+}

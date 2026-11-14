@@ -265,6 +265,7 @@ struct App {
 
   bool init() {
     if (!store.load()) store.save();
+    store.handWeights = Store::loadHandWeights(g_root + "/input/hand_weights.json");
     in.init();
     std::string gpu;
     if (uploader.init(&gpu)) logf("overlay images via the GPU: %s", gpu.c_str());
@@ -751,6 +752,13 @@ struct App {
     m.ready = Store::decafReady();
     m.pointHand = store.dashPointHand;
     m.strength = store.decafPct(sceneKey);
+    // A game that weights your hands, or smooths aim, itself (input/hand_weights.json): Decaf adds to it, so the page says so.
+    const std::string weight = sceneKey.empty() ? "" : store.handWeight(sceneKey);
+    if (weight == "weighted")
+      m.weightNote = sceneName + " gives your hands weight of its own, and Decaf adds to it." +
+                     (store.decafLightStart(sceneKey) ? " It starts at " + std::to_string(m.strength) + "% here." : "");
+    else if (weight == "smooths")
+      m.weightNote = sceneName + " can smooth or steady your aim itself. Both at once can feel late: try one, then the other.";
     for (int h = 0; h < 2; ++h) {
       float raw = 0, out = 0;
       if (!sceneKey.empty() && Store::decafShake(h, raw, out)) m.hands[h] = {true, raw, out};
@@ -786,10 +794,7 @@ struct App {
   // How much of the step: the Decaf page's slider (MMeNDtal's fine tune idea, J4 asked for a slider, 14 November). While the
   // laser drags it, the hands follow live and nothing's written; letting go saves it, the way Save for says.
   void setDecafPct(int pct, bool save) {
-    int& slot = saveForGame && !sceneKey.empty() ? store.apps[sceneKey].decafPct : store.decafPctAll;
-    if (saveForGame && !sceneKey.empty() && store.apps[sceneKey].name.empty()) store.apps[sceneKey].name = sceneName;
-    if (!(saveForGame && !sceneKey.empty()) && !sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decafPct = -1;
-    slot = pct;
+    store.setDecafPct(sceneKey, sceneName, pct, saveForGame && !sceneKey.empty());
     store.publishDecaf();
     dashPoke = true;
     if (!save) return;
@@ -984,7 +989,8 @@ struct App {
         if (!sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decaf = store.apps[sceneKey].decafPct = -1;
         store.save();
         store.publishDecaf();
-        setStatus(std::string("Back on the all-games step: ") + decafName(store.decafAll) + " at " + std::to_string(store.decafPctAll) + "%.", Good);
+        setStatus(std::string("Back on the all-games step: ") + decafName(store.decafAll) + " at " + std::to_string(store.decafPct(sceneKey)) + "%" +
+                  (store.decafLightStart(sceneKey) ? ", the lighter start for a game that weights your hands." : "."), Good);
       }
       else if (id == "decaf_strength") {
         if (const Button* s = findButton(buttons, id)) setDecafPct(sliderValue(*s, x, kDecafMinPct, kDecafMaxPct, 5), true);

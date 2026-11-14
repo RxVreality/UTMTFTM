@@ -189,12 +189,15 @@ int main(int argc, char** argv) {
           drawDecaf(cv, slider, sb);
           cv.savePNG(out + "/decaf_strength_" + std::to_string(pct) + ".png");
           CHECK(inBounds(sb, cv) && has(sb, "decaf_strength"));
+          DecafModel moved = slider;
+          moved.strength = pct + 5;
+          CHECK(decafKey(moved) != decafKey(slider));  // dragging it redraws the page
           const Button* bar = findButton(sb, "decaf_strength");
           CHECK(bar && sliderValue(*bar, bar->x + 14, kDecafMinPct, kDecafMaxPct, 5) == 25 && sliderValue(*bar, bar->x + bar->w - 14, kDecafMinPct, kDecafMaxPct, 5) == 150);
           CHECK(bar && sliderValue(*bar, -500, kDecafMinPct, kDecafMaxPct, 5) == 25 && sliderValue(*bar, 5000, kDecafMinPct, kDecafMaxPct, 5) == 150);  // dragged off either end
           CHECK(bar && sliderValue(*bar, bar->x + 14 + (bar->w - 28) * 0.6, kDecafMinPct, kDecafMaxPct, 5) == 100);  // 100% sits 60% along
         }
-        // DRAFT for J4: a game that weights your hands itself, started at half strength.
+        // A game that weights your hands itself, on the lighter start (J4's pick, 14 November).
         DecafModel heavy = m;
         heavy.game = "Blade & Sorcery";
         heavy.level = 1;

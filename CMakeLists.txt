@@ -128,6 +128,7 @@ add_dependencies(test_ui utmtftm)
 
 add_executable(test_session tests/test_session.cpp src/store.cpp ${PLATFORM_SRC})
 target_link_libraries(test_session PRIVATE ${COMMON_LIBS})
+target_compile_definitions(test_session PRIVATE UTMTFTM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")  # for input/hand_weights.json
 add_dependencies(test_session utmtftm)
 
 add_executable(test_driver tests/test_driver.cpp)

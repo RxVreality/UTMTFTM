@@ -284,7 +284,7 @@ struct DecafModel {
   DecafHand hands[2];
   int pointHand = -1;       // the hand pointing at the dashboard, which is left as tracked so the laser stays sharp. -1: neither
   int strength = 100;       // how much of the step, 25 to 150 percent: the slider (MMeNDtal's fine tune idea, J4's slider)
-  // DRAFT for J4 (14 November): this game gives your hands weight of its own, in words. Empty: it doesn't, or isn't known.
+  // This game weights your hands, or smooths aim, itself (input/hand_weights.json), in words. Empty: not that we know of.
   std::string weightNote;
   std::string status;
   bool statusWarn = false, statusGood = false;
