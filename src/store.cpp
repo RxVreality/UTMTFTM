@@ -325,7 +325,7 @@ int Store::decafLevel(const std::string& app) const {
 int Store::decafPct(const std::string& app) const {
   auto it = apps.find(app);
   if (it != apps.end() && it->second.decafPct >= 0) return it->second.decafPct;
-  if (handWeight(app) == "weighted") return std::min(decafPctAll, kLightStartPct);
+  if (handWeight(app) == "weighted" && handWeightSolid(app)) return std::min(decafPctAll, kLightStartPct);
   return decafPctAll;
 }
 
@@ -338,18 +338,20 @@ void Store::setDecafPct(const std::string& app, const std::string& name, int pct
     return;
   }
   decafPctAll = pct;
-  // "All games" includes the game you're in, the same as offsets. A weighted game keeps it as its own, so it isn't lightened.
-  if (!app.empty() && handWeight(app) == "weighted") {
+  if (app.empty()) return;
+  // "All games" includes the game you're in, the same as offsets. A game on the lighter start keeps it as its own, or the
+  // lighter start would put the slider straight back.
+  if (handWeight(app) == "weighted" && handWeightSolid(app)) {
     AppProfile& p = apps[app];
     if (p.name.empty()) p.name = name;
     p.decafPct = pct;
-  } else if (!app.empty() && apps.count(app)) {
+  } else if (apps.count(app)) {
     apps[app].decafPct = -1;
   }
 }
 
-std::map<std::string, std::string> Store::loadHandWeights(const std::string& file) {
-  std::map<std::string, std::string> out;
+std::map<std::string, Store::HandWeight> Store::loadHandWeights(const std::string& file) {
+  std::map<std::string, HandWeight> out;
   Json::Value v;
   Json::CharReaderBuilder b;
   std::string errs;
@@ -358,19 +360,25 @@ std::map<std::string, std::string> Store::loadHandWeights(const std::string& fil
   for (const Json::Value& g : v["games"]) {
     const std::string kind = g.get("kind", "").asString();
     if (kind != "weighted" && kind != "smooths") continue;
-    for (const Json::Value& k : g["keys"]) out[k.asString()] = kind;
+    const HandWeight w{kind, g.get("confidence", "solid").asString() != "players"};
+    for (const Json::Value& k : g["keys"]) out[k.asString()] = w;
   }
   return out;
 }
 
 std::string Store::handWeight(const std::string& app) const {
   auto it = handWeights.find(app);
-  return it == handWeights.end() ? "" : it->second;
+  return it == handWeights.end() ? "" : it->second.kind;
+}
+
+bool Store::handWeightSolid(const std::string& app) const {
+  auto it = handWeights.find(app);
+  return it != handWeights.end() && it->second.solid;
 }
 
 bool Store::decafLightStart(const std::string& app) const {
   auto it = apps.find(app);
-  return handWeight(app) == "weighted" && (it == apps.end() || it->second.decafPct < 0);
+  return handWeight(app) == "weighted" && handWeightSolid(app) && (it == apps.end() || it->second.decafPct < 0);
 }
 
 bool Store::decafOwn(const std::string& app) const {

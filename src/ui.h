@@ -286,6 +286,7 @@ struct DecafModel {
   int strength = 100;       // how much of the step, 25 to 150 percent: the slider (MMeNDtal's fine tune idea, J4's slider)
   // This game weights your hands, or smooths aim, itself (input/hand_weights.json), in words. Empty: not that we know of.
   std::string weightNote;
+  bool weightMaybe = false;  // only players say so: a yellow lamp, and it says "may"
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;

@@ -753,12 +753,18 @@ struct App {
     m.pointHand = store.dashPointHand;
     m.strength = store.decafPct(sceneKey);
     // A game that weights your hands, or smooths aim, itself (input/hand_weights.json): Decaf adds to it, so the page says so.
+    // Solid ones say so plainly; "players" ones say may, with a yellow lamp (J4's two tiers, 14 November).
     const std::string weight = sceneKey.empty() ? "" : store.handWeight(sceneKey);
-    if (weight == "weighted")
+    m.weightMaybe = !weight.empty() && !store.handWeightSolid(sceneKey);
+    if (weight == "weighted" && !m.weightMaybe)
       m.weightNote = sceneName + " gives your hands weight of its own, and Decaf adds to it." +
                      (store.decafLightStart(sceneKey) ? " It starts at " + std::to_string(m.strength) + "% here." : "");
-    else if (weight == "smooths")
+    else if (weight == "weighted")
+      m.weightNote = "Players say " + sceneName + " may give your hands weight of its own. If Decaf feels late here, try less strength.";
+    else if (weight == "smooths" && !m.weightMaybe)
       m.weightNote = sceneName + " can smooth or steady your aim itself. Both at once can feel late: try one, then the other.";
+    else if (weight == "smooths")
+      m.weightNote = "Players say " + sceneName + " may smooth or steady your aim itself. If Decaf feels late here, try it off.";
     for (int h = 0; h < 2; ++h) {
       float raw = 0, out = 0;
       if (!sceneKey.empty() && Store::decafShake(h, raw, out)) m.hands[h] = {true, raw, out};

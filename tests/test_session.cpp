@@ -353,6 +353,10 @@ int main() {
     CHECK(w.decafPctAll == 70 && w.decafPct("steam.app.629730") == 70, "saved for all games from inside it, the slider stays where you put it");
     w.setDecafPct("steam.app.555160", "Pavlov", 60, false);
     CHECK(w.decafPctAll == 60 && w.decafPct("steam.app.555160") == 60 && w.decafPct("steam.app.629730") == 70, "and from another game it doesn't change that one");
+    CHECK(w.handWeight("steam.app.843390") == "weighted" && w.handWeightSolid("steam.app.843390"), "Vertigo 2 is on the list as solid, from playing it");
+    // A game only players say may weight your hands: the yellow note, and no lighter start.
+    w.handWeights["steam.app.999"] = Store::HandWeight{"weighted", false};
+    CHECK(w.decafPct("steam.app.999") == 60 && !w.decafLightStart("steam.app.999") && !w.handWeightSolid("steam.app.999"), "a 'players' game keeps the all-games strength");
   }
 
   // F. The name a game without a Steam app id is saved under.

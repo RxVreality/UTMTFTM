@@ -68,9 +68,13 @@ struct Store {
   // Games that weight your hands themselves ("weighted") or can smooth or steady aim themselves ("smooths"), by game key,
   // from input/hand_weights.json (J4, 14 November). Decaf's smoothing adds to theirs, so weighted games start at no more
   // than 50% of the step until a strength is set for them, and the Decaf page says so.
-  std::map<std::string, std::string> handWeights;
-  static std::map<std::string, std::string> loadHandWeights(const std::string& file);
+  // J4's two tiers: "solid" (developer notes, reviews, or played) and "players" (community posts say it may). Only a solid
+  // weighted game gets the lighter start; a "players" one only gets the yellow "may" note.
+  struct HandWeight { std::string kind; bool solid = true; };
+  std::map<std::string, HandWeight> handWeights;
+  static std::map<std::string, HandWeight> loadHandWeights(const std::string& file);
   std::string handWeight(const std::string& app) const;   // "weighted", "smooths" or ""
+  bool handWeightSolid(const std::string& app) const;     // and it's the solid tier
   bool decafLightStart(const std::string& app) const;     // weighted, with no strength of its own: it's on the lighter start
   static constexpr int kLightStartPct = 50;
   int decafLevel(const std::string& app) const;      // what this game uses

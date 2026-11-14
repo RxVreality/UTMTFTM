@@ -784,7 +784,7 @@ std::string decafKey(const DecafModel& m) {
     snprintf(b, sizeof b, "|%d,%.2f,%.2f", h.measured, h.raw, h.out);
     k += b;
   }
-  return k + "|p" + std::to_string(m.pointHand) + "|s" + std::to_string(m.strength) + "|" + m.weightNote + "|fx:" + m.hover + "," + m.down;
+  return k + "|p" + std::to_string(m.pointHand) + "|s" + std::to_string(m.strength) + "|" + m.weightNote + std::to_string(m.weightMaybe) + "|fx:" + m.hover + "," + m.down;
 }
 
 void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
@@ -916,7 +916,7 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   } else if (m.ready && updateLine(c, btn, L, R, baseY)) {
   } else if (m.ready && !m.weightNote.empty() && m.level > 0) {
     // A game that weights your hands, or smooths aim, itself: Decaf's lag adds to the game's own (J4's pick, 14 November).
-    lamp(c, L, baseY - 14, 14, SIGNAL);
+    lamp(c, L, baseY - 14, 14, m.weightMaybe ? SIGNAL : PAPER);
     text(c, L + 28, baseY, 19, m.weightNote, true, PAPER, 1, 0, R - L - 28);
   } else {
     const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."

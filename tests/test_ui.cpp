@@ -205,8 +205,16 @@ int main(int argc, char** argv) {
         heavy.weightNote = "Blade & Sorcery gives your hands weight of its own, and Decaf adds to it. It starts at 50% here.";
         std::vector<Button> hb2;
         drawDecaf(cv, heavy, hb2);
-        cv.savePNG(out + "/decaf_weight_note_draft.png");
+        cv.savePNG(out + "/decaf_weight_note_solid.png");
         CHECK(inBounds(hb2, cv));
+        DecafModel maybe = m;
+        maybe.game = "Example Game";
+        maybe.level = 1;
+        maybe.weightMaybe = true;
+        maybe.weightNote = "Players say Example Game may give your hands weight of its own. If Decaf feels late here, try less strength.";
+        drawDecaf(cv, maybe, hb2);
+        cv.savePNG(out + "/decaf_weight_note_maybe.png");
+        CHECK(inBounds(hb2, cv) && decafKey(maybe) != decafKey(heavy));
         DecafModel off = m;
         off.level = 0;
         std::vector<Button> ob;
