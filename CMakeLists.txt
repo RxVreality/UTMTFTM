@@ -112,6 +112,10 @@ add_executable(test_ghost tests/test_ghost.cpp)
 
 add_executable(test_macro tests/test_macro.cpp)
 
+# Decaffeinate's filter on made-up hands: how much shake it takes out and how late it makes a moving hand.
+add_executable(test_decaf tests/test_decaf.cpp)
+target_link_libraries(test_decaf PRIVATE ${CAIRO_LIBS})
+
 add_executable(test_ui tests/test_ui.cpp src/ui.cpp ${PLATFORM_SRC} src/glove.cpp)
 target_link_libraries(test_ui PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
 add_dependencies(test_ui utmtftm)

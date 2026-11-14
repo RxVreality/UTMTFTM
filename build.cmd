@@ -9,6 +9,8 @@ cmake --build build || exit /b 1
 if "%1"=="notest" exit /b 0
 dist\test_ghost.exe || exit /b 1
 dist\test_macro.exe || exit /b 1
+if not exist build\decaf mkdir build\decaf
+dist\test_decaf.exe build\decaf || exit /b 1
 dist\test_session.exe || exit /b 1
 dist\test_driver.exe || exit /b 1
 dist\test_controllers.exe || exit /b 1

@@ -22,6 +22,7 @@ struct AppProfile {
   std::string settings_key;      // e.g. frame_controller_250820_CurrentURL_openxr
   bool managed = false;          // CurrentURL currently points at our file
   bool live = false;             // the driver add-on reaches this game (offsets apply live, no binding)
+  int decaf = -1;                // Decaffeinate step for this game, 0 off to 3 Maximum. -1: same as all games
 };
 
 struct Store {
@@ -55,6 +56,17 @@ struct Store {
   // own frame. `drag` replaces them while a hand is being placed.
   void publishLive(const HandPair* drag = nullptr) const;
 
+  // Decaffeinate: smoothing the shake out of both hands (decaf.h), a step from 0 off to 3 Maximum.
+  int decafAll = 0;                                  // for every game that hasn't one of its own
+  int decafLevel(const std::string& app) const;      // what this game uses
+  bool decafOwn(const std::string& app) const;       // it has one of its own
+  void publishDecaf() const;                         // hand the running game's step to the driver. Off with no game
+  static bool decafReady();                          // the driver that's loaded can smooth. If not, SteamVR needs a restart
+  static void decafMeasure(bool on);                 // measure the shake even with it off, while the page shows it
+  // How much a hand shakes while held still, before and after, in degrees. False until there's a measurement.
+  static bool decafShake(int hand, float& rawDeg, float& outDeg);
+  static uint64_t decafSmoothed();                   // poses smoothed, both hands: a moving count means it's working
+
   // The running game.
   uint32_t scenePid = 0;
   std::string sceneKey;
@@ -65,6 +77,7 @@ struct Store {
   M gripFromRaw[2] = {ident(), ident()};                        // the OpenXR grip pose in the device's frame
   bool dashboardUp = false;  // the driver's offsets stand aside while the dashboard's open, so its pointers point true
   int dashLiveHand = -1;     // except this hand, while fine adjusting: it isn't the one pointing, so it can stay moved and you can watch it
+  int dashPointHand = -1;    // the hand pointing at the dashboard: Decaffeinate leaves its laser alone, so menus never feel heavy
   static uint64_t driverPoseUpdates();  // the driver's running count of poses it has seen
   static uint64_t driverHandUpdates();  // how many of those were from the two hands
   static M appliedDeviceOffset(int hand);  // what the driver has put in the poses being reported now

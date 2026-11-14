@@ -30,6 +30,7 @@
 #include <thread>
 #include <vector>
 
+#include "decaf.h"
 #include "live.h"
 
 static int fails = 0, checks = 0;
@@ -597,6 +598,159 @@ int main() {
     printf("at 500 updates/s for 2 hands and 3 other devices, that's %.4f%% of one CPU core\n", perSecond);
   }
 
+  // ---------------------------------------------------------------- Decaffeinate
+  {
+    fhlive::DecafChannel& dc = shm->decaf;
+    CHECK(dc.magic.load() == fhlive::kDecafMagic, "the overlay needs to be able to see the driver can smooth");
+    auto setDecaf = [&](const fhlive::DecafSettings& l, const fhlive::DecafSettings& r) {
+      fhlive::seqWriteBegin(dc.seq);
+      dc.want[0] = l; dc.want[1] = r;
+      fhlive::seqWriteEnd(dc.seq);
+    };
+    auto asSettings = [](const decaf::Params& q) { return fhlive::DecafSettings{q.rotMinHz, q.rotBeta, q.posMinHz, q.posBeta, q.speedHz}; };
+    const fhlive::DecafSettings off{}, strong = asSettings(decaf::preset(2));
+    using C = std::chrono::steady_clock;
+    auto waitMs = [](double ms) { const auto end = C::now() + std::chrono::duration<double, std::milli>(ms); while (C::now() < end) {} };
+    std::normal_distribution<double> n01(0, 1);
+
+    // A hand held still with the tracking shaking it about by about a third of a degree and a millimetre, 500 times a second.
+    const Q base = randQ();
+    const V basePos = {0.2, 1.3, -0.4};
+    auto shaky = [&]() {
+      vr::DriverPose_t s = randPose();
+      const Q q = mul(axisTurn(U(-1, 1), U(-1, 1), U(-1, 1), n01(rng) * 0.35), base);
+      s.qRotation = toHmd(q);
+      s.vecPosition[0] = basePos.x + n01(rng) * 0.001; s.vecPosition[1] = basePos.y + n01(rng) * 0.001; s.vecPosition[2] = basePos.z + n01(rng) * 0.001;
+      for (int i = 0; i < 3; ++i) { s.vecVelocity[i] = n01(rng) * 0.02; s.vecAngularVelocity[i] = n01(rng) * 0.3; s.vecAcceleration[i] = s.vecAngularAcceleration[i] = 0; }
+      return s;
+    };
+    auto angleTo = [&](const vr::HmdQuaternion_t& h) { return gapDegrees({fromHmd(h), {0, 0, 0}}, {base, {0, 0, 0}}); };
+
+    // Off: nothing changes, on either hand.
+    publish(ch, 3, 4, kNone, kNone);
+    setDecaf(off, off);
+    for (uint32_t dev : {3u, 4u, 5u}) {
+      p = shaky();
+      api->TrackedDevicePoseUpdated(dev, p, sizeof p);
+      CHECK(!memcmp(host.last, &p, sizeof p), "Decaffeinate off: device %u's pose goes through untouched", dev);
+    }
+
+    // Strong on the left hand only.
+    setDecaf(strong, off);
+    const uint64_t smoothed0 = dc.smoothed[0].load();
+    double inSq = 0, outSq = 0, inW = 0, outW = 0;
+    int n = 0;
+    bool rightUntouched = true, othersUntouched = true, finite = true;
+    for (int i = 0; i < 600; ++i) {
+      p = shaky();
+      api->TrackedDevicePoseUpdated(3, p, sizeof p);
+      const vr::DriverPose_t o = host.pose();
+      for (double x : o.vecPosition) finite = finite && std::isfinite(x);
+      if (i >= 300) {
+        const double a = angleTo(p.qRotation), b = angleTo(o.qRotation);
+        inSq += a * a; outSq += b * b;
+        inW += p.vecAngularVelocity[0] * p.vecAngularVelocity[0]; outW += o.vecAngularVelocity[0] * o.vecAngularVelocity[0];
+        ++n;
+      }
+      vr::DriverPose_t r = shaky();
+      api->TrackedDevicePoseUpdated(4, r, sizeof r);
+      rightUntouched = rightUntouched && !memcmp(host.last, &r, sizeof r);
+      api->TrackedDevicePoseUpdated(5, r, sizeof r);
+      othersUntouched = othersUntouched && !memcmp(host.last, &r, sizeof r);
+      waitMs(2);
+    }
+    const double inRms = std::sqrt(inSq / n), outRms = std::sqrt(outSq / n);
+    printf("Decaffeinate Strong through the driver: a hand shaking %.3f degrees comes out shaking %.3f (%.1f times less)\n", inRms, outRms, inRms / outRms);
+    CHECK(outRms < inRms / 3, "Strong takes at least two thirds of the shake out of a held-still hand (%.3f > %.3f)", inRms, outRms);
+    CHECK(std::sqrt(outW / n) < std::sqrt(inW / n) / 3, "and the velocity SteamVR steps the pose on by is smoothed too, or the shake comes back");
+    CHECK(rightUntouched, "the other hand, with it off, is untouched");
+    CHECK(othersUntouched, "devices that aren't hands are untouched");
+    CHECK(finite, "never a broken number");
+    CHECK(dc.smoothed[0].load() >= smoothed0 + 590 && dc.smoothed[1].load() == 0, "the overlay can see it's working, hand by hand");
+    CHECK(dc.rotRaw[0].load() > 100 && dc.rotOut[0].load() < dc.rotRaw[0].load() / 2,
+          "the shake meter sees it and sees it go (%u > %u thousandths of a degree)", dc.rotRaw[0].load(), dc.rotOut[0].load());
+
+    // It only touches the tracked pose. The hand's offset still goes on afterwards, the same as without it.
+    const fhlive::DeviceOffset l = randOffset();
+    publish(ch, 3, 4, l, kNone);
+    p = shaky();
+    api->TrackedDevicePoseUpdated(3, p, sizeof p);
+    const vr::DriverPose_t both = host.pose();
+    setDecaf(off, off);
+    api->TrackedDevicePoseUpdated(3, p, sizeof p);
+    const vr::DriverPose_t offsetOnly = host.pose();
+    CHECK(!memcmp(&both.qDriverFromHeadRotation, &offsetOnly.qDriverFromHeadRotation, sizeof both.qDriverFromHeadRotation) &&
+          !memcmp(both.vecDriverFromHeadTranslation, offsetOnly.vecDriverFromHeadTranslation, sizeof both.vecDriverFromHeadTranslation),
+          "with both on, the offset goes on exactly as it does alone");
+    CHECK(angleTo(both.qRotation) < angleTo(p.qRotation) + 0.2, "and the smoothing's still in it");
+    publish(ch, 3, 4, kNone, kNone);
+
+    // Lost tracking goes through as it came, and it starts again from the next good pose with no slide.
+    setDecaf(strong, strong);
+    vr::DriverPose_t lost = shaky();
+    lost.poseIsValid = false;
+    lost.result = vr::TrackingResult_Running_OutOfRange;
+    api->TrackedDevicePoseUpdated(3, lost, sizeof lost);
+    CHECK(!memcmp(host.last, &lost, sizeof lost), "a pose with no tracking goes through untouched");
+    vr::DriverPose_t back = shaky();
+    back.vecPosition[0] += 0.5;  // it's come back half a metre away
+    api->TrackedDevicePoseUpdated(3, back, sizeof back);
+    CHECK(!memcmp(host.last, &back, sizeof back), "the first pose after it comes back is where the hand really is");
+
+    // Measuring with it off: the page can show how much you shake before you switch it on.
+    setDecaf(off, off);
+    dc.measure.store(1);
+    dc.rotRaw[1].store(0);
+    bool measuredUntouched = true;
+    for (int i = 0; i < 200; ++i) {
+      vr::DriverPose_t r = shaky();
+      api->TrackedDevicePoseUpdated(4, r, sizeof r);
+      measuredUntouched = measuredUntouched && !memcmp(host.last, &r, sizeof r);
+      waitMs(2);
+    }
+    dc.measure.store(0);
+    CHECK(measuredUntouched, "measuring changes nothing in the pose");
+    CHECK(dc.rotRaw[1].load() > 100 && dc.rotRaw[1].load() == dc.rotOut[1].load(), "measuring with it off: shake seen, and nothing taken out (%u, %u)",
+          dc.rotRaw[1].load(), dc.rotOut[1].load());
+
+    // Whatever's in the file, nothing broken comes out of it.
+    const float nan = std::nanf("");
+    setDecaf({nan, nan, nan, nan, nan}, {1e30f, -5.f, -1.f, 1e30f, 0.f});
+    bool sane = true;
+    for (int i = 0; i < 50; ++i) {
+      for (uint32_t dev : {3u, 4u}) {
+        p = shaky();
+        api->TrackedDevicePoseUpdated(dev, p, sizeof p);
+        const vr::DriverPose_t o = host.pose();
+        for (double x : o.vecPosition) sane = sane && std::isfinite(x);
+        sane = sane && std::isfinite(o.qRotation.w) && std::isfinite(o.qRotation.x) && std::isfinite(o.vecAngularVelocity[0]);
+      }
+    }
+    CHECK(sane, "nonsense settings in the file never make a broken pose");
+
+    // What it adds to each pose update, with Strong on both hands.
+    {
+      const int N = 2000000;
+      setDecaf(strong, strong);
+      p = shaky();
+      auto direct = [&](uint32_t which) { host.which = which; host.size = sizeof p; ++host.calls; memcpy(host.last, &p, sizeof p); };
+      auto t0 = C::now();
+      for (int i = 0; i < N; ++i) direct(3);
+      auto t1 = C::now();
+      for (int i = 0; i < N; ++i) api->TrackedDevicePoseUpdated(3, p, sizeof p);
+      auto t2 = C::now();
+      setDecaf(off, off);
+      for (int i = 0; i < N; ++i) api->TrackedDevicePoseUpdated(3, p, sizeof p);
+      auto t3 = C::now();
+      auto ns = [&](C::time_point a, C::time_point b) { return std::chrono::duration<double, std::nano>(b - a).count() / N; };
+      const double on = ns(t1, t2) - ns(t0, t1), offCost = ns(t2, t3) - ns(t0, t1);
+      printf("Decaffeinate cost per hand pose: %.0f ns on, %.0f ns off. At 1000 poses a second on both hands, %.4f%% of one CPU core\n", on, offCost,
+             2 * 1000 * on / 1e9 * 100);
+      CHECK(on < 2000, "Decaffeinate has become expensive (%.0f ns a pose)", on);
+    }
+    setDecaf(off, off);
+  }
+
   // ---------------------------------------------------------------- buttons
   {
     fhlive::InputChannel& in = shm->input;
@@ -1036,6 +1190,7 @@ int main() {
   // M. Shutting down leaves SteamVR as it found it.
   provider->Cleanup();
   CHECK(vtable[1] == originalSlot, "the hook must come out on Cleanup");
+  CHECK(shm->decaf.magic.load() == 0, "and the overlay can see smoothing has gone with it");
   for (int i = 0; i < 4; ++i) CHECK(inputVtable[i] == originalInputSlots[i], "button call %d must come out on Cleanup", i);
   p = randPose();
   api->TrackedDevicePoseUpdated(3, p, sizeof p);

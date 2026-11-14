@@ -434,14 +434,19 @@ void drawHandPreview(Canvas& cv, double x, double y, double size, bool left, con
 
 // ---------------------------------------------------------------- dashboard
 // The top of both pages: the mark and name, which page this is, what's running and how it's connected, and Close.
+static int g_tabs = kDecafOwnTab ? 4 : 3;
+void setTabCount(int n) { g_tabs = n == 4 ? 4 : 3; }
+
 static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const std::string& game, LiveState live, bool confirmClose, DashPage page) {
   const double L = 44, R = width - 44;
   markTile(c, L, 20, 80, 64);
   caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  const double tabX = 456, tabY = 34, tabH = 42, tabW = 112, tabD = tabH * kLean;
-  const struct { DashPage p; const char* id; const char* name; } tabs[3] = {{DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}};
-  for (int i = 0; i < 3; ++i) {
+  const int nTabs = g_tabs;
+  const double tabX = 456, tabY = 34, tabH = 42, tabW = nTabs == 4 ? 104 : 112, tabD = tabH * kLean;
+  const struct { DashPage p; const char* id; const char* name; } tabs[4] = {
+      {DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}, {DashPage::Decaf, "page_decaf", "Decaf"}};
+  for (int i = 0; i < nTabs; ++i) {
     const double x = tabX + i * (tabW - tabD + 3);
     const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos);
     if (on) slab(c, x, tabY, tabW, tabH, PAPER);
@@ -460,7 +465,23 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
     while (cut > 0 && (static_cast<unsigned char>(shownName[cut]) & 0xC0) == 0x80) --cut;
     shownName = shownName.substr(0, cut) + "...";
   }
-  text(c, right, 50, 21, game.empty() ? "No game running" : shownName, false, game.empty() ? DIM : PAPER, 1, 2, right - (tabX + 3 * tabW - 2 * tabD + 12));
+  const double nameW = right - (tabX + nTabs * tabW - (nTabs - 1) * tabD + 12);
+  if (nTabs == 4 && !game.empty()) {
+    // Less room with a fourth tab: the name stays big enough to read and loses its end instead.
+    double size = 21;
+    while (size > 17 && textW(c, shownName, size, false) > nameW) size -= 1;
+    auto chars = utf8Chars(game);
+    std::string cut = game;
+    for (size_t n = chars.size(); n > 1 && textW(c, cut, size, false) > nameW; --n) {
+      cut.clear();
+      for (size_t i = 0; i + 1 < n; ++i) cut += chars[i];
+      while (!cut.empty() && cut.back() == ' ') cut.pop_back();
+      cut += "...";
+    }
+    text(c, right, 50, size, cut, false, PAPER, 1, 2);
+  } else {
+    text(c, right, 50, 21, game.empty() ? "No game running" : shownName, false, game.empty() ? DIM : PAPER, 1, 2, nameW);
+  }
   if (live == LiveState::Live || live == LiveState::NextLaunch) {
     const bool on = live == LiveState::Live;
     const double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
@@ -483,6 +504,7 @@ std::string dashKey(const DashModel& m) {
     k += "|" + std::to_string((int)cd.badge) + std::to_string(cd.ghostMatched);
   }
   k += "|fx:" + m.hover + "," + m.down + "|" + std::to_string(m.statusGood) + std::to_string(m.fine) + std::to_string(m.fineBig) + m.hint;
+  k += "|decaf:" + std::to_string(m.decaf);
   return k;
 }
 
@@ -699,7 +721,20 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
     caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(lims[i]) + " cm", on ? INK : PAPER, 1, 1, 1);
     btn.push_back({bx + rd / 2, fy, rw, fh, id});
   }
-  if (m.gameHasCustom) button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
+  // Decaffeinate's four steps share the row, and the all-games button drops down to the status line to make room.
+  double statusR = R;
+  if (m.decaf >= 0) {
+    const double dW = label(c, sx, fy + 29, 16, "Decaf");
+    std::vector<Segment> steps;
+    for (int i = 0; i < kDecafSteps; ++i) steps.push_back({"decaf_" + std::to_string(i), i == 3 ? "Max" : decafName(i), m.decaf == i, true});
+    segments(c, btn, sx + dW + 16, fy, R - (sx + dW + 16), fh, steps, 17);
+    if (m.gameHasCustom) {
+      button(c, btn, R - 300, 710, 300, 40, "use_global", "Use the all-games default", Outline);
+      statusR = R - 316;
+    }
+  } else if (m.gameHasCustom) {
+    button(c, btn, sx, fy, R - sx, fh, "use_global", "Use the all-games default", Outline);
+  }
 
   // one line of status along the bottom edge
   hline(c, L, R, 700);
@@ -707,14 +742,133 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   std::string st = m.status;
   if (!st.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
-    text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, R - L - 28);
+    text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, statusR - L - 28);
   } else if (!m.hint.empty()) {
-    text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, R - L);
+    text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, statusR - L);
   } else {
     if (m.armed || m.live == LiveState::NoGame || m.fine) {}  // the line above the hands already says it
     else if (m.live == LiveState::Live) st = "Changes show on your in-game hands as you move them.";
     else st = "This game takes new offsets the next time it launches.";
-    if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, R - L);
+    if (!st.empty()) text(c, L, baseY, 19, st, false, DIM, 1, 0, statusR - L);
+  }
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- Decaffeinate page
+const char* decafName(int level) {
+  static const char* const names[kDecafSteps] = {"Off", "Tuned", "Strong", "Maximum"};
+  return level >= 0 && level < kDecafSteps ? names[level] : "Off";
+}
+
+std::string decafKey(const DecafModel& m) {
+  char b[160];
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.level) + std::to_string(m.saveForGame) + std::to_string(m.gameHasOwn) +
+                  std::to_string(m.ready) + std::to_string(m.confirmClose) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood);
+  for (const DecafHand& h : m.hands) {
+    // To the hundredth of a degree: the meter moves, but not so finely it redraws on every pass.
+    snprintf(b, sizeof b, "|%d,%.2f,%.2f", h.measured, h.raw, h.out);
+    k += b;
+  }
+  return k + "|fx:" + m.hover + "," + m.down;
+}
+
+void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Decaf);
+
+  text(c, L, 138, 27, "Take the shake out of your aim", true, PAPER);
+  text(c, L, 164, 18, "Smooths the tiny trembles of a hand held still, and lets go the moment you move. Made for aiming down sights.", false, DIM, 1, 0, R - L);
+
+  // The four steps, as tiles: what each feels like, and what it measured on a test hand (tests/test_decaf.cpp).
+  struct Step { const char* line1; const char* line2; const char* measured; };
+  const Step steps[kDecafSteps] = {
+      {"Your hands exactly", "as they're tracked.", ""},
+      {"Takes the edge off.", "You won't feel it working.", "5x less shake, slow moves 24 ms late"},
+      {"Steady when you aim.", "A touch of weight on slow moves.", "10x less shake, slow moves 49 ms late"},
+      {"As steady as it gets.", "Slow moves feel heavy.", "18x less shake, slow moves 80 ms late"},
+  };
+  const double ty = 188, th = 132, td = th * kLean, gap = 4;
+  const double tw = (R - L + td * (kDecafSteps - 1) - gap * (kDecafSteps - 1)) / kDecafSteps;
+  for (int i = 0; i < kDecafSteps; ++i) {
+    const double x = L + i * (tw - td + gap);
+    const bool on = m.level == i;
+    const std::string id = "decaf_" + std::to_string(i);
+    if (on) slab(c, x, ty, tw, th, PAPER);
+    else frame(c, x, ty, tw, th, PAPER, 0.45, 2);
+    fxOver(c, x, ty, tw, th, id, true, on);
+    const RGB ink = on ? INK : PAPER, soft = on ? INK : DIM;
+    // Text sits inside the lean: each line starts further right the higher it is.
+    auto lx = [&](double y) { return x + 24 + (ty + th - y) * kLean; };
+    caps(c, lx(ty + 40), ty + 40, 26, decafName(i), ink, 1, 0, 2);
+    text(c, lx(ty + 72), ty + 72, 17, steps[i].line1, false, ink, 1, 0, tw - 40 - td);
+    text(c, lx(ty + 94), ty + 94, 17, steps[i].line2, false, ink, 1, 0, tw - 40 - td);
+    if (steps[i].measured[0]) text(c, lx(ty + 120), ty + 120, 13.5, steps[i].measured, false, soft, on ? 0.75 : 1, 0, tw - 40 - td);
+    btn.push_back({i == 0 ? x : x + td / 2, ty, tw - td / 2, th, id});
+  }
+
+  // How much each hand shakes while held still, as tracked and after, live from the driver.
+  const char* title[2] = {"Left hand", "Right hand"};
+  const double cw = mid - 12 - L, py = 342;
+  for (int h = 0; h < 2; ++h) {
+    const double x = h ? mid + 12 : L;
+    const DecafHand& d = m.hands[h];
+    slab(c, x, py, cw, 40, RAISED);
+    caps(c, x + 20, py + 29, 24, title[h], PAPER, 1, 0, 2);
+    label(c, x + cw - 18, py + 27, 15, "Shake while held still", DIM, 2);
+    const double barL = x + 190, barR = x + cw - 92, barH = 26;
+    const double scale = std::max(0.2f, std::max(d.raw, d.out) * 1.15f);
+    auto bar = [&](double y, const char* name, float v, RGB k, bool show) {
+      label(c, x, y + 20, 16, name);
+      hline(c, barL, barR, y + barH, LINE, 1);
+      if (show) {
+        const double w = std::max(barH * kLean + 2, (barR - barL) * std::min(1.0, v / scale));
+        slab(c, barL, y, w, barH, k);
+        text(c, x + cw - 4, y + 22, 24, fmt("%.2f", v) + "\xC2\xB0", true, PAPER, 1, 2);
+      } else {
+        text(c, x + cw - 4, y + 22, 24, "\xE2\x80\x93", true, FAINT, 1, 2);
+      }
+    };
+    const bool on = m.level > 0;
+    bar(py + 62, "As tracked", d.raw, DIM, d.measured);
+    bar(py + 106, "Decaffeinated", on ? d.out : d.raw, on ? SIGNAL : FAINT, d.measured);
+    std::string verdict;
+    RGB vk = DIM;
+    if (!m.ready) verdict = "Needs SteamVR restarted once";
+    else if (m.live == LiveState::NoGame) verdict = "Start a game to measure it";
+    else if (!d.measured) verdict = "Hold this hand still to measure it";
+    else if (!on) verdict = "Pick a step to steady it";
+    else if (d.out > 0.0005f) { verdict = fmt("%.0fx steadier", d.raw / d.out); vk = PAPER; }
+    else { verdict = "Steady"; vk = PAPER; }
+    text(c, x, py + 182, 22, verdict, vk.r == PAPER.r, vk, 1, 0, cw);
+  }
+  hline(c, L, R, 558);
+
+  // Where it's saved, the same as the Hands tab.
+  const double ay = 572, ah = 54, sx = mid + 12;
+  if (m.gameHasOwn) button(c, btn, L, ay, cw, ah, "decaf_use_global", "Use the all-games step", Outline);
+  else text(c, L, ay + 34, 17, m.game.empty() ? "Every game uses this unless one has its own." : "This game uses the all-games step.", false, DIM, 1, 0, cw);
+  const double saveW = label(c, sx, ay + 34, 16, "Save for");
+  segments(c, btn, sx + saveW + 18, ay, R - (sx + saveW + 18), ah,
+           {{"scope_game", "This game", m.saveForGame && !m.game.empty(), !m.game.empty()}, {"scope_global", "All games", !m.saveForGame || m.game.empty(), true}}, 21);
+
+  text(c, L, 664, 17, "Some games have smoothing of their own, like H3VR2's Controller Filtering. Use one or the other: two at once feel late.",
+       false, DIM, 1, 0, R - L);
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else {
+    const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
+                     : m.live == LiveState::NoGame ? "It only works with a game running, so SteamVR's own pointers stay as they are."
+                                                   : "Changes reach your in-game hands straight away. No restart.";
+    text(c, L, baseY, 19, st, false, m.ready ? DIM : PAPER, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;
 }

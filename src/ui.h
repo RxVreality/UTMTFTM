@@ -58,13 +58,19 @@ struct DashModel {
   bool fine = false;          // fine adjust: arrows either side of each number
   bool fineBig = false;       // and they go 1 cm and 5 degrees a tap, rather than 1 mm and 1 degree
   std::string hint;           // what's under the laser would do, when it isn't obvious
+  int decaf = -1;             // Decaffeinate's step, when it has a row on this page: 0 off to 3 Maximum. -1: no row
 
   // press feedback (static states, no animation): button under the laser / button held down
   std::string hover, down;
 };
 
 // The pages share the dashboard panel. This says which one's showing.
-enum class DashPage { Hands, Bindings, Combos, Recorded };
+enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf };
+// Decaffeinate's screen. J4 picks between two drafts: true, its own Decaf tab with a shake meter (A); false, one row of
+// steps on the Hands tab (B).
+constexpr bool kDecafOwnTab = true;
+// How many tabs the header shows: 4 with Decaffeinate's own, otherwise 3. Only the draft pictures change it.
+void setTabCount(int n);
 
 // A fine adjust arrow: "nudge_<hand>_<axis>_<p or m>". axis as in nudged(), in placement.h.
 bool parseNudge(const std::string& id, int& hand, int& axis, int& dir);
@@ -234,6 +240,30 @@ struct RecordedModel {
 };
 std::string recordedKey(const RecordedModel& m);
 void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- Decaffeinate page
+// Smoothing the shake out of a held-still hand (decaf.h): four steps, and how much each hand shakes, live.
+constexpr int kDecafSteps = 4;
+const char* decafName(int level);  // "Off", "Tuned", "Strong", "Maximum"
+struct DecafHand {
+  bool measured = false;
+  float raw = 0, out = 0;  // degrees of shake while held still, as tracked and after
+};
+struct DecafModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  int level = 0;
+  bool saveForGame = true;
+  bool gameHasOwn = false;  // this game has a step of its own, not the all-games one
+  bool ready = true;        // the driver that's loaded can smooth. If not, SteamVR needs a restart
+  DecafHand hands[2];
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string decafKey(const DecafModel& m);
+void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- in-headset instruction panel
 struct PanelModel {
