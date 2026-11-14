@@ -914,6 +914,10 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
   } else if (m.ready && updateLine(c, btn, L, R, baseY)) {
+  } else if (m.ready && !m.weightNote.empty() && m.level > 0) {
+    // DRAFT: a game that weights your hands itself. Decaf's lag adds to the game's own.
+    lamp(c, L, baseY - 14, 14, SIGNAL);
+    text(c, L + 28, baseY, 19, m.weightNote, true, PAPER, 1, 0, R - L - 28);
   } else {
     const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
                      : m.live == LiveState::NoGame ? "It only works with a game running, so SteamVR's own pointers stay as they are."

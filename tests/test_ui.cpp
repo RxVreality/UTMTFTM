@@ -194,6 +194,16 @@ int main(int argc, char** argv) {
           CHECK(bar && sliderValue(*bar, -500, kDecafMinPct, kDecafMaxPct, 5) == 25 && sliderValue(*bar, 5000, kDecafMinPct, kDecafMaxPct, 5) == 150);  // dragged off either end
           CHECK(bar && sliderValue(*bar, bar->x + 14 + (bar->w - 28) * 0.6, kDecafMinPct, kDecafMaxPct, 5) == 100);  // 100% sits 60% along
         }
+        // DRAFT for J4: a game that weights your hands itself, started at half strength.
+        DecafModel heavy = m;
+        heavy.game = "Blade & Sorcery";
+        heavy.level = 1;
+        heavy.strength = 50;
+        heavy.weightNote = "Blade & Sorcery gives your hands weight of its own, and Decaf adds to it. It starts at 50% here.";
+        std::vector<Button> hb2;
+        drawDecaf(cv, heavy, hb2);
+        cv.savePNG(out + "/decaf_weight_note_draft.png");
+        CHECK(inBounds(hb2, cv));
         DecafModel off = m;
         off.level = 0;
         std::vector<Button> ob;
