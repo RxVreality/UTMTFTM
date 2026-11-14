@@ -906,15 +906,47 @@ void scenarioBindings() {
   check(logHas("bindings page: oculus_quest_plus_controller_right loaded, 7 parts"), "and the other controller's");
   check(settingNow(setting).empty(), "just looking changes nothing");
 
-  // The tab opens on the walkthrough. Swapping two buttons there puts the game on our file, and Undo takes it off again.
+  // The tab opens on the walkthrough. Swapping two buttons there is done by the driver, live, without touching the game's
+  // binding: with the dashboard shut, pressing A reaches the game as B. Undo puts A back.
+  g_pageForClicks->setHookState(true, true);  // the program can see the hook by now, so this copy takes the same path
   clickGuide(fh::DashPage::Bindings, "g:right/input/a");
   wait(300);
   clickGuide(fh::DashPage::Bindings, "g:right/input/b");
   wait(600);
-  check(settingNow(setting).rfind("file:///", 0) == 0, "swapping A and B on the walkthrough points the game's setting at a file");
+  check(settingNow(setting).empty(), "swapping A and B on the walkthrough leaves the game's binding alone");
+  setDashboard(false);
+  wait(800);
+  fakeserver::clearHeardButtons();
+  fakeserver::reportButton(1, "/input/a/click", 1);
+  wait(100);
+  fakeserver::reportButton(1, "/input/a/click", 0);
+  wait(100);
+  {
+    bool b = false, a = false;
+    for (const auto& [who, v] : fakeserver::heardButtons()) {
+      b = b || (who == "R/input/b/click" && v == 1.f);
+      a = a || (who == "R/input/a/click" && v == 1.f);
+    }
+    check(b && !a, "and with the dashboard shut, pressing A reaches the game as B");
+  }
+  setDashboard(true);
+  wait(600);
   clickGuide(fh::DashPage::Bindings, "guide_bind_undo");
   wait(600);
-  check(settingNow(setting).empty(), "and Undo puts it back");
+  setDashboard(false);
+  wait(800);
+  fakeserver::clearHeardButtons();
+  fakeserver::reportButton(1, "/input/a/click", 1);
+  wait(100);
+  fakeserver::reportButton(1, "/input/a/click", 0);
+  wait(100);
+  {
+    bool a = false;
+    for (const auto& [who, v] : fakeserver::heardButtons()) a = a || (who == "R/input/a/click" && v == 1.f);
+    check(a, "and after Undo, A is A again");
+  }
+  setDashboard(true);
+  wait(600);
   clickGuide(fh::DashPage::Bindings, "guide_advanced");
   wait(400);
 

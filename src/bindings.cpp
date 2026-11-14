@@ -1373,6 +1373,10 @@ void Page::loadPrefs() {
         if (pair.isArray() && pair.size() == 2 && pair[0].isString() && pair[1].isString()) c.inputs.push_back({pair[0].asString(), pair[1].asString()});
       if (!c.output.empty() && !c.inputs.empty()) combos[k].push_back(c);
     }
+  swaps.clear();
+  for (const auto& k : v["swaps"].getMemberNames())
+    for (const auto& from : v["swaps"][k].getMemberNames())
+      if (v["swaps"][k][from].isString() && !v["swaps"][k][from].asString().empty()) swaps[k][from] = v["swaps"][k][from].asString();
   macroTouches = v.get("macro_touches", false).asBool();
   macroInterview = v.get("macro_interview", false).asBool();
   stickAxes = v.get("stick_names", "compass").asString() == "axes";
@@ -1444,6 +1448,12 @@ void Page::savePrefs() const {
       }
       v["combos"][k].append(e);
     }
+  }
+  v["swaps"] = Json::objectValue;
+  for (const auto& [k, m] : swaps) {
+    if (m.empty()) continue;
+    v["swaps"][k] = Json::objectValue;
+    for (const auto& [from, to] : m) v["swaps"][k][from] = to;
   }
   v["macro_touches"] = macroTouches;
   v["macro_interview"] = macroInterview;
@@ -1997,6 +2007,8 @@ BindModel Page::model(const std::string& hover, const std::string& down) {
     } else if (yourGuide) m.yours.note = "From " + guide()->from;
     else m.yours.note = "No bindings found yet. Play it once";
     if (m.hasGame && !combosHere().empty()) m.yours.note += ", plus " + std::to_string(combosHere().size()) + (combosHere().size() == 1 ? " combo" : " combos");
+    auto sw = swaps.find(choiceKey());
+    if (m.hasGame && sw != swaps.end() && !sw->second.empty()) m.yours.note += ", plus buttons swapped on the guided page";
   } else {
     m.yours.note = yours_.type.empty() ? "Turn your controllers on" : "SteamVR has no description of this controller";
   }
@@ -2929,6 +2941,19 @@ void Page::fillInputTable(fhlive::InputTable& t) {
       if (m.hand < 0 || m.path.empty() || t.macros >= fhlive::kMaxMacros) continue;
       macro::toWire(m, t.macro[t.macros++]);
     }
+  auto sw = swaps.find(choiceKey());
+  if (sw != swaps.end())
+    for (const auto& [from, to] : sw->second) {
+      if (t.routes >= fhlive::kMaxRoutes) break;
+      int fromHand = 0, toHand = 0;
+      std::string fromPath, toPath;
+      if (!wireHand(from, fromHand, fromPath) || !wireHand(to, toHand, toPath)) continue;
+      fhlive::WireRoute& w = t.route[t.routes++];
+      w.fromHand = uint8_t(fromHand);
+      w.toHand = uint8_t(toHand);
+      macro::copyName(w.from, sizeof w.from, fromPath);
+      macro::copyName(w.to, sizeof w.to, toPath);
+    }
   if (!launchKnown_) return;  // nothing's changed since it launched, then
   if (linking()) {
     static const std::map<std::string, uint8_t> partNo = {{"click", fhlive::LinkClick}, {"touch", fhlive::LinkTouch}, {"value", fhlive::LinkValue}, {"move", fhlive::LinkMove},
@@ -3507,6 +3532,7 @@ void Page::guideRemember() {
   gUndo_.games = games;
   gUndo_.combos = combos;
   gUndo_.recorded = recorded;
+  gUndo_.swaps = swaps;
 }
 
 void Page::guideUndo() {
@@ -3522,6 +3548,7 @@ void Page::guideUndo() {
   wiringChanges = gUndo_.wiring;
   combos = gUndo_.combos;
   recorded = gUndo_.recorded;
+  swaps = gUndo_.swaps;
   gUndo_.have = false;
   reapply();
   savePrefs();
@@ -3551,6 +3578,24 @@ BindSide Page::guideSide() {
     for (RowText& r : rows[hand]) r.unused = active.ok && !r.bound;
   }
   if (active.ok) guideOn(rows, *yourP, &active);
+  // A swapped button does the job of the one it presses as.
+  auto sw = swaps.find(choiceKey());
+  if (sw != swaps.end() && !gameKey_.empty()) {
+    std::map<std::string, RowText> was;
+    for (const auto& list : rows)
+      for (const RowText& r : list) was[r.id] = r;
+    for (auto& list : rows)
+      for (RowText& r : list) {
+        auto to = sw->second.find(r.id);
+        auto them = to == sw->second.end() ? was.end() : was.find(to->second);
+        if (them == was.end()) continue;
+        r.action = them->second.action;
+        r.actions = them->second.actions;
+        r.bound = them->second.bound;
+        r.unused = them->second.unused;
+        r.passThrough = them->second.passThrough;
+      }
+  }
   fillRows(side, "y:", yours_, rows);
   return side;
 }
@@ -3611,10 +3656,18 @@ static std::vector<size_t> offButtons(const std::vector<GameAction>& jobs) {
   return out;
 }
 
+bool Page::swapByDriver(const std::string& a, const std::string& b) const {
+  const Profile* mine = lib_.profile(yours_.type);
+  if (!hookOk_ || !mine || a.find('#') != std::string::npos || b.find('#') != std::string::npos) return false;
+  const Input* x = inputAt(*mine, a);
+  const Input* y = inputAt(*mine, b);
+  return x && y && x->click == y->click && x->touch == y->touch && x->value == y->value && x->force == y->force && is2D(*x) == is2D(*y);
+}
+
 bool Page::liveNow() { return afterChange().find("Live in the game now") != std::string::npos; }
 
 std::string Page::liveWords() {
-  return liveNow() ? "Works in " + gameName_ + " now. No restart." : "Works from the next time " + gameName_ + " starts.";
+  return liveNow() || gbByDriver_ ? "Works in " + gameName_ + " now. No restart." : "Works from the next time " + gameName_ + " starts.";
 }
 
 bool Page::guideFlashing(DashPage tab) const {
@@ -3655,6 +3708,8 @@ void Page::guideBindModel(GuideModel& m) {
     guideRows(m, [](GuideRow& g, const BindRow&) { g.look = GuideLook::Pulse; });
     bool changed = false;
     for (const auto& [k, w] : wiringChanges) changed = changed || (!w.empty() && k.size() > gameKey_.size() && k.compare(k.size() - gameKey_.size() - 1, std::string::npos, "|" + gameKey_) == 0);
+    auto sw = swaps.find(choiceKey());
+    changed = changed || (sw != swaps.end() && !sw->second.empty());
     if (changed) m.buttons.push_back({"guide_bind_reset", "Put it all back"});
     m.foot = "Your " + yours_.name + ", as " + gameName_ + " has it now.";
     return;
@@ -3702,7 +3757,7 @@ void Page::guideBindModel(GuideModel& m) {
   m.buttons.push_back({"guide_bind_undo", "Undo"});
   m.buttons.push_back({"guide_bind_again", "Change another", true});
   m.foot = liveWords();
-  m.footLive = liveNow();
+  m.footLive = liveNow() || gbByDriver_;
 }
 
 void Page::guideBindClick(const std::string& id) {
@@ -3728,9 +3783,28 @@ void Page::guideBindClick(const std::string& id) {
       return;
     }
     if (gbStep_ != 2 || control == gbButton_) return;
+    const std::string other = handedName(*mine, control, false);
+    if (swapByDriver(gbButton_, control)) {
+      // Each now presses as what the other pressed as, which undoes an earlier swap of the same two.
+      guideRemember();
+      std::map<std::string, std::string>& s = swaps[choiceKey()];
+      auto as = [&](const std::string& k) { auto it = s.find(k); return it == s.end() ? k : it->second; };
+      const std::string a = as(gbButton_), b = as(control);
+      s[gbButton_] = b;
+      s[control] = a;
+      for (auto it = s.begin(); it != s.end();) it = it->first == it->second ? s.erase(it) : std::next(it);
+      if (s.empty()) swaps.erase(choiceKey());
+      savePrefs();
+      gbByDriver_ = true;
+      gbChanged_ = {gbButton_, control};
+      gbDoneTitle_ = "Done. " + name + " and " + other + " swapped.";
+      gbDoneSub_.clear();
+      gbStep_ = 3;
+      return;
+    }
+    gbByDriver_ = false;
     const std::string from = guideBase();
     if (from.empty()) { say("UTMTFTM hasn't seen " + gameName_ + "'s controls yet. Play it once, then come back.", 2); return; }
-    const std::string other = handedName(*mine, control, false), mineJob = jobOn(gbButton_), theirJob = jobOn(control);
     guideRemember();
     const Wiring w = wiring(from, yours_.type);
     auto at = [&](const std::string& k) { auto it = w.find(k); return it == w.end() ? std::string() : it->second; };
@@ -3742,8 +3816,6 @@ void Page::guideBindClick(const std::string& id) {
     gbChanged_ = {gbButton_, control};
     gbDoneTitle_ = "Done. " + name + " and " + other + " swapped.";
     gbDoneSub_.clear();
-    (void)mineJob;
-    (void)theirJob;
     gbStep_ = 3;
     return;
   }
@@ -3768,6 +3840,7 @@ void Page::guideBindClick(const std::string& id) {
     }
     games[choiceKey()].explicitly = false;
     games[choiceKey()].from.clear();
+    swaps.erase(choiceKey());
     reapply();
     savePrefs();
     say("Back to how " + gameName_ + " had it." + afterChange(), 1);
@@ -3778,6 +3851,19 @@ void Page::guideBindClick(const std::string& id) {
     if (from.empty()) return;
     const std::string oldJob = jobOn(gbButton_);
     guideRemember();
+    gbByDriver_ = false;
+    // A button in a swap goes back to being itself first, and so does everything in that swap, or the two changes would fight.
+    auto sw = swaps.find(choiceKey());
+    if (sw != swaps.end()) {
+      std::set<std::string> ring = {gbButton_};
+      for (bool grew = true; grew;) {
+        grew = false;
+        for (const auto& [k, v] : sw->second)
+          if ((ring.count(k) || ring.count(v)) && (ring.insert(k).second | ring.insert(v).second)) grew = true;
+      }
+      for (const std::string& k : ring) sw->second.erase(k);
+      if (sw->second.empty()) swaps.erase(sw);
+    }
     wiringChanges[gameWiringKey(from)][gbButton_] = "";
     std::string now = "nothing";
     if (id != "guide_bind_none") {

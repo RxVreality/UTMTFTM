@@ -2533,33 +2533,56 @@ static void testGuide(const std::string& work, const std::string& out) {
   check(hasGuideButton(m, "guide_bind_back") && hasGuideButton(m, "guide_bind_more"), "with Back and Other jobs");
   shotGuide(m, out + "/guide_bind_2.png");
 
-  // Tapping another's job swaps them, for this game only, and it's live.
-  page.guideClick(DashPage::Bindings, "g:right/input/bumper");
+  // Tapping another's job swaps them. Two buttons the driver can trade, it does, for this game, every time: live now, and a job
+  // stays on the hand the game wants it on (J4, 13 November: Titan Isles wouldn't jump from the left D-pad).
+  page.guideClick(DashPage::Bindings, "g:right/input/a");
   m = page.guideModel(DashPage::Bindings, "", "", 0);
-  check(m.title == "Done. Y and right Bumper swapped.", "done: " + m.title);
-  const std::string own = "frame_controller>frame_controller|steam.app.777";
-  check(page.wiringChanges.count(own) && page.wiringChanges[own]["right/input/y"] == "right/input/bumper" && page.wiringChanges[own]["right/input/bumper"] == "right/input/y", "saved as this game's own rewiring");
-  check(!page.wiringChanges.count("frame_controller>frame_controller"), "and not for every game");
-  check(guideRow(m, "g:right/input/y")->job == "Fire the gun" && guideRow(m, "g:right/input/bumper")->job == "Reload", "the picture shows them swapped: Y " + guideRow(m, "g:right/input/y")->job + ", bumper " + guideRow(m, "g:right/input/bumper")->job);
-  check(guideRow(m, "g:right/input/y")->look == GuideLook::Changed && guideRow(m, "g:right/input/a")->look == GuideLook::Faded, "lit, and the rest faded");
+  check(m.title == "Done. Y and A swapped.", "done: " + m.title);
+  const std::string here = "steam.app.777|frame_controller", own = "frame_controller>frame_controller|steam.app.777";
+  check(page.swaps.count(here) && page.swaps[here]["right/input/y"] == "right/input/a" && page.swaps[here]["right/input/a"] == "right/input/y", "saved as a swap the driver does");
+  check(!page.wiringChanges.count(own) && !page.wiringChanges.count("frame_controller>frame_controller"), "and the binding file isn't touched");
+  check(guideRow(m, "g:right/input/a")->job == "Reload" && guideRow(m, "g:right/input/y")->job == "Nothing", "the picture shows them swapped: A " + guideRow(m, "g:right/input/a")->job + ", Y " + guideRow(m, "g:right/input/y")->job);
+  check(guideRow(m, "g:right/input/y")->look == GuideLook::Changed && guideRow(m, "g:right/input/b")->look == GuideLook::Faded, "lit, and the rest faded");
   check(m.footLive && m.foot.find("now") != std::string::npos, "and it says it works now: " + m.foot);
   shotGuide(m, out + "/guide_bind_3.png");
+  const auto routeFrom = [](const fhlive::InputTable& t, int hand, const std::string& from, int toHand, const std::string& to) {
+    for (uint32_t i = 0; i < t.routes; ++i)
+      if (t.route[i].fromHand == hand && from == t.route[i].from && t.route[i].toHand == toHand && to == t.route[i].to) return true;
+    return false;
+  };
   {
     fhlive::InputTable t;
     page.fillInputTable(t);
-    check(t.links >= 2, "the driver gets the swap");
+    check(t.routes == 2 && routeFrom(t, 1, "/input/y", 1, "/input/a") && routeFrom(t, 1, "/input/a", 1, "/input/y"), "the driver gets the swap as two buttons sent as each other");
   }
+  // Across hands: A's job now is Reload, the right hand's. The left D-pad gets it by pressing as the right Y.
+  page.guideClick(DashPage::Bindings, "g:right/input/a");
+  page.guideClick(DashPage::Bindings, "g:left/input/dpad_up");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(guideRow(m, "g:left/input/dpad_up")->job == "Reload", "the left D-pad reloads: " + guideRow(m, "g:left/input/dpad_up")->job);
+  {
+    fhlive::InputTable t;
+    page.fillInputTable(t);
+    check(routeFrom(t, 0, "/input/dpad_up", 1, "/input/y"), "as the right hand's Y, so a game that only reloads on the right hand does");
+  }
+  shotGuide(m, out + "/guide_bind_3_hands.png");
+  page.guideClick(DashPage::Bindings, "guide_bind_undo");
+  check(page.swaps[here].size() == 2 && page.swaps[here]["right/input/y"] == "right/input/a", "Undo takes back just the last swap");
   // Another game doesn't get it.
   page.setGame("steam.app.12345", "", "Fixture Game");
-  check(page.wiring("frame_controller", "frame_controller").at("right/input/y") == "right/input/y", "another game's Y is still its Y");
+  {
+    fhlive::InputTable t;
+    page.fillInputTable(t);
+    check(t.routes == 0, "another game's Y is still its Y");
+  }
   page.setGame("steam.app.777", "", "Named Game");
   page.gameStarted();
   m = page.guideModel(DashPage::Bindings, "", "", 0);
   check(m.step == "Step 1 of 3" && hasGuideButton(m, "guide_bind_reset"), "back on its first step, with a way to put it all back");
-  check(guideRow(m, "g:right/input/y")->job == "Fire the gun", "and the swap's still there");
+  check(guideRow(m, "g:right/input/a")->job == "Reload", "and the swap's still there, next launch too");
   shotGuide(m, out + "/guide_bind_1_changed.png");
 
-  // Other jobs: nothing, or a job on no button.
+  // Other jobs: nothing, or a job on no button. A button in a swap goes back to itself first.
   page.guideClick(DashPage::Bindings, "g:right/input/a");
   page.guideClick(DashPage::Bindings, "guide_bind_more");
   m = page.guideModel(DashPage::Bindings, "", "", 0);
@@ -2568,14 +2591,27 @@ static void testGuide(const std::string& work, const std::string& out) {
   page.guideClick(DashPage::Bindings, "guide_bind_none");
   m = page.guideModel(DashPage::Bindings, "", "", 0);
   check(m.title == "Done. Your A does nothing now.", "a button can do nothing: " + m.title);
+  check(!page.swaps.count(here) && page.wiringChanges[own]["right/input/a"].empty(), "its swap's gone, and the binding has it doing nothing");
+  check(guideRow(m, "g:right/input/y")->job == "Reload", "so Y's Reload again");
   // Undo takes back just that.
   page.guideClick(DashPage::Bindings, "guide_bind_undo");
-  check(page.wiringChanges[own].count("right/input/a") == 0 && page.wiringChanges[own]["right/input/y"] == "right/input/bumper", "Undo takes back the last change and keeps the one before");
+  check(page.swaps[here].size() == 2 && !page.wiringChanges.count(own), "Undo takes back the last change and keeps the one before");
   // Put it all back.
   page.guideClick(DashPage::Bindings, "guide_bind_reset");
-  check(!page.wiringChanges.count(own) && !page.games[page.games.count("steam.app.777|frame_controller") ? "steam.app.777|frame_controller" : ""].explicitly, "Put it all back takes the game back to its own");
+  check(!page.swaps.count(here) && !page.wiringChanges.count(own) && !page.games[here].explicitly, "Put it all back takes the game back to its own");
   m = page.guideModel(DashPage::Bindings, "", "", 0);
   check(guideRow(m, "g:right/input/y")->job == "Reload" && !hasGuideButton(m, "guide_bind_reset"), "Y reloads again, and there's nothing left to put back");
+  page.status.clear();
+
+  // With a driver from before the button hook, a swap goes in the binding file, for this game only, from its next launch.
+  page.setHookState(false, false);
+  page.guideClick(DashPage::Bindings, "g:right/input/y");
+  page.guideClick(DashPage::Bindings, "g:right/input/a");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(!page.swaps.count(here) && page.wiringChanges[own]["right/input/y"] == "right/input/a" && page.wiringChanges[own]["right/input/a"] == "right/input/y", "without the hook it's this game's own rewiring");
+  check(guideRow(m, "g:right/input/a")->job == "Reload" && !m.footLive, "shown swapped, and from the next launch: " + m.foot);
+  page.guideClick(DashPage::Bindings, "guide_bind_reset");
+  page.setHookState(true, true);
   page.status.clear();
 
   // Advanced is the full page, and Guided comes back.

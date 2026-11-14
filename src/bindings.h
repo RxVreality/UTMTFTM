@@ -270,6 +270,10 @@ class Page {
   std::map<std::string, GameChoice> games;       // "<game>|<your controller_type>"
   std::map<std::string, Wiring> wiringChanges;   // "<their type>><your type>" -> only what's been changed
   std::map<std::string, std::vector<Combo>> combos;  // "<game>|<your controller_type>"
+  // Buttons swapped on the guided page: "<game>|<your controller_type>" -> your control -> the one of yours it presses as.
+  // The driver does these for that game every time, not the binding file, because many games tie a job to a hand: Titan Isles
+  // jumps on the right hand's bottom face button, and a left-hand button in a binding file only ever says left (J4, 13 Nov).
+  std::map<std::string, std::map<std::string, std::string>> swaps;
   std::string fileFor(const std::string& game, const std::string& yourType) const;
   // Which of their inputs each of yours acts as: SteamVR's translation, then your rewiring for every game, then this game's own.
   Wiring wiring(const std::string& theirs, const std::string& yours) const;
@@ -388,7 +392,10 @@ class Page {
     std::map<std::string, GameChoice> games;
     std::map<std::string, std::vector<Combo>> combos;
     std::map<std::string, std::vector<macro::Recorded>> recorded;
+    std::map<std::string, std::map<std::string, std::string>> swaps;
   } gUndo_;
+  bool gbByDriver_ = false;  // the last guided change is one the driver does, so it works now whatever the game launched with
+  bool swapByDriver(const std::string& a, const std::string& b) const;  // two controls the driver can trade, report for report
   int gcStep_ = 0;  // combos: 0 combo or macro, 1 what it should do, 2 which controls, 3 done, 4 jobs on no button,
                     // 11 which button plays the macro, 12 ready to record, 13 recording, 14 keep it, 15 done
   std::string gcJob_, gcJobName_;  // the action a combo sets off, and what it's called
