@@ -1857,6 +1857,40 @@ static void testReal(const std::string& work, const std::string& out) {
     page.guideClick(DashPage::Combos, "guide_combo_combo");
     shotGuide(page.guideModel(DashPage::Combos, "", "", 0.5), out + "/game_" + g.file + "_guide_combo_1.png");
     page.guideClick(DashPage::Combos, "guide_combo_back");
+    if (std::string(g.file) == "nms") {
+      // The rest of each walkthrough on No Man's Sky, for J4 to look at. Everything's undone again after.
+      page.setHookState(true, true);
+      page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+      page.guideClick(DashPage::Bindings, "g:right/input/a");
+      page.guideClick(DashPage::Bindings, "g:right/input/b");
+      shotGuide(page.guideModel(DashPage::Bindings, "", "", 0), out + "/game_nms_guide_3.png");
+      page.guideClick(DashPage::Bindings, "guide_bind_undo");
+      page.guideClick(DashPage::Bindings, "g:right/input/a");
+      page.guideClick(DashPage::Bindings, "guide_bind_more");
+      shotGuide(page.guideModel(DashPage::Bindings, "", "", 0), out + "/game_nms_guide_4.png");
+      page.guideClick(DashPage::Bindings, "guide_bind_back");
+      page.guideClick(DashPage::Bindings, "guide_bind_back");
+      shotGuide(page.guideModel(DashPage::Combos, "", "", 0), out + "/game_nms_guide_combo_0.png");
+      page.guideClick(DashPage::Combos, "guide_combo_combo");
+      page.guideClick(DashPage::Combos, "g:left/input/dpad_left");
+      page.guideClick(DashPage::Combos, "g:right/input/a");
+      page.guideClick(DashPage::Combos, "g:right/input/a");
+      page.guideClick(DashPage::Combos, "g:right/input/b");
+      page.guideClick(DashPage::Combos, "g:right/input/b");
+      shotGuide(page.guideModel(DashPage::Combos, "", "", 0), out + "/game_nms_guide_combo_2.png");
+      page.guideClick(DashPage::Combos, "guide_combo_save");
+      shotGuide(page.guideModel(DashPage::Combos, "", "", 0), out + "/game_nms_guide_combo_3.png");
+      page.guideClick(DashPage::Combos, "guide_combo_undo");
+      page.guideClick(DashPage::Combos, "guide_combo_macro");
+      shotGuide(page.guideModel(DashPage::Combos, "", "", 0.5), out + "/game_nms_guide_macro_1.png");
+      page.guideClick(DashPage::Combos, "g:left/input/bumper");
+      shotGuide(page.guideModel(DashPage::Combos, "", "", 0), out + "/game_nms_guide_macro_2.png");
+      page.guideClick(DashPage::Combos, "guide_macro_back");
+      page.guideClick(DashPage::Combos, "guide_macro_back");
+      page.status.clear();
+      page.setHookState(false, false);
+      page.setHookFeatures(0);
+    }
     if (m.layoutOk) {
       page.click("bind_scope_game");
       page.click("bind_layout");

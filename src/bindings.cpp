@@ -3600,6 +3600,17 @@ std::vector<GameAction> Page::guideJobs() {
   return out;
 }
 
+// What can go on a button that has nothing on any now. A game can list the same job twice under two names, one of them on a
+// button (No Man's Sky's Fire Weapon), so a name that's on a button already doesn't count.
+static std::vector<size_t> offButtons(const std::vector<GameAction>& jobs) {
+  std::set<std::string> placed;
+  for (const GameAction& a : jobs) if (!a.row.empty()) placed.insert(lowered(a.label));
+  std::vector<size_t> out;
+  for (size_t i = 0; i < jobs.size(); ++i)
+    if (jobs[i].row.empty() && !jobs[i].nameless && placed.insert(lowered(jobs[i].label)).second) out.push_back(i);  // once each
+  return out;
+}
+
 bool Page::liveNow() { return afterChange().find("Live in the game now") != std::string::npos; }
 
 std::string Page::liveWords() {
@@ -3668,10 +3679,9 @@ void Page::guideBindModel(GuideModel& m) {
     m.step = "Step 2 of 3";
     std::vector<GuideChoice> all = {{"guide_bind_none", "Nothing", "Your " + name + " does nothing"}};
     const std::vector<GameAction> jobs = guideJobs();
-    for (size_t i = 0; i < jobs.size(); ++i)
-      if (jobs[i].row.empty() && !jobs[i].nameless) all.push_back({"guide_bind_job_" + std::to_string(i), jobs[i].label, ""});
+    for (size_t i : offButtons(jobs)) all.push_back({"guide_bind_job_" + std::to_string(i), jobs[i].label, ""});
     m.sub = all.size() > 1 ? "These aren't on any button now." : gameName_ + " doesn't list anything else, but the button can do nothing.";
-    const size_t per = 18;
+    const size_t per = 15;  // five rows, clear of the buttons along the bottom
     m.pages = int((all.size() + per - 1) / per);
     gbListPage_ = std::min(gbListPage_, m.pages - 1);
     m.pageNo = gbListPage_;
@@ -3837,7 +3847,7 @@ void Page::guideComboModel(GuideModel& m) {
         else g.look = GuideLook::TagPulse;
       });
       const std::vector<GameAction> jobs = guideJobs();
-      if (std::any_of(jobs.begin(), jobs.end(), [](const GameAction& a) { return a.row.empty() && !a.nameless; })) m.buttons.push_back({"guide_combo_more", "Other jobs"});
+      if (!offButtons(jobs).empty()) m.buttons.push_back({"guide_combo_more", "Other jobs"});
       m.buttons.push_back({"guide_combo_back", "Back"});
       return;
     }
@@ -3848,9 +3858,8 @@ void Page::guideComboModel(GuideModel& m) {
       m.step = "Step 1 of 3";
       std::vector<GuideChoice> all;
       const std::vector<GameAction> jobs = guideJobs();
-      for (size_t i = 0; i < jobs.size(); ++i)
-        if (jobs[i].row.empty() && !jobs[i].nameless) all.push_back({"guide_combo_job_" + std::to_string(i), jobs[i].label, ""});
-      const size_t per = 18;
+      for (size_t i : offButtons(jobs)) all.push_back({"guide_combo_job_" + std::to_string(i), jobs[i].label, ""});
+      const size_t per = 15;  // five rows, clear of the buttons along the bottom
       m.pages = std::max(1, int((all.size() + per - 1) / per));
       gcListPage_ = std::min(gcListPage_, m.pages - 1);
       m.pageNo = gcListPage_;
