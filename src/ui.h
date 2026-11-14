@@ -253,6 +253,7 @@ struct DecafModel {
   bool gameHasOwn = false;  // this game has a step of its own, not the all-games one
   bool ready = true;        // the driver that's loaded can smooth. If not, SteamVR needs a restart
   DecafHand hands[2];
+  int pointHand = -1;       // the hand pointing at the dashboard, which is left as tracked so the laser stays sharp. -1: neither
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;

@@ -1846,8 +1846,13 @@ void Page::fillRows(BindSide& side, const std::string& prefix, const Headset& h,
             br.behind = spot->behind;
           }
         // The Frame's D-pad is one part, so where its four directions sit comes from the buttons they mirror on the other hand.
+        // The profile pairs them by where they sit on their own hand: X with D-pad left, both on the left. A mirror image of X
+        // lands on the right, though, so left and right each take the other's twin (MMeNDtal, 0.6.0: they pointed at each other).
         if (key.rfind("/input/dpad_", 0) == 0) {
-          auto mir = prof->mirror.find(r.id);
+          const std::string handName = r.id.substr(0, slash);
+          const std::string look = key == "/input/dpad_left" ? handName + "/input/dpad_right"
+                                   : key == "/input/dpad_right" ? handName + "/input/dpad_left" : r.id;
+          auto mir = prof->mirror.find(look);
           auto other = models_.find(h.model[1 - hand]);
           if (mir != prof->mirror.end() && other != models_.end()) {
             const ModelPart* twin = partNamed(other->second.parts, partsFor(mir->second.substr(mir->second.find('/'))));
@@ -1862,6 +1867,7 @@ void Page::fillRows(BindSide& side, const std::string& prefix, const Headset& h,
 
 BindModel Page::model(const std::string& hover, const std::string& down) {
   BindModel m;
+  m.canGuide = true;  // here, not in main.cpp, so the test pictures have the Guided button the app has (it hid Focus 3 in 0.6.0)
   m.hover = hover;
   m.down = down;
   m.game = gameName_;
@@ -2178,7 +2184,15 @@ bool Page::wire(std::string mine, std::string their) {
   else {
     std::string who = yourWords(mine);
     who[0] = char(std::toupper(static_cast<unsigned char>(who[0])));
-    if (their.empty()) what = who + " now does nothing.";
+    if (their.empty()) {
+      what = who + " now does nothing.";
+      // The driver holds that way at the middle. One from before 0.6.1 can't, and the binding file alone can't do it.
+      if (isDirection(partOf(mine)) && !(hookFeatures_ & fhlive::kFeatureHold)) {
+        say(what + " Restart SteamVR once to turn this on.", 1);
+        savePrefs();
+        return true;
+      }
+    }
     else what = who + (isDirection(partOf(their)) && !isDirection(partOf(mine)) ? " now pushes " : " now does ") + theirWords(their) + ".";
   }
   say(what + afterChange(), 1);
@@ -2370,6 +2384,7 @@ std::vector<Page::ComboIdeaOf> Page::comboIdeas(const Profile& p) const {
 
 ComboModel Page::comboModel(const std::string& hover, const std::string& down) {
   ComboModel m;
+  m.canGuide = true;
   m.hover = hover;
   m.down = down;
   m.game = gameName_;
@@ -2932,6 +2947,16 @@ static bool wireHand(const std::string& path, int& hand, std::string& rest) {
   return true;
 }
 
+std::vector<std::pair<std::string, std::string>> Page::heldWays() const {
+  std::vector<std::pair<std::string, std::string>> out;
+  if (!(hookFeatures_ & fhlive::kFeatureHold) || gameKey_.empty() || yours_.type.empty()) return out;
+  const std::string from = effectiveFrom();
+  if (from.empty()) return out;
+  for (const auto& [mine, their] : wiring(from, yours_.type))
+    if (their.empty() && isDirection(partOf(mine))) out.push_back({mine, partOf(mine)});
+  return out;
+}
+
 void Page::fillInputTable(fhlive::InputTable& t) {
   std::memset(&t, 0, sizeof t);
   if (gameKey_.empty() || yours_.type.empty()) return;
@@ -2954,10 +2979,25 @@ void Page::fillInputTable(fhlive::InputTable& t) {
       macro::copyName(w.from, sizeof w.from, fromPath);
       macro::copyName(w.to, sizeof w.to, toPath);
     }
+  static const std::map<std::string, uint8_t> partNo = {{"click", fhlive::LinkClick}, {"touch", fhlive::LinkTouch}, {"value", fhlive::LinkValue}, {"move", fhlive::LinkMove},
+                                                        {"north", fhlive::LinkNorth}, {"east", fhlive::LinkEast}, {"south", fhlive::LinkSouth}, {"west", fhlive::LinkWest}};
+  // Your stick pushed one way, set to do nothing. A binding file can't take one way out of a stick the game reads as a stick,
+  // so the driver holds that way at the middle, every time this game runs (MMeNDtal, 0.6.0: Y+ and Y- set to nothing still moved).
+  for (const auto& [mine, way] : heldWays()) {
+    if (t.links >= fhlive::kMaxLinks) break;
+    int hand = 0;
+    std::string path;
+    if (!wireHand(baseOf(mine), hand, path)) continue;
+    fhlive::WireLink& w = t.link[t.links++];
+    w = fhlive::WireLink{};
+    w.fromHand = uint8_t(hand);
+    w.fromPart = partNo.at(way);
+    macro::copyName(w.from, sizeof w.from, path);
+    w.toHand = fhlive::kNoHand;
+    w.amount = 1;
+  }
   if (!launchKnown_) return;  // nothing's changed since it launched, then
   if (linking()) {
-    static const std::map<std::string, uint8_t> partNo = {{"click", fhlive::LinkClick}, {"touch", fhlive::LinkTouch}, {"value", fhlive::LinkValue}, {"move", fhlive::LinkMove},
-                                                          {"north", fhlive::LinkNorth}, {"east", fhlive::LinkEast}, {"south", fhlive::LinkSouth}, {"west", fhlive::LinkWest}};
     for (const LiveLink& l : linksNow(nullptr)) {
       if (t.links >= fhlive::kMaxLinks) break;
       auto fp = partNo.find(l.fromPart);
@@ -3192,6 +3232,7 @@ void Page::recordedClick(const std::string& id) {
   const std::vector<macro::Step> showing = macro::shown(editing_.steps, editing_.withTouches);
   const auto startRecording = [&] {
     recStep_ = 1;
+    recForGuide_ = false;  // the walkthrough sets it again straight after, when it's the one starting this
     recPhaseStarted_ = false;
     recWaitShut_ = recShutMode_;
     recCountdown_ = 3;
@@ -4196,7 +4237,7 @@ void Page::guideComboClick(const std::string& id) {
     macroInterview = false;  // the walkthrough asks its own questions
     recordedClick("macro_record");
     macroInterview = interview;
-    if (recStep_ == 1) gcStep_ = 13;
+    if (recStep_ == 1) { gcStep_ = 13; recForGuide_ = true; }
     return;
   }
   if (id == "guide_macro_cancel") {
@@ -4207,6 +4248,7 @@ void Page::guideComboClick(const std::string& id) {
   if (id == "guide_macro_again") {
     recordedClick("macro_again");
     gcStep_ = 13;
+    recForGuide_ = true;
     return;
   }
   if (id == "guide_macro_keep") {

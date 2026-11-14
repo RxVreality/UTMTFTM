@@ -745,7 +745,7 @@ std::string decafKey(const DecafModel& m) {
     snprintf(b, sizeof b, "|%d,%.2f,%.2f", h.measured, h.raw, h.out);
     k += b;
   }
-  return k + "|fx:" + m.hover + "," + m.down;
+  return k + "|p" + std::to_string(m.pointHand) + "|fx:" + m.hover + "," + m.down;
 }
 
 void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
@@ -810,17 +810,22 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
       }
     };
     const bool on = m.level > 0;
+    // The hand pointing at this page is left as tracked, so the laser stays sharp. MMeNDtal, 0.6.0: that read as only the
+    // left hand being steadied, so its panel says so.
+    const bool pointing = m.pointHand == h && m.live != LiveState::NoGame && m.ready;
     bar(py + 62, "As tracked", d.raw, DIM, d.measured);
-    bar(py + 106, "Decaffeinated", on ? d.out : d.raw, on ? SIGNAL : FAINT, d.measured);
+    bar(py + 106, "Decaffeinated", on && !pointing ? d.out : d.raw, on && !pointing ? SIGNAL : FAINT, d.measured);
     std::string verdict;
     RGB vk = DIM;
     if (!m.ready) verdict = "Needs SteamVR restarted once";
     else if (m.live == LiveState::NoGame) verdict = "Start a game to measure it";
+    else if (pointing && on) { verdict = "Not steadied while it points at this menu"; vk = PAPER; }
     else if (!d.measured) verdict = "Hold this hand still to measure it";
     else if (!on) verdict = "Pick a step to steady it";
     else if (d.out > 0.0005f) { verdict = fmt("%.0fx steadier", d.raw / d.out); vk = PAPER; }
     else { verdict = "Steady"; vk = PAPER; }
     text(c, x, py + 182, 22, verdict, vk.r == PAPER.r, vk, 1, 0, cw);
+    if (pointing && on) text(c, x, py + 208, 17, "So your laser stays sharp. Point with the other hand to watch it.", false, DIM, 1, 0, cw);
   }
   hline(c, L, R, 558);
 
@@ -1070,24 +1075,50 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
   const double compareW = label(c, L, chipY + 24, 16, "Compare with");
   if (m.canGuide) button(c, btn, R - 130, chipY, 130, chipH, "guide_on", "Guided", Outline);
   const double chipX0 = L + compareW + 16, chipSpace = R - chipX0 - (m.canGuide ? 146 : 0);
-  double size = 16, total = 0;
-  for (; size > 11; size -= 1) {
-    total = 0;
-    for (const std::string& n : m.refs) total += capsW(c, upper(n), size, 1) + 22 + 3;
-    if (total + chipD <= chipSpace) break;
+  // The names shrink to fit, then the room inside each chip does. MMeNDtal, 0.6.0: they ran on under Guided, over Focus 3.
+  const auto rowW = [&](const std::vector<std::string>& names, double s, double p) {
+    double t = chipD;
+    for (const std::string& n : names) t += capsW(c, upper(n), s, 1) + p + 3;
+    return t;
+  };
+  double size = 16, pad = 22;
+  while (rowW(m.refs, size, pad) > chipSpace && size > 12) size -= 1;
+  if (rowW(m.refs, size, pad) > chipSpace) {
+    pad = 12;
+    while (rowW(m.refs, size, pad) > chipSpace && size > 11) size -= 1;
+  }
+  // A SteamVR that draws even more: as many as fit, the one you're on always among them, and More for the next one left out.
+  std::vector<std::string> shown = m.refs;
+  std::string more;
+  if (rowW(shown, size, pad) > chipSpace) {
+    shown.clear();
+    for (const std::string& n : m.refs) {
+      if (n == m.ref) { shown.push_back(n); continue; }
+      std::vector<std::string> next = shown;
+      next.push_back(n);
+      if (!m.ref.empty() && std::find(next.begin(), next.end(), m.ref) == next.end()) next.push_back(m.ref);
+      next.push_back("More");
+      if (rowW(next, size, pad) <= chipSpace) shown.push_back(n);
+    }
+    const auto at = std::find(m.refs.begin(), m.refs.end(), m.ref);
+    const size_t start = at == m.refs.end() ? 0 : size_t(at - m.refs.begin()) + 1;
+    for (size_t k = 0; k < m.refs.size() && more.empty(); ++k) {
+      const std::string& n = m.refs[(start + k) % m.refs.size()];
+      if (std::find(shown.begin(), shown.end(), n) == shown.end()) more = n;
+    }
   }
   double chipX = chipX0;
-  for (const std::string& n : m.refs) {
-    const double w = capsW(c, upper(n), size, 1) + 22 + chipD;
-    const bool on = n == m.ref;
-    const std::string id = "ref_" + n;
+  const auto chip = [&](const std::string& words, const std::string& id, bool on) {
+    const double w = capsW(c, upper(words), size, 1) + pad + chipD;
     if (on) slab(c, chipX, chipY, w, chipH, PAPER);
     else frame(c, chipX, chipY, w, chipH, PAPER, 0.35, 1.5);
     fxOver(c, chipX, chipY, w, chipH, id, true, on);
-    caps(c, chipX + w / 2, chipY + chipH / 2 + size * 0.36, size, n, on ? INK : PAPER, 1, 1, 1);
+    caps(c, chipX + w / 2, chipY + chipH / 2 + size * 0.36, size, words, on ? INK : PAPER, 1, 1, 1);
     btn.push_back({chipX + chipD / 2, chipY, w - chipD, chipH, id});
     chipX += w - chipD + 3;
-  }
+  };
+  for (const std::string& n : shown) chip(n, "ref_" + n, n == m.ref);
+  if (!more.empty()) chip("More", "ref_" + more, false);  // picks the next one along, so tapping it again goes round them all
 
   // The two controllers, theirs above yours.
   const BindSide* sides[2] = {&m.theirs, &m.yours};

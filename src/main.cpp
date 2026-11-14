@@ -695,6 +695,7 @@ struct App {
     m.saveForGame = saveForGame && !sceneKey.empty();
     m.gameHasOwn = !sceneKey.empty() && store.decafOwn(sceneKey);
     m.ready = Store::decafReady();
+    m.pointHand = store.dashPointHand;
     for (int h = 0; h < 2; ++h) {
       float raw = 0, out = 0;
       if (!sceneKey.empty() && Store::decafShake(h, raw, out)) m.hands[h] = {true, raw, out};
@@ -771,7 +772,6 @@ struct App {
       guarded([&] {
         syncBindings();
         BindModel m = bindings.model(fx.hover, fx.down);
-        m.canGuide = true;
         m.live = sceneKey.empty() ? LiveState::NoGame : sceneLive() ? LiveState::Live : LiveState::NextLaunch;
         m.confirmClose = Clock::now() < confirmUntil;
         m.status.clear();
@@ -786,7 +786,6 @@ struct App {
       guarded([&] {
         syncBindings();
         ComboModel m = bindings.comboModel(fx.hover, fx.down);
-        m.canGuide = true;
         m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::NextLaunch;
         m.confirmClose = Clock::now() < confirmUntil;
         m.status.clear();

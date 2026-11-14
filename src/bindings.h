@@ -244,7 +244,9 @@ class Page {
   GuideModel guideModel(DashPage tab, const std::string& hover, const std::string& down, double phase);
   void guideClick(DashPage tab, const std::string& id);
   bool guideFlashing(DashPage tab) const;  // something on it flashes, so it wants drawing again now and then
-  bool guideMacroHere() const { return gcStep_ >= 11; }  // a macro's being made here, so the dashboard comes back to it
+  // The walkthrough started the recording that just finished, so the dashboard comes back to it. One made on the Macros page
+  // goes back there, even after a walkthrough macro earlier (MMeNDtal, 0.6.0: it landed on Combos with New combo instead).
+  bool guideMacroHere() const { return recForGuide_ && guideCombo_ && gcStep_ >= 12 && gcStep_ <= 14; }
 
   std::map<std::string, std::vector<macro::Recorded>> recorded;  // "<game>|<your controller_type>"
   bool macroTouches = false;    // resting a thumb on something can count, as well as pressing it. Off, only presses do
@@ -301,6 +303,9 @@ class Page {
   struct LiveRoute { std::string from, to; };  // "right/input/a", "right/input/b". to empty: as nothing
   std::vector<LiveRoute> liveRoutes(bool* allOfIt) const;
   std::vector<LiveLink> linksNow(bool* allOfIt);  // liveLinks, from what the game launched with to what it would load now
+  // Your stick's ways set to do nothing, in the layout this game's on: "left/input/thumbstick#north" -> "north". The driver holds
+  // them at the middle, so only one that says it can (kFeatureHold) gets them.
+  std::vector<std::pair<std::string, std::string>> heldWays() const;
   bool linking() const { return (hookFeatures_ & fhlive::kFeatureLinks) != 0 && launchJsonOk_; }
   std::vector<Combo> liveCombos(bool* allOfIt);
   std::string afterChange();  // how to finish "It takes effect...": right now, or the next launch
@@ -351,6 +356,7 @@ class Page {
   int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button, 5 the interview
   int recAsk_ = 0;   // which question the interview is on
   bool recGuided_ = false;  // this one's being made by interview
+  bool recForGuide_ = false;  // the Combos walkthrough started this recording, not the Macros page
   int recFirstTile_ = 0;
   std::map<std::string, float> felt_;  // while listening: the last thing each part of each control said
   uint32_t recPhaseStart_ = 0;

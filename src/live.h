@@ -114,6 +114,9 @@ struct InputTable {
 
 // What the loaded driver can do beyond macros, swaps and combos of touches and presses. It says so in InputChannel::features.
 constexpr uint32_t kFeatureLinks = 1, kFeatureWays = 2;
+// A link from a stick pushed one way to nothing holds that way at the middle: pushing it does nothing in the game. Older
+// drivers ignored those links, so the overlay only counts on it from a driver that says so.
+constexpr uint32_t kFeatureHold = 4;
 
 struct InputChannel {
   // The driver writes these.

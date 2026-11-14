@@ -3,6 +3,7 @@
 // the settings are a map in memory and everything written goes in a throwaway folder.
 // Usage: test_bindings <folder for pictures>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -59,6 +60,16 @@ static std::string actionOf(const BindSide& s, const std::string& id) {
   return r ? r->action : "(no such row)";
 }
 
+// J4, 7 November: Save landed on Keep. MMeNDtal, 0.6.0: Guided sat on Focus 3. Shapes lean, so neighbours' boxes cross a
+// little, but no more than that, on every page.
+static void noOverlap(const std::vector<Button>& b, const std::string& path) {
+  for (size_t i = 0; i < b.size(); ++i)
+    for (size_t j = i + 1; j < b.size(); ++j) {
+      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
+    }
+}
+
 static void shot(const BindModel& m, const std::string& path) {
   Canvas cv(1200, 760);
   std::vector<Button> b;
@@ -66,6 +77,7 @@ static void shot(const BindModel& m, const std::string& path) {
   cv.savePNG(path);
   // Everything's on the panel, and nothing's tappable twice over.
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+  noOverlap(b, path);
 }
 
 static void shotCombo(const ComboModel& m, const std::string& path) {
@@ -74,12 +86,7 @@ static void shotCombo(const ComboModel& m, const std::string& path) {
   drawCombos(cv, m, b);
   cv.savePNG(path);
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
-  // J4, 7 November: Save landed on Keep. Shapes lean, so neighbours' boxes cross a little, but no more than that.
-  for (size_t i = 0; i < b.size(); ++i)
-    for (size_t j = i + 1; j < b.size(); ++j) {
-      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
-      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
-    }
+  noOverlap(b, path);
 }
 
 static void shotRecorded(const RecordedModel& m, const std::string& path) {
@@ -88,12 +95,7 @@ static void shotRecorded(const RecordedModel& m, const std::string& path) {
   drawRecorded(cv, m, b);
   cv.savePNG(path);
   for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
-  // J4, 7 November: Save landed on Keep. Shapes lean, so neighbours' boxes cross a little, but no more than that.
-  for (size_t i = 0; i < b.size(); ++i)
-    for (size_t j = i + 1; j < b.size(); ++j) {
-      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
-      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
-    }
+  noOverlap(b, path);
 }
 
 static Json::Value readFile(const std::string& path) {
@@ -1807,6 +1809,35 @@ static void testReal(const std::string& work, const std::string& out) {
     std::string safe = h.name;
     for (char& ch : safe) if (ch == ' ') ch = '_';
     shot(m, out + "/ref_" + safe + ".png");
+    if (h.type == "frame_controller") {
+      // MMeNDtal, 0.6.0: D-pad left and right pointed at each other. SteamVR's own model puts the left stick to the right of
+      // the D-pad (x 0.024 against -0.004), so D-pad right is the arm nearer it.
+      const BindRow *l = rowOf(m.theirs, "t:left/input/dpad_left"), *r = rowOf(m.theirs, "t:left/input/dpad_right"), *st = rowOf(m.theirs, "t:left/input/thumbstick");
+      if (l && r && st && l->x >= 0 && r->x >= 0 && st->x >= 0) {
+        const double toL = std::hypot(l->x - st->x, l->y - st->y), toR = std::hypot(r->x - st->x, r->y - st->y);
+        printf("frame d-pad: left %.3f,%.3f right %.3f,%.3f stick %.3f,%.3f\n", l->x, l->y, r->x, r->y, st->x, st->y);
+        check(toR < toL, "Steam Frame: D-pad right points at the arm nearer the stick, D-pad left at the one farther away");
+      } else check(false, "Steam Frame: the D-pad and stick have somewhere to point");
+    }
+  }
+
+  {
+    // A SteamVR that draws more controllers than fit on the line: no chip under Guided, and More reaches the rest.
+    BindModel many = page.model("", "");
+    for (const char* extra : {"Vive Cosmos", "Windows Mixed Reality", "Pico Neo 3 Pro", "Knuckles EV2"}) many.refs.push_back(extra);
+    Canvas cv(1200, 760);
+    std::vector<Button> b;
+    drawBindings(cv, many, b);
+    cv.savePNG(out + "/ref_many_controllers.png");
+    noOverlap(b, "ref_many_controllers.png");
+    int chips = 0;
+    bool moreOk = false;
+    for (const Button& x : b)
+      if (x.id.rfind("ref_", 0) == 0) {
+        ++chips;
+        moreOk = moreOk || x.id == "ref_Vive Cosmos";  // the first one left out, after the one that's on
+      }
+    check(chips < int(many.refs.size()) + 1 && moreOk, "with too many to fit, the rest go behind More (" + std::to_string(chips) + " chips)");
   }
 
   // SteamVR leaves its last translation on disk. Doing the same one must give the same result. UTMTFTM_REMAP_DIR adds a
@@ -2241,6 +2272,36 @@ static void testParts(const std::string& work, const std::string& out) {
     check(t.routes == 0, "parts don't go to the driver as button swaps");
   }
 
+  // Your stick pushed up and down set to nothing (MMeNDtal, 0.6.0: it said so, and the stick still moved). The game reads it as
+  // a stick, so the file can't drop one way. The driver holds those ways at the middle instead, every time this game runs.
+  page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+  page.click("y:left/input/thumbstick");
+  page.click("bind_part_north");
+  page.click("bind_nothing");
+  check(page.wiringChanges["oculus_touch>frame_controller"].count("left/input/thumbstick#north"), "up can be set to nothing");
+  check(page.status.find("Restart SteamVR once") != std::string::npos, "with a driver that can't hold it, the page says what turns it on: " + page.status);
+  page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays | fhlive::kFeatureHold);
+  page.click("y:left/input/thumbstick");
+  page.click("bind_part_south");
+  page.click("bind_nothing");
+  check(page.status.find("Restart SteamVR") == std::string::npos, "with one that can, it doesn't: " + page.status);
+  {
+    static fhlive::InputTable t;
+    const auto held = [&](uint8_t way) {
+      int n = 0;
+      page.fillInputTable(t);
+      for (uint32_t i = 0; i < t.links; ++i) {
+        const fhlive::WireLink& l = t.link[i];
+        n += l.fromHand == 0 && std::string(l.from) == "/input/thumbstick" && l.toHand == fhlive::kNoHand && l.fromPart == way;
+      }
+      return n;
+    };
+    check(held(fhlive::LinkNorth) == 1 && held(fhlive::LinkSouth) == 1 && held(fhlive::LinkEast) == 0, "the driver's told to hold the left stick's up and down, and only those");
+    page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+    check(held(fhlive::LinkNorth) == 0, "and an older driver isn't told something it would ignore");
+    page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays | fhlive::kFeatureHold);
+  }
+
   // Undo takes all of it away.
   page.click("bind_reset_wiring");
   check(page.wiringChanges.empty(), "Undo rewiring takes the parts too");
@@ -2661,6 +2722,7 @@ static void testGuide(const std::string& work, const std::string& out) {
   check(m.title == "Now show it the moves" && guideRow(m, "g:right/input/bumper")->look == GuideLook::Armed, "then the moves, with its button lit");
   shotGuide(m, out + "/guide_macro_2.png");
   page.guideClick(DashPage::Combos, "guide_macro_start");
+  check(page.guideMacroHere(), "a walkthrough macro brings the dashboard back to the walkthrough");
   page.recordedTick(1000, 0);
   page.recordedTick(4000, 0);
   check(page.recordedListening(), "Start records");
@@ -2687,6 +2749,13 @@ static void testGuide(const std::string& work, const std::string& out) {
   shotGuide(m, out + "/guide_macro_4.png");
   page.guideClick(DashPage::Combos, "guide_combo_undo");
   check(page.recorded["steam.app.777|frame_controller"].empty(), "and Undo takes it away too");
+
+  // MMeNDtal, 0.6.0: after a walkthrough macro, one recorded on the Macros page came back to Combos (New combo) instead of
+  // the Macros page, where its button gets chosen.
+  page.guideClick(DashPage::Combos, "guide_advanced");
+  page.recordedClick("macro_record");
+  check(!page.guideMacroHere(), "a macro started on the Macros page comes back to the Macros page");
+  page.recordedClick("macro_cancel");
 }
 
 int main(int argc, char** argv) {

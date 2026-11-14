@@ -107,6 +107,15 @@ int main(int argc, char** argv) {
       DecafModel m2 = m; m2.hands[0].out = 0.05f;
       CHECK(decafKey(m) != decafKey(m2));  // the meter moving redraws the page
 
+      // MMeNDtal, 0.6.0: the hand pointing at the page isn't steadied, on purpose, and that read as broken. Its panel says why.
+      DecafModel pointing = m;
+      pointing.pointHand = 1;
+      pointing.hands[1].out = pointing.hands[1].raw;  // the driver measures it as tracked, since it is
+      drawDecaf(cv, pointing, b);
+      cv.savePNG(out + "/decaf_pointing_right.png");
+      CHECK(inBounds(b, cv));
+      CHECK(decafKey(pointing) != decafKey(m));
+
       DecafModel offM = m;
       offM.level = 0;
       offM.hands[1] = {};

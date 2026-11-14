@@ -445,6 +445,7 @@ using ScalarUpdateFn = vr::EVRInputError (*)(void*, vr::VRInputComponentHandle_t
 
 constexpr uint32_t kTaken = 1;  // the game doesn't get what this reports
 constexpr uint32_t kRouted = 2; // and something else gets it instead
+constexpr uint32_t kHeld = 4;   // a stick's one way set to do nothing: the game gets it kept between lo and hi
 
 constexpr uint32_t kCompSlots = 512;
 struct Comp {
@@ -455,6 +456,7 @@ struct Comp {
   std::atomic<float> phys{0};        // what the controller said last, whoever got it
   std::atomic<uint32_t> flags{0};
   std::atomic<Comp*> route{nullptr};
+  std::atomic<float> lo{-1.f}, hi{1.f};  // while kHeld
   std::atomic<bool> heldBack{false}; // said something while recording that SteamVR hasn't heard
   float lastLogged = -2;             // while recording: sticks and triggers report constantly, and most of that isn't news
   uint32_t lastLoggedMs = 0;         // and Steam Link sends every button about 360 times a second, changed or not
@@ -526,6 +528,14 @@ void sendRaw(Comp* c, float v, double offset = 0) {
   else g_nextUpdateBool[g_inputMain](g_inputSelf[g_inputMain], h, v > 0.5f, offset);
 }
 
+// What the controller says, less any way of it that's held back.
+float physOf(const Comp* c) {
+  const float v = c->phys.load(std::memory_order_relaxed);
+  if (!(c->flags.load(std::memory_order_acquire) & kHeld)) return v;
+  return std::min(std::max(v, c->lo.load(std::memory_order_relaxed)), c->hi.load(std::memory_order_relaxed));
+}
+void sendPhys(Comp* c) { sendRaw(c, physOf(c)); }
+
 int handOfContainer(vr::PropertyContainerHandle_t c) {
   if (!c) return fhlive::kNoHand;
   if (c == g_handContainer[0].load(std::memory_order_relaxed)) return 0;
@@ -582,6 +592,7 @@ vr::EVRInputError onUpdate(Next next, void* self, vr::VRInputComponentHandle_t h
   }
   const uint32_t flags = c->flags.load(std::memory_order_acquire);
   if (!flags) return next(self, h, v, offset);
+  if (flags == kHeld) return next(self, h, Value(std::min(std::max(f, c->lo.load(std::memory_order_relaxed)), c->hi.load(std::memory_order_relaxed))), offset);
   if (flags & kRouted)
     if (Comp* to = c->route.load(std::memory_order_acquire)) sendRaw(to, f, offset);
   return vr::VRInputError_None;
@@ -683,11 +694,14 @@ struct Link {
   std::vector<Comp*> held;
   bool on = false;
 };
+// A stick's x or y kept between lo and hi: north set to do nothing keeps y at 0 or below, south at 0 or above.
+struct Hold { Comp* c; float lo, hi; };
 struct Compiled {
   std::vector<Macro> macros;
   std::vector<Route> routes;
   std::vector<Chord> chords;
   std::vector<Link> links;
+  std::vector<Hold> holds;
 };
 Compiled g_run;
 bool g_armed = false;
@@ -723,7 +737,8 @@ void letGo(Comp* c) {
   if (c->holds > 0) --c->holds;
   if (c->holds > 0) return;
   if (!c->mine) c->flags.fetch_and(~kTaken, std::memory_order_acq_rel);
-  sendRaw(c, c->mine ? 0.f : c->phys.load(std::memory_order_relaxed));
+  if (c->mine) sendRaw(c, 0.f);
+  else sendPhys(c);
 }
 
 void pressInto(int hand, const char* path, std::vector<Set>& set) {
@@ -842,7 +857,7 @@ void standDown() {
       c->mine = false;
       if (c->holds == 0) {
         c->flags.fetch_and(~kTaken, std::memory_order_acq_rel);
-        sendRaw(c, c->phys.load(std::memory_order_relaxed));
+        sendPhys(c);
       }
     }
   }
@@ -859,15 +874,19 @@ void standDown() {
       c->mine = false;
       if (c->holds == 0) {
         c->flags.fetch_and(~kTaken, std::memory_order_acq_rel);
-        sendRaw(c, c->phys.load(std::memory_order_relaxed));
+        sendPhys(c);
       }
     }
   }
   for (Route& r : g_run.routes) {
     r.from->route.store(nullptr, std::memory_order_release);
     r.from->flags.fetch_and(~(kTaken | kRouted), std::memory_order_acq_rel);
-    sendRaw(r.from, r.from->phys.load(std::memory_order_relaxed));
-    if (r.to) sendRaw(r.to, r.to->phys.load(std::memory_order_relaxed));
+    sendPhys(r.from);
+    if (r.to) sendPhys(r.to);
+  }
+  for (Hold& h : g_run.holds) {
+    h.c->flags.fetch_and(~kHeld, std::memory_order_acq_rel);
+    sendPhys(h.c);
   }
   g_armed = false;
 }
@@ -894,6 +913,12 @@ void arm() {
       takeOver(c);
       if (c->phys.load(std::memory_order_relaxed) != 0.f) sendRaw(c, 0.f);
     }
+  for (Hold& h : g_run.holds) {
+    h.c->lo.store(h.lo, std::memory_order_relaxed);
+    h.c->hi.store(h.hi, std::memory_order_relaxed);
+    h.c->flags.fetch_or(kHeld, std::memory_order_acq_rel);
+    sendPhys(h.c);  // a stick already pushed that way goes back to the middle now
+  }
   g_armed = true;
 }
 
@@ -985,6 +1010,19 @@ void compile(const fhlive::InputTable& t) {
     char to[sizeof g.to + 1] = {0};
     memcpy(to, g.to, sizeof g.to);
     const bool nothing = g.toHand == fhlive::kNoHand;
+    // A stick pushed one way that does nothing: a binding file can't take one way out of a stick the game reads as a stick,
+    // so that way of x or y is held at the middle instead (MMeNDtal, 0.6.0: Y+ and Y- set to nothing still moved).
+    if (isWay(w.fromPart) && nothing && group.size() == 1) {
+      const Probe p = wayProbe(w.fromHand, from, w.fromPart - fhlive::LinkNorth);
+      if (!p.c) continue;  // that controller isn't on yet
+      auto h = std::find_if(g_run.holds.begin(), g_run.holds.end(), [&](const Hold& x) { return x.c == p.c; });
+      if (h == g_run.holds.end()) {
+        g_run.holds.push_back({p.c, -1.f, 1.f});
+        h = g_run.holds.end() - 1;
+      }
+      (p.sign > 0 ? h->hi : h->lo) = 0.f;
+      continue;
+    }
     const bool sameKind = group.size() == 1 && !isWay(w.fromPart) && (nothing || (g.toPart == w.fromPart && (g.toPart != fhlive::LinkValue || g.amount == 1.f)));
     if (sameKind) {
       if (w.fromPart == fhlive::LinkMove) {
@@ -1053,7 +1091,7 @@ void tickInput() {
     g_recording.store(recording, std::memory_order_relaxed);
     if (!recording) {
       for (uint32_t n = g_compCount.load(std::memory_order_acquire), i = 0; i < n; ++i)
-        if (g_compList[i]->heldBack.exchange(false, std::memory_order_relaxed) && !g_compList[i]->flags.load(std::memory_order_relaxed)) sendRaw(g_compList[i], g_compList[i]->phys.load(std::memory_order_relaxed));
+        if (g_compList[i]->heldBack.exchange(false, std::memory_order_relaxed) && !g_compList[i]->flags.load(std::memory_order_relaxed)) sendPhys(g_compList[i]);
     } else {
       for (uint32_t n = g_compCount.load(std::memory_order_acquire), i = 0; i < n; ++i) g_compList[i]->lastLogged = -2;
     }
@@ -1072,7 +1110,7 @@ void tickInput() {
     g_seenSeq = read;
     g_seenComps = comps;
     compile(table);
-    logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos, %zu links", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size(), g_run.links.size());
+    logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos, %zu links, %zu held ways", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size(), g_run.links.size(), g_run.holds.size());
   }
 
   const bool wanted = in->enabled.load(std::memory_order_relaxed) != 0 && !recording;
@@ -1146,7 +1184,7 @@ void startInput(vr::IVRDriverContext* ctx, fhlive::InputChannel* in) {
   fhlive::seqWriteEnd(in->tableSeq);
   g_in.store(in, std::memory_order_release);
   installInputHooks(ctx);
-  in->features.store(g_inputMain >= 0 ? fhlive::kFeatureLinks | fhlive::kFeatureWays : 0, std::memory_order_relaxed);
+  in->features.store(g_inputMain >= 0 ? fhlive::kFeatureLinks | fhlive::kFeatureWays | fhlive::kFeatureHold : 0, std::memory_order_relaxed);
   if (g_inputMain >= 0) in->magic.store(fhlive::kInputMagic, std::memory_order_release);
 }
 

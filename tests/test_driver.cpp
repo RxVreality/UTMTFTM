@@ -1171,6 +1171,45 @@ int main() {
     in.enabled.store(1);
     tick();
 
+    // A stick's ways set to do nothing (MMeNDtal, 0.6.0: Y+ and Y- set to nothing still moved). The game reads the stick as a
+    // stick, so the driver holds those ways at the middle: up and down here, on the left stick, with right and left still free.
+    CHECK(in.features.load() & fhlive::kFeatureHold, "the overlay can see this driver holds a stick's ways");
+    memset(&table, 0, sizeof table);
+    table.links = 2;
+    link(table.link[0], 0, "/input/thumbstick", fhlive::LinkNorth, fhlive::kNoHand, nullptr, 0);
+    link(table.link[1], 0, "/input/thumbstick", fhlive::LinkSouth, fhlive::kNoHand, nullptr, 0);
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.7f, 0);
+    setTable(table);
+    tick();
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.f, "a stick already pushed up goes back to the middle the moment it's set");
+    clearHeard();
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.9f, 0);
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], 0.6f, 0);
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.f && lastSaid("L/input/thumbstick/x") == 0.6f, "pushed up and right, the game only sees it go right");
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], -0.8f, 0);
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.f, "pushed down, nothing either");
+    // Only north: down still works.
+    table.links = 1;
+    setTable(table);
+    tick();
+    CHECK(lastSaid("L/input/thumbstick/y") == -0.8f, "with only up held, a stick held down reaches the game again");
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.5f, 0);
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.f, "and up is still the middle");
+    // The dashboard gets the whole stick.
+    in.enabled.store(0);
+    tick();
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.5f, "the dashboard opening gives the stick back as your thumb has it");
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.9f, 0);
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.9f, "and it moves freely while it's open");
+    in.enabled.store(1);
+    tick();
+    CHECK(lastSaid("L/input/thumbstick/y") == 0.f, "shut again, up is held again");
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.f, 0);
+    inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], 0.f, 0);
+    memset(&table, 0, sizeof table);
+    setTable(table);
+    tick();
+
     // A combo with a stick pushed one way: hold left A and push the right stick down to press right B.
     memset(&table, 0, sizeof table);
     table.chords = 1;
