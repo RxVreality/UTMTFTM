@@ -78,7 +78,13 @@ Section
     !insertmacro MoveAside "$INSTDIR\utmtftm.exe"
     !insertmacro MoveAside "$INSTDIR\openvr_api.dll"
     !insertmacro MoveAside "$INSTDIR\driver\bin\win64\driver_utmtftm.dll"
+    Goto placed
   fresh:
+  ; SteamVR is shut, so whatever an update moved aside last time can go now.
+  Delete "$INSTDIR\utmtftm.exe.old*"
+  Delete "$INSTDIR\openvr_api.dll.old*"
+  Delete "$INSTDIR\driver\bin\win64\driver_utmtftm.dll.old*"
+  placed:
   SetOutPath "$INSTDIR"
   File /r /x install.cmd /x uninstall.cmd "${STAGE}\*.*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
