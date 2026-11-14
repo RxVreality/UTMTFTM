@@ -6,6 +6,8 @@ Mostly fixes, from [MMeNDtal](https://github.com/MMeNDtal)'s testing of 0.6.0 on
 
 Fixed:
 
+- Placing a hand while streaming to the headset, like with Virtual Desktop, the hand you were dragging trailed behind the hand dragging it. Streaming adds a delay that SteamVR makes up for by predicting where your hands will be, and placing now uses those same predicted positions, so the two stay together.
+- With a large distance limit, the bubble around your hand hid the instructions. They now sit above the bubble.
 - On the Steam Frame's pictures, the lines for D-pad left and D-pad right pointed at each other's arm.
 - On the advanced Bindings page, the **Guided** button sat on top of the last controller, Focus 3. The controller names now make room for it, and if a SteamVR ever lists more controllers than fit, the rest go behind a **More** button.
 - Setting one way of a stick to **Nothing** said it worked and didn't. A game that reads the stick as a stick can't have one way taken out by its bindings, so the add-on now holds that way at the middle while you play. The dashboard still gets the whole stick.

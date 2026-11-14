@@ -1,5 +1,6 @@
 Mostly fixes, from @MMeNDtal's testing of 0.6.0 on PC VR (#2). Thank you.
 
+- Placing a hand while streaming, like with Virtual Desktop, no longer leaves the dragged hand trailing behind, and the instructions sit above the bubble instead of inside it.
 - The Steam Frame's D-pad left and right no longer point at each other's arm on the Bindings pictures.
 - The **Guided** button no longer covers the last controller on the advanced Bindings page.
 - Setting one way of a stick to **Nothing** now really does nothing in the game. The add-on holds that way at the middle while you play.
