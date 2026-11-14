@@ -906,6 +906,143 @@ int main() {
     inputApi->UpdateBooleanComponent(H["L/input/b/touch"], false, 0);
     tick();
 
+    // ---- Links: a stick pushed one way, a press on its own, a whole layout, with no game restart (J4, 13 November).
+    CHECK((in.features.load() & fhlive::kFeatureLinks) && (in.features.load() & fhlive::kFeatureWays), "the overlay can see this driver does links and stick pushes");
+    const auto link = [](fhlive::WireLink& l, int fromHand, const char* from, uint8_t fromPart, int toHand, const char* to, uint8_t toPart, float amount = 1.f) {
+      l = fhlive::WireLink{};
+      l.fromHand = uint8_t(fromHand);
+      l.fromPart = fromPart;
+      snprintf(l.from, sizeof l.from, "%s", from);
+      l.toHand = uint8_t(toHand);
+      l.toPart = toPart;
+      l.amount = amount;
+      if (to) snprintf(l.to, sizeof l.to, "%s", to);
+    };
+    // Pushing your right stick right presses B. The stick still moves as it did.
+    memset(&table, 0, sizeof table);
+    table.links = 1;
+    link(table.link[0], 1, "/input/thumbstick", fhlive::LinkEast, 1, "/input/b", fhlive::LinkClick);
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.3f, 0);
+    tick();
+    CHECK(said("R/input/thumbstick/x", 0.3f) && !said("R/input/b/click", 1.f), "a little way right is just the stick moving");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.9f, 0);
+    tick();
+    CHECK(said("R/input/b/click", 1.f), "most of the way right presses B");
+    CHECK(said("R/input/thumbstick/x", 0.9f), "and the game still sees the stick go right, as SteamVR's own d-pad leaves it");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.5f, 0);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 1.f, "easing back a little doesn't let go");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.f, 0);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 0.f, "back in the middle lets go of B");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], -0.9f, 0);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 0.f, "and the other way isn't east");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.f, 0);
+    tick();
+
+    // A button pushing a stick up, and no longer doing its own job: here left A and the right stick.
+    memset(&table, 0, sizeof table);
+    table.links = 1;
+    link(table.link[0], 0, "/input/a", fhlive::LinkClick, 1, "/input/thumbstick", fhlive::LinkNorth);
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.2f, 0);
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], true, 0);
+    tick();
+    CHECK(!said("L/input/a/click", 1.f), "the button's own press doesn't reach the game");
+    CHECK(lastSaid("R/input/thumbstick/y") == 1.f && lastSaid("R/input/thumbstick/touch") == 1.f, "it pushes the stick all the way up, with a thumb on it");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/y"], -0.4f, 0);
+    CHECK(lastSaid("R/input/thumbstick/y") == 1.f, "while it's held, your thumb on the real stick doesn't fight it");
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], false, 0);
+    tick();
+    CHECK(lastSaid("R/input/thumbstick/y") == -0.4f && lastSaid("R/input/thumbstick/x") == 0.2f, "let go, and the stick's where your thumb really has it");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/y"], 0.f, 0);
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/x"], 0.f, 0);
+
+    // One press doing what two parts did: A pulls the right trigger all the way and clicks it.
+    memset(&table, 0, sizeof table);
+    table.links = 2;
+    link(table.link[0], 1, "/input/a", fhlive::LinkClick, 1, "/input/trigger", fhlive::LinkClick);
+    link(table.link[1], 1, "/input/a", fhlive::LinkClick, 1, "/input/trigger", fhlive::LinkValue, 1.f);
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    tick();
+    CHECK(said("R/input/trigger/click", 1.f) && said("R/input/trigger/value", 1.f) && !said("R/input/a/click", 1.f), "both, and not A");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], false, 0);
+    tick();
+    CHECK(lastSaid("R/input/trigger/click") == 0.f && lastSaid("R/input/trigger/value") == 0.f, "and both let go");
+
+    // The same kind of report sent as another's goes in the hook as it arrives, like a swap: A's touch as B's touch, at once.
+    memset(&table, 0, sizeof table);
+    table.links = 2;
+    link(table.link[0], 1, "/input/a", fhlive::LinkTouch, 1, "/input/b", fhlive::LinkTouch);
+    link(table.link[1], 1, "/input/b", fhlive::LinkClick, fhlive::kNoHand, nullptr, 0);
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["R/input/a/touch"], true, 0);
+    CHECK(said("R/input/b/touch", 1.f) && !said("R/input/a/touch", 1.f), "A's touch arrives as B's, without waiting for SteamVR's loop");
+    inputApi->UpdateBooleanComponent(H["R/input/a/click"], true, 0);
+    CHECK(said("R/input/a/click", 1.f), "and A's press, which nothing changed, is still A's");
+    inputApi->UpdateBooleanComponent(H["R/input/b/click"], true, 0);
+    CHECK(!said("R/input/b/click", 1.f), "a press set to nothing does nothing");
+    // The dashboard opening puts everything back.
+    in.enabled.store(0);
+    tick();
+    CHECK(lastSaid("R/input/a/touch") == 1.f && lastSaid("R/input/b/touch") == 0.f && lastSaid("R/input/b/click") == 1.f, "standing down tells SteamVR what your hand's really doing");
+    for (const char* n : {"R/input/a/touch", "R/input/a/click", "R/input/b/click"}) inputApi->UpdateBooleanComponent(H[n], false, 0);
+    in.enabled.store(1);
+    tick();
+
+    // Standing down mid-push: the stick goes back to where your thumb is, and B's let go.
+    memset(&table, 0, sizeof table);
+    table.links = 1;
+    link(table.link[0], 0, "/input/b", fhlive::LinkClick, 1, "/input/thumbstick", fhlive::LinkWest);
+    setTable(table);
+    tick();
+    inputApi->UpdateBooleanComponent(H["L/input/b/click"], true, 0);
+    tick();
+    CHECK(lastSaid("R/input/thumbstick/x") == -1.f, "left B pushes the right stick left");
+    in.enabled.store(0);
+    tick();
+    CHECK(lastSaid("R/input/thumbstick/x") == 0.f && lastSaid("L/input/b/click") == 1.f, "the dashboard opening lets go of the stick and gives B back");
+    inputApi->UpdateBooleanComponent(H["L/input/b/click"], false, 0);
+    in.enabled.store(1);
+    tick();
+
+    // A combo with a stick pushed one way: hold left A and push the right stick down to press right B.
+    memset(&table, 0, sizeof table);
+    table.chords = 1;
+    table.chord[0].count = 2;
+    table.chord[0].targetHand = 1;
+    snprintf(table.chord[0].target, sizeof table.chord[0].target, "/input/b");
+    table.chord[0].in[0].hand = 0; table.chord[0].in[0].onTouch = 0;
+    snprintf(table.chord[0].in[0].path, sizeof table.chord[0].in[0].path, "/input/a");
+    table.chord[0].in[1].hand = 1; table.chord[0].in[1].onTouch = fhlive::ChordSouth;
+    snprintf(table.chord[0].in[1].path, sizeof table.chord[0].in[1].path, "/input/thumbstick");
+    setTable(table);
+    tick();
+    clearHeard();
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], true, 0);
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/y"], 0.9f, 0);
+    tick();
+    CHECK(!said("R/input/b/click", 1.f), "pushed up isn't down");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/y"], -0.9f, 0);
+    tick();
+    CHECK(said("R/input/b/click", 1.f), "A held and the stick pushed down is the combo");
+    inputApi->UpdateScalarComponent(H["R/input/thumbstick/y"], 0.f, 0);
+    tick();
+    CHECK(lastSaid("R/input/b/click") == 0.f, "and letting the stick back ends it");
+    inputApi->UpdateBooleanComponent(H["L/input/a/click"], false, 0);
+    tick();
+
     // Recording: everything goes to the overlay and nothing to the dashboard, then SteamVR's told the truth afterwards.
     memset(&none, 0, sizeof none);
     setTable(none);

@@ -51,7 +51,7 @@ struct DriverChannel {
 // recorded sequence, and lets a rewired button work straight away. See the buttons section of driver_main.cpp.
 constexpr uint32_t kInputMagic = 0x32495446;  // "FTI2": the driver that's loaded has the button hook
 
-constexpr uint32_t kEventRing = 256, kMaxMacros = 12, kMaxSteps = 32, kMaxRoutes = 16, kMaxChords = 6, kMaxChordInputs = 4;
+constexpr uint32_t kEventRing = 256, kMaxMacros = 12, kMaxSteps = 32, kMaxRoutes = 16, kMaxChords = 6, kMaxChordInputs = 4, kMaxLinks = 32;
 constexpr uint8_t kNoHand = 255;
 
 // What the driver heard, for the overlay while it's recording. Nothing goes in here the rest of the time.
@@ -84,8 +84,20 @@ struct WireRoute {
 };
 // Controls held together press a button that already does what the combo should.
 struct WireChordInput {
-  uint8_t hand, onTouch;
+  uint8_t hand, onTouch;  // 0 pressed, 1 touched, or pushed one way: a ChordWay. Ways only go to a driver that says kFeatureWays
   char path[26];
+};
+enum ChordWay : uint8_t { ChordNorth = 2, ChordEast, ChordSouth, ChordWest };
+
+// One part of one control. For links.
+enum LinkPart : uint8_t { LinkClick = 1, LinkTouch, LinkValue, LinkMove, LinkNorth, LinkEast, LinkSouth, LinkWest };
+// While this game runs, one part of a control does what another part did when the game launched. The overlay works these
+// out from the binding the game loaded and the one it would load now, which is how a whole layout, a stick pushed one way or a
+// press on its own can change with no restart. Several from the same part all happen together. toHand kNoHand: it does nothing.
+struct WireLink {
+  uint8_t fromHand, fromPart, toHand, toPart;
+  float amount;  // a LinkValue it sets, how far. 1 otherwise
+  char from[24], to[24];  // "/input/thumbstick"
 };
 struct WireChord {
   uint8_t count, targetHand;
@@ -93,11 +105,15 @@ struct WireChord {
   WireChordInput in[kMaxChordInputs];
 };
 struct InputTable {
-  uint32_t macros, routes, chords, reserved;
+  uint32_t macros, routes, chords, links;  // links was always 0 before the driver had them, so an older one ignores them
   WireMacro macro[kMaxMacros];
   WireRoute route[kMaxRoutes];
   WireChord chord[kMaxChords];
+  WireLink link[kMaxLinks];  // last, so everything before it stays where an older driver looks
 };
+
+// What the loaded driver can do beyond macros, swaps and combos of touches and presses. It says so in InputChannel::features.
+constexpr uint32_t kFeatureLinks = 1, kFeatureWays = 2;
 
 struct InputChannel {
   // The driver writes these.
@@ -115,7 +131,7 @@ struct InputChannel {
                                         // SteamVR, so the dashboard doesn't get them. It has to be kept moving, so a crash can't leave buttons dead
   uint32_t unused[2];                   // were for Room View, kept so nothing after them moves
   std::atomic<uint32_t> tableSeq;       // seqlock for table
-  uint32_t reserved;
+  std::atomic<uint32_t> features;       // the driver writes this: kFeature bits. 0 from a driver older than links
   InputEvent events[kEventRing];
   InputTable table;
 };
@@ -130,6 +146,8 @@ struct Shared {
 static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free, "the atomics have to work across processes");
 static_assert(sizeof(DeviceOffset) == 28 && offsetof(DriverChannel, poseUpdates) == 72 && offsetof(DriverChannel, handUpdates) == 216, "the file layout changed");
 static_assert(sizeof(InputEvent) == 48 && sizeof(WireStep) == 32 && sizeof(WireRoute) == 56 && sizeof(WireChord) == 140 && alignof(InputChannel) == 8, "the file layout changed");
+static_assert(sizeof(WireLink) == 56 && offsetof(InputTable, link) == 16 + sizeof(WireMacro) * kMaxMacros + sizeof(WireRoute) * kMaxRoutes + sizeof(WireChord) * kMaxChords, "links go after everything that was there before");
+static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "features sits where a plain number was");
 
 // Writing a seqlock. x86 keeps stores in order by itself and ARM doesn't: without the fence the new fields can become
 // visible before the odd number does, and a reader takes half-written values for a finished update.

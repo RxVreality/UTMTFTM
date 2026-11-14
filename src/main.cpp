@@ -159,6 +159,7 @@ struct App {
   std::map<std::string, int> recHeard;  // what a take heard, for the log: "R/input/a/touch" and how many reports said it was on
   uint64_t recReports = 0, recLostAtStart = 0;
   uint64_t hookReports = 0, hookTicksSeen = 0, hookUnknown = 0;
+  uint32_t hookFeatures = 0;
   bool hookLogged = false;
   Clock::time_point clockStart = Clock::now();
   Clock::time_point dashSettleAt{};
@@ -295,6 +296,13 @@ struct App {
     const bool ready = Store::inputReady();
     const uint64_t reports = Store::inputReports(), ticks = Store::inputTicks(), unknown = Store::inputUnknown();
     bindings.setHookState(ready, reports > 0, reports == 0 && unknown > 0);
+    const uint32_t features = Store::inputFeatures();
+    bindings.setHookFeatures(features);
+    if (features != hookFeatures) {  // what can go live depends on it, so the driver's table has to be worked out again
+      hookFeatures = features;
+      logf("button hook: can do %s", features & fhlive::kFeatureLinks ? "links and stick pushes" : "swaps only, from an older driver");
+      syncInput();
+    }
     if (!hookLogged && (reports > 0 || unknown > 0)) {
       hookLogged = true;
       logf("button hook: %s, %llu reports recognised, %llu unknown, driver called %llu times", ready ? "ready" : "not the driver this needs",

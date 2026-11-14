@@ -2596,6 +2596,193 @@ void Page::noteLaunch() {
   launchFrom_ = effectiveFrom();
   launchWiring_ = launchFrom_.empty() ? Wiring{} : wiring(launchFrom_, yours_.type);
   launchCombos_ = combosHere();
+  const Found f = activeBinding();
+  launchJsonOk_ = f.ok;
+  launchJson_ = f.ok ? f.json : Json::Value();
+}
+
+namespace {
+// What one part of one of your controls sets off in a binding, as "hand|set|action|kind". Kinds: b on or off, t a toggle, g a grab,
+// a how far, p a stick's movement, px and py one number of it, k<x>,<y> a set amount while pressed, x anything else.
+using PartKey = std::pair<std::string, std::string>;  // "right/input/a", "click"
+using Parts = std::map<PartKey, std::set<std::string>>;
+}  // namespace
+
+static Parts partsIn(const Json::Value& binding) {
+  Parts out;
+  if (!binding.isObject() || !binding["bindings"].isObject()) return out;
+  for (const auto& setName : binding["bindings"].getMemberNames()) {
+    const Json::Value& set = binding["bindings"][setName];
+    if (!set.isMember("sources")) continue;
+    for (const auto& src : set["sources"]) {
+      const std::string path = after(src["path"].asString(), "/user/hand/");
+      if (path.empty() || !src["inputs"].isObject()) continue;
+      const std::string mode = src["mode"].asString();
+      const Json::Value params = src.get("parameters", Json::Value(Json::objectValue));
+      const Json::Value& in = src["inputs"];
+      for (const auto& name : in.getMemberNames()) {
+        if (!in[name].isObject() || !in[name].isMember("output")) continue;
+        std::string part, kind = "b";
+        if (mode == "button") { if (name == "click" || name == "touch") part = name; }
+        else if (mode == "toggle_button") { if (name == "click" || name == "touch") { part = name; kind = "t"; } }
+        else if (mode == "grab") { if (name == "grab") { part = "value"; kind = "g"; } }
+        else if (mode == "trigger") {
+          if (name == "click" || name == "touch") part = name;
+          else if (name == "pull") { part = "value"; kind = "a"; }
+        } else if (mode == "force_sensor") {
+          if (name == "force") { part = "value"; kind = "a"; }
+        } else if (mode == "scalar_constant") {
+          if (name == "value") {
+            part = "click";
+            kind = "k" + params.get("on/x", "1").asString() + "," + params.get("on/y", "0").asString();
+          }
+        } else if (mode == "joystick" || mode == "trackpad") {
+          if (name == "click" || name == "touch") part = name;
+          else if (name == "position") { part = "move"; kind = "p"; }
+          else if (name == "position_x") { part = "move"; kind = "px"; }
+          else if (name == "position_y") { part = "move"; kind = "py"; }
+        } else if (mode == "dpad" || mode == "dpad_click" || mode == "dpad_touch") {
+          if (isDirection(name)) {
+            part = name;
+            if (mode == "dpad_click" || (mode == "dpad" && params.get("sub_mode", "touch").asString() == "click")) kind = "bc";
+          }
+        }
+        if (part.empty()) { part = "?" + mode + "/" + name; kind = "x"; }
+        // Which hand is part of the job: an OpenXR game asks for one action once per hand, so the same name on the left
+        // stick and the right one are two different things to it.
+        out[{path, part}].insert(path.substr(0, path.find('/')) + "|" + setName + "|" + lowered(in[name]["output"].asString()) + "|" + kind);
+      }
+    }
+  }
+  return out;
+}
+
+static std::string kindOf(const std::string& e) { return e.substr(e.rfind('|') + 1); }
+static std::string jobOf(const std::string& e) { return e.substr(0, e.rfind('|')); }
+
+// A part that did `had` at launch, doing `wanted` now: which part of it the driver works, and how far. False if it can't.
+static bool reachFor(const std::string& had, const std::string& wanted, const std::string& carrierPart, std::string& toPart, float& amount) {
+  amount = 1;
+  if (had == wanted && had != "x") {
+    toPart = carrierPart;
+    return had != "bc";  // a stick pushed one way and pressed in: the driver only pushes
+  }
+  if (wanted.size() < 2 || wanted[0] != 'k') return false;
+  const size_t comma = wanted.find(',');
+  const double x = std::atof(wanted.substr(1, comma == std::string::npos ? std::string::npos : comma - 1).c_str());
+  const double y = comma == std::string::npos ? 0 : std::atof(wanted.substr(comma + 1).c_str());
+  auto way = [&](double across, double up) -> bool {
+    if (across == 0 && up == 0) return false;
+    if (across != 0 && up != 0) return false;
+    toPart = up > 0 ? "north" : up < 0 ? "south" : across > 0 ? "east" : "west";
+    return true;
+  };
+  if (had == "p") return way(x, y);
+  if (had == "px") return way(x, 0);
+  if (had == "py") return way(0, x);  // a constant on one number carries it in its x
+  if (had == "a") { toPart = "value"; amount = float(x); return x > 0; }
+  return false;
+}
+
+// Which part of yours can be worked to do which.
+static bool sourceSuits(const std::string& part, const std::string& toPart, float amount) {
+  if (part == "move" || toPart == "move") return part == toPart;
+  if (part == "value") return toPart == "value" && amount == 1;
+  return part.empty() || part[0] != '?';
+}
+
+std::vector<LiveLink> liveLinks(const Json::Value& launched, const Json::Value& now, bool* allOfIt) {
+  bool all = true;
+  std::vector<LiveLink> out;
+  const Parts was = partsIn(launched), is = partsIn(now);
+  std::set<PartKey> keys;
+  for (const auto& kv : was) keys.insert(kv.first);
+  for (const auto& kv : is) keys.insert(kv.first);
+  static const std::set<std::string> none;
+  for (const PartKey& key : keys) {
+    auto w = was.find(key), n = is.find(key);
+    const std::set<std::string>& before = w == was.end() ? none : w->second;
+    const std::set<std::string>& wanted = n == is.end() ? none : n->second;
+    if (before == wanted) continue;
+    const std::string& part = key.second;
+    if (part[0] == '?') { all = false; continue; }
+    // Everything it should set off now, from parts of the launch binding that set off those and nothing else. Its own old
+    // job first, then the parts that did the most.
+    std::vector<std::pair<const PartKey*, const std::set<std::string>*>> carriers;
+    for (const auto& kv : was)
+      if (!kv.second.empty() && kv.first.second[0] != '?') carriers.push_back({&kv.first, &kv.second});
+    std::stable_sort(carriers.begin(), carriers.end(), [&](const auto& a, const auto& b) {
+      if ((*a.first == key) != (*b.first == key)) return *a.first == key;
+      return a.second->size() > b.second->size();
+    });
+    std::set<std::string> left = wanted;
+    bool self = false;
+    std::vector<LiveLink> picks;
+    for (const auto& [ck, sig] : carriers) {
+      if (left.empty()) break;
+      std::string toPart;
+      float amount = 1;
+      bool fits = true;
+      std::vector<std::string> used, across, up;  // a stick's numbers that nothing here asks for, by which one they are
+      for (const std::string& e : *sig) {
+        std::string match;
+        for (const std::string& l : left)
+          if (jobOf(l) == jobOf(e)) { match = l; break; }
+        if (match.empty() && (kindOf(e) == "px" || kindOf(e) == "py")) {
+          (kindOf(e) == "px" ? across : up).push_back(e);
+          continue;
+        }
+        std::string tp;
+        float amt = 1;
+        if (match.empty() || !reachFor(kindOf(e), kindOf(match), ck->second, tp, amt) || (!toPart.empty() && (tp != toPart || amt != amount))) { fits = false; break; }
+        toPart = tp;
+        amount = amt;
+        used.push_back(match);
+      }
+      // Pushing a stick up leaves its across number alone, and pushing it sideways its up one. Anything else it did, it does.
+      if (fits && (!across.empty() || !up.empty())) {
+        const bool upDown = toPart == "north" || toPart == "south", sideways = toPart == "east" || toPart == "west";
+        fits = !toPart.empty() && (across.empty() || upDown) && (up.empty() || sideways);
+      }
+      if (!fits || toPart.empty() || !sourceSuits(part, toPart, amount)) continue;
+      for (const std::string& u : used) left.erase(u);
+      if (*ck == key && toPart == part && amount == 1) self = true;
+      else picks.push_back({key.first, part, ck->first, toPart, amount});
+    }
+    if (!left.empty()) {  // something no part did at launch
+      if (std::getenv("UTMTFTM_LIVE_DEBUG")) {
+        printf("    live: %s %s can't: wants", key.first.c_str(), part.c_str());
+        for (const std::string& e : left) printf(" [%s]", e.c_str());
+        printf("\n");
+      }
+      all = false;
+      continue;
+    }
+    // A stick pushed one way can't stop doing its old job and keep the rest of the stick's: that waits.
+    if (!before.empty() && !self && isDirection(part)) { all = false; continue; }
+    if (self) {
+      if (picks.empty()) continue;
+      picks.push_back({key.first, part, key.first, part, 1});  // it keeps doing its own, as well
+    }
+    if (picks.empty()) {
+      if (!before.empty()) out.push_back({key.first, part, "", "", 1});  // it does nothing now
+      continue;
+    }
+    out.insert(out.end(), picks.begin(), picks.end());
+  }
+  if (allOfIt) *allOfIt = all;
+  return out;
+}
+
+std::vector<LiveLink> Page::linksNow(bool* allOfIt) {
+  if (allOfIt) *allOfIt = true;
+  if (gameKey_.empty() || !launchKnown_ || !launchJsonOk_ || !lib_.profile(yours_.type)) return {};
+  const Found f = activeBinding();
+  if (!f.ok) {
+    if (allOfIt) *allOfIt = false;
+    return {};
+  }
+  return liveLinks(launchJson_, f.json, allOfIt);
 }
 
 // The game still has the bindings it launched with. If your A should now do what its B does, the driver can send your A's
@@ -2658,14 +2845,21 @@ std::vector<Combo> Page::liveCombos(bool* allOfIt) {
     });
     if (old) continue;
     if (!haveActions) {
-      bool routesAll = true;
-      const bool sameLayout = effectiveFrom() == launchFrom_ && liveRoutes(&routesAll).empty() && routesAll;
-      if (sameLayout) actions = comboActions(activeBinding(), *mine);
+      if (linking()) {
+        // The button that does it is wherever it was when the game launched: that's what the game has.
+        Found launched = activeBinding();
+        launched.json = launchJson_;
+        actions = comboActions(launched, *mine);
+      } else {
+        bool routesAll = true;
+        const bool sameLayout = effectiveFrom() == launchFrom_ && liveRoutes(&routesAll).empty() && routesAll;
+        if (sameLayout) actions = comboActions(activeBinding(), *mine);
+      }
       haveActions = true;
     }
     auto it = std::find_if(actions.begin(), actions.end(), [&](const GameAction& a) { return lowered(a.output) == lowered(c.output) && !a.row.empty(); });
-    // The driver's live combos know a touch and a press, not a stick pushed one way, so those wait for the next launch.
-    const bool pushes = std::any_of(c.inputs.begin(), c.inputs.end(), [](const ComboInput& in) { return isDirection(in.state); });
+    // An older driver's live combos know a touch and a press, not a stick pushed one way, so those wait for the next launch.
+    const bool pushes = !(hookFeatures_ & fhlive::kFeatureWays) && std::any_of(c.inputs.begin(), c.inputs.end(), [](const ComboInput& in) { return isDirection(in.state); });
     if (it == actions.end() || pushes || c.inputs.size() > fhlive::kMaxChordInputs) {
       if (allOfIt) *allOfIt = false;
       continue;
@@ -2674,13 +2868,23 @@ std::vector<Combo> Page::liveCombos(bool* allOfIt) {
     live.output = it->row;
     out.push_back(live);
   }
+  // One taken away since launch is still in the game's binding, and nothing can lift it out until it launches again.
+  for (const Combo& o : launchCombos_) {
+    const bool kept = std::any_of(combosHere().begin(), combosHere().end(), [&](const Combo& c) {
+      if (o.output != c.output || o.inputs.size() != c.inputs.size()) return false;
+      for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
+      return true;
+    });
+    if (!kept && allOfIt) *allOfIt = false;
+  }
   return out;
 }
 
 std::string Page::afterChange() {
   if (gameKey_.empty()) return "";
   bool routes = true, chords = true;
-  liveRoutes(&routes);
+  if (linking()) linksNow(&routes);
+  else liveRoutes(&routes);
   liveCombos(&chords);
   if (hookOk_ && hookHeard_ && routes && chords) return " Live in the game now.";
   return " It takes effect the next time " + gameName_ + " launches.";
@@ -2706,7 +2910,33 @@ void Page::fillInputTable(fhlive::InputTable& t) {
       macro::toWire(m, t.macro[t.macros++]);
     }
   if (!launchKnown_) return;  // nothing's changed since it launched, then
-  for (const LiveRoute& r : liveRoutes(nullptr)) {
+  if (linking()) {
+    static const std::map<std::string, uint8_t> partNo = {{"click", fhlive::LinkClick}, {"touch", fhlive::LinkTouch}, {"value", fhlive::LinkValue}, {"move", fhlive::LinkMove},
+                                                          {"north", fhlive::LinkNorth}, {"east", fhlive::LinkEast}, {"south", fhlive::LinkSouth}, {"west", fhlive::LinkWest}};
+    for (const LiveLink& l : linksNow(nullptr)) {
+      if (t.links >= fhlive::kMaxLinks) break;
+      auto fp = partNo.find(l.fromPart);
+      int hand = 0;
+      std::string path;
+      if (fp == partNo.end() || !wireHand(l.from, hand, path)) continue;
+      fhlive::WireLink& w = t.link[t.links];
+      w = fhlive::WireLink{};
+      w.fromHand = uint8_t(hand);
+      w.fromPart = fp->second;
+      macro::copyName(w.from, sizeof w.from, path);
+      w.toHand = fhlive::kNoHand;
+      w.amount = l.amount;
+      if (!l.to.empty()) {
+        auto tp = partNo.find(l.toPart);
+        if (tp == partNo.end() || !wireHand(l.to, hand, path)) continue;
+        w.toHand = uint8_t(hand);
+        w.toPart = tp->second;
+        macro::copyName(w.to, sizeof w.to, path);
+      }
+      ++t.links;
+    }
+  }
+  for (const LiveRoute& r : linking() ? std::vector<LiveRoute>{} : liveRoutes(nullptr)) {
     if (t.routes >= fhlive::kMaxRoutes) break;
     fhlive::WireRoute& w = t.route[t.routes];
     int hand = 0;
@@ -2733,7 +2963,7 @@ void Page::fillInputTable(fhlive::InputTable& t) {
     for (const ComboInput& in : c.inputs) {
       if (!wireHand(in.path, hand, path)) continue;
       w.in[n].hand = uint8_t(hand);
-      w.in[n].onTouch = in.state == "touch" ? 1 : 0;
+      w.in[n].onTouch = in.state == "touch" ? 1 : in.state == "north" ? fhlive::ChordNorth : in.state == "east" ? fhlive::ChordEast : in.state == "south" ? fhlive::ChordSouth : in.state == "west" ? fhlive::ChordWest : 0;
       macro::copyName(w.in[n].path, sizeof w.in[n].path, path);
       ++n;
     }

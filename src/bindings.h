@@ -179,6 +179,14 @@ struct GameAction {
 };
 std::vector<GameAction> comboActions(const Found& binding, const Profile& yours);
 
+// What changed between the binding a game launched with and the one it would load now, as parts of your controller doing
+// what other parts did at launch. The driver can do that with no restart. Parts are "click", "touch", "value" (how far a
+// trigger's pulled), "move" (a whole stick's movement) and "north" "east" "south" "west" (a stick pushed one way). to empty:
+// that part does nothing now. allOfIt: false when something changed that no part of the launch binding did, like a job
+// the game had on no button, so that waits for the next launch.
+struct LiveLink { std::string from, fromPart, to, toPart; float amount = 1; };
+std::vector<LiveLink> liveLinks(const Json::Value& launched, const Json::Value& now, bool* allOfIt);
+
 class Page {
  public:
   Page(Dirs dirs, Settings settings) : d_(std::move(dirs)), s_(std::move(settings)) {}
@@ -222,6 +230,8 @@ class Page {
   // hookOk: the driver can do this at all. heard: it's heard this controller's buttons. late: it's hearing buttons it never
   // saw being set up, so it can't tell which is which. Any of those says why on the page.
   void setHookState(bool hookOk, bool heard, bool late = false) { hookOk_ = hookOk; hookHeard_ = heard; hookLate_ = late; }
+  // fhlive::kFeature bits from the driver that's loaded. With links, almost any change works with no restart.
+  void setHookFeatures(uint32_t f) { hookFeatures_ = f; }
   // Everything for the driver about the game that's running: macros, plus whatever's changed since it launched that
   // can work now. Empty with no game.
   void fillInputTable(fhlive::InputTable& t);
@@ -277,6 +287,8 @@ class Page {
   void noteLaunch();
   struct LiveRoute { std::string from, to; };  // "right/input/a", "right/input/b". to empty: as nothing
   std::vector<LiveRoute> liveRoutes(bool* allOfIt) const;
+  std::vector<LiveLink> linksNow(bool* allOfIt);  // liveLinks, from what the game launched with to what it would load now
+  bool linking() const { return (hookFeatures_ & fhlive::kFeatureLinks) != 0 && launchJsonOk_; }
   std::vector<Combo> liveCombos(bool* allOfIt);
   std::string afterChange();  // how to finish "It takes effect...": right now, or the next launch
   std::string controlName(int hand, const std::string& path) const;
@@ -317,6 +329,9 @@ class Page {
   std::string launchFrom_;
   Wiring launchWiring_;
   std::vector<Combo> launchCombos_;
+  Json::Value launchJson_;  // the binding it launched with, before combos
+  bool launchJsonOk_ = false;
+  uint32_t hookFeatures_ = 0;
   int recStep_ = 0;  // 0 what's saved, 1 get ready, 2 recording, 3 checking the steps, 4 choosing the button, 5 the interview
   int recAsk_ = 0;   // which question the interview is on
   bool recGuided_ = false;  // this one's being made by interview

@@ -344,6 +344,11 @@ uint64_t Store::inputReports() {
   return m ? m->input.reports.load(std::memory_order_relaxed) : 0;
 }
 
+uint32_t Store::inputFeatures() {
+  fhlive::Shared* m = platform::mapLive();
+  return m && m->input.magic.load(std::memory_order_acquire) == fhlive::kInputMagic ? m->input.features.load(std::memory_order_relaxed) : 0;
+}
+
 uint64_t Store::inputUnknown() {
   fhlive::Shared* m = platform::mapLive();
   return m ? m->input.unknownReports.load(std::memory_order_relaxed) : 0;

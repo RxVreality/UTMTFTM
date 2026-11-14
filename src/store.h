@@ -74,6 +74,7 @@ struct Store {
   // The driver's button hook: macros, and rewired buttons working with no game restart.
   static bool inputReady();        // the driver that's loaded has it. If not, SteamVR needs a restart
   static uint64_t inputReports();  // how many button reports it's recognised. Still at 0 with a controller on: this controller goes some other way
+  static uint32_t inputFeatures(); // fhlive::kFeature bits: what the loaded driver can do beyond swaps. 0 from an older one
   static uint64_t inputUnknown();  // reports from buttons it never saw set up
   static uint32_t inputNowMs();    // the driver's clock, which recorded events are timed on
   static uint64_t inputTicks();    // how many times SteamVR has called it. Nothing can play without that

@@ -2216,7 +2216,7 @@ static void testPartsReal() {
   const Profile* touch = lib.profile("oculus_touch");
   const Profile* frame = lib.profile("frame_controller");
   if (!touch || !frame) { printf("no Quest or Frame description here, skipping parts on real games\n"); return; }
-  int games = 0, pushes = 0, presses = 0;
+  int games = 0, pushes = 0, presses = 0, live = 0;
   for (const std::string& dir : d.config) {
     std::error_code ec;
     for (const auto& f : fs::directory_iterator(fs::u8path(dir) / "openxr", ec)) {
@@ -2253,9 +2253,172 @@ static void testPartsReal() {
           printf("  %s lost: %s\n", name.c_str(), s.c_str());
         }
       check(lost == 0, name + ": the rest of the binding comes through");
+      // And both go live with no restart: the game launched on the plain translation.
+      bool all = false;
+      const std::vector<LiveLink> links = liveLinks(base, t, &all);
+      bool yUp = false, eastPress = false;
+      for (const LiveLink& l : links) {
+        yUp = yUp || (l.from == "right/input/y" && l.fromPart == "click" && l.to == "right/input/thumbstick" && l.toPart == "north");
+        eastPress = eastPress || (l.from == "right/input/thumbstick" && l.fromPart == "east" && l.toPart == "click");
+      }
+      check(hits["right/input/y"] == 0 || yUp, name + ": Y pushing the stick up goes live");
+      if (hits["right/input/y"] > 0 && !yUp && std::getenv("UTMTFTM_LIVE_DEBUG"))
+        for (const LiveLink& l : links) printf("    link %s %s -> %s %s %.2f\n", l.from.c_str(), l.fromPart.c_str(), l.to.c_str(), l.toPart.c_str(), l.amount);
+      check(hits["right/input/thumbstick#east"] == 0 || eastPress || !all, name + ": and so does the push pressing B, unless something waits");
+      if (!all) printf("  %s: not all of it can go live\n", name.c_str());
+      live += all;
     }
   }
-  printf("parts on real games: %d Quest bindings, Y pushes the stick in %d, a stick push presses B in %d\n", games, pushes, presses);
+  printf("parts on real games: %d Quest bindings, Y pushes the stick in %d, a stick push presses B in %d, all of it live in %d\n", games, pushes, presses, live);
+}
+
+// J4, 13 November: every binding, combo and macro change has to go live in game, the way offsets do. The driver can do it when
+// what you want is something a part of the binding the game launched with already did.
+static bool hasLink(const std::vector<LiveLink>& links, const std::string& from, const std::string& fromPart, const std::string& to, const std::string& toPart, float amount = 1) {
+  for (const LiveLink& l : links)
+    if (l.from == from && l.fromPart == fromPart && l.to == to && l.toPart == toPart && l.amount == amount) return true;
+  return false;
+}
+
+static void testLive(const std::string& work) {
+  const std::string head = "{\"bindings\": {\"/actions/x\": {\"sources\": [";
+  auto binding = [&](const std::string& sources) { return parse(head + sources + "]}}}"); };
+  const std::string stick = "{\"path\": \"/user/hand/right/input/thumbstick\", \"mode\": \"joystick\", \"inputs\": {\"position\": {\"output\": \"/actions/x/in/move\"}}}";
+  auto button = [](const std::string& b, const std::string& job) { return "{\"path\": \"/user/hand/right/input/" + b + "\", \"mode\": \"button\", \"inputs\": {\"click\": {\"output\": \"/actions/x/in/" + job + "\"}}}"; };
+  bool all = false;
+
+  // A and B swapped: each one's press goes as the other's.
+  std::vector<LiveLink> l = liveLinks(binding(button("a", "jump") + "," + button("b", "fire")), binding(button("a", "fire") + "," + button("b", "jump")), &all);
+  check(all && l.size() == 2 && hasLink(l, "right/input/a", "click", "right/input/b", "click") && hasLink(l, "right/input/b", "click", "right/input/a", "click"), "a swap is two presses sent as each other's");
+
+  // Y pushing the stick up, as the file says it with a constant, and no longer jumping.
+  const std::string yUp = "{\"path\": \"/user/hand/right/input/y\", \"mode\": \"scalar_constant\", \"parameters\": {\"on/x\": \"0\", \"on/y\": \"1\"}, \"inputs\": {\"value\": {\"output\": \"/actions/x/in/move\"}}}";
+  l = liveLinks(binding(stick + "," + button("y", "jump") + "," + button("a", "jump")), binding(stick + "," + yUp + "," + button("a", "jump")), &all);
+  check(all && l.size() == 1 && hasLink(l, "right/input/y", "click", "right/input/thumbstick", "north"), "Y pushing the stick up goes live as a push");
+
+  // The same, for a game that reads the stick as two numbers: its up is the second one, and the constant says it in its x.
+  {
+    const std::string twoNumbers = "{\"path\": \"/user/hand/right/input/thumbstick\", \"mode\": \"trackpad\", \"inputs\": {\"position_x\": {\"output\": \"/actions/x/in/sx\"}, \"position_y\": {\"output\": \"/actions/x/in/sy\"}}}";
+    const std::string yDown = "{\"path\": \"/user/hand/right/input/y\", \"mode\": \"scalar_constant\", \"parameters\": {\"on/x\": \"-1\", \"on/y\": \"0\"}, \"inputs\": {\"value\": {\"output\": \"/actions/x/in/sy\"}}}";
+    l = liveLinks(binding(twoNumbers), binding(twoNumbers + "," + yDown), &all);
+    check(all && l.size() == 1 && hasLink(l, "right/input/y", "click", "right/input/thumbstick", "south"), "and on a stick read as two numbers");
+  }
+
+  // Pushing the stick right presses what B pressed. The stick still moves.
+  const std::string eastFire = "{\"path\": \"/user/hand/right/input/thumbstick\", \"mode\": \"dpad\", \"parameters\": {\"sub_mode\": \"touch\"}, \"inputs\": {\"east\": {\"output\": \"/actions/x/in/fire\"}}}";
+  l = liveLinks(binding(stick + "," + button("b", "fire")), binding(stick + "," + eastFire + "," + button("b", "fire")), &all);
+  check(all && l.size() == 1 && hasLink(l, "right/input/thumbstick", "east", "right/input/b", "click"), "a stick pushed one way presses B, live");
+
+  // One press doing what two parts did: A clicks the trigger and pulls it all the way.
+  {
+    const std::string trigger = "{\"path\": \"/user/hand/right/input/trigger\", \"mode\": \"trigger\", \"inputs\": {\"click\": {\"output\": \"/actions/x/in/fire\"}, \"pull\": {\"output\": \"/actions/x/in/squeeze\"}}}";
+    const std::string aAsTrigger = button("a", "fire") + ", {\"path\": \"/user/hand/right/input/a\", \"mode\": \"scalar_constant\", \"inputs\": {\"value\": {\"output\": \"/actions/x/in/squeeze\"}}}";
+    l = liveLinks(binding(trigger), binding(trigger + "," + aAsTrigger), &all);
+    check(all && l.size() == 2 && hasLink(l, "right/input/a", "click", "right/input/trigger", "click") && hasLink(l, "right/input/a", "click", "right/input/trigger", "value", 1), "a button on the trigger's jobs clicks it and pulls it");
+  }
+
+  // Set to nothing.
+  l = liveLinks(binding(button("a", "jump") + "," + button("b", "jump")), binding(button("b", "jump")), &all);
+  check(all && l.size() == 1 && l[0].from == "right/input/a" && l[0].to.empty(), "a button set to nothing does nothing, live");
+
+  // Doing what it did and something more keeps its own press going too.
+  l = liveLinks(binding(button("a", "jump") + "," + button("b", "fire")), binding(button("a", "jump") + "," + button("a", "fire") + "," + button("b", "fire")), &all);
+  check(all && hasLink(l, "right/input/a", "click", "right/input/b", "click") && hasLink(l, "right/input/a", "click", "right/input/a", "click"), "A that jumps and now fires as well does both");
+
+  // What no button did at launch can't be pressed: that waits.
+  l = liveLinks(binding(button("a", "jump")), binding(button("a", "torch")), &all);
+  check(!all && l.empty(), "a job on no button waits for the next launch");
+  // A stick that went off one way at launch can't stop doing that and keep the rest of its push.
+  {
+    const std::string northX = "{\"path\": \"/user/hand/right/input/thumbstick\", \"mode\": \"dpad\", \"inputs\": {\"north\": {\"output\": \"/actions/x/in/jump\"}}}";
+    const std::string northY = "{\"path\": \"/user/hand/right/input/thumbstick\", \"mode\": \"dpad\", \"inputs\": {\"north\": {\"output\": \"/actions/x/in/fire\"}}}";
+    liveLinks(binding(northX + "," + button("b", "fire")), binding(northY + "," + button("b", "fire")), &all);
+    check(!all, "changing what a stick push already did waits");
+  }
+  // Nothing changed, nothing to do.
+  l = liveLinks(binding(stick + "," + button("a", "jump")), binding(stick + "," + button("a", "jump")), &all);
+  check(all && l.empty(), "the same binding is nothing to do");
+
+  // ---- On the page, with a driver that has links: the stick parts that used to wait go live.
+  FakeSettings fake;
+  fixture::writeSteamVR(work + "/live/steamvr", work + "/live/config", work + "/live/games");
+  Dirs d;
+  d.steamvr = work + "/live/steamvr";
+  d.steam = work + "/live/steam";
+  d.data = work + "/live/data";
+  d.config = {work + "/live/config"};
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "frame_controller_left", "frame_controller_right");
+  page.setGame("steam.app.12345", "", "Fixture Game");
+  page.gameStarted();
+  page.setHookState(true, true);
+  page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+  page.click("y:right/input/y");
+  page.click("t:right/input/joystick");
+  page.click("bind_way_north");
+  check(page.status.find("Live in the game now") != std::string::npos, "Y pushing the stick up is live now: " + page.status);
+  fhlive::InputTable t;
+  page.fillInputTable(t);
+  bool yUpLink = false;
+  for (uint32_t i = 0; i < t.links; ++i)
+    yUpLink = yUpLink || (std::string(t.link[i].from) == "/input/y" && t.link[i].fromPart == fhlive::LinkClick && t.link[i].toPart == fhlive::LinkNorth && std::string(t.link[i].to) == "/input/thumbstick");
+  check(yUpLink && t.routes == 0, "and the driver's told to push the stick up when Y's pressed");
+  page.click("y:right/input/thumbstick");
+  page.click("bind_part_east");
+  page.click("t:right/input/b");
+  check(page.status.find("Live in the game now") != std::string::npos, "a push of the stick pressing B is live: " + page.status);
+  page.fillInputTable(t);
+  bool eastLink = false;
+  for (uint32_t i = 0; i < t.links; ++i) eastLink = eastLink || (std::string(t.link[i].from) == "/input/thumbstick" && t.link[i].fromPart == fhlive::LinkEast && t.link[i].toPart == fhlive::LinkClick);
+  check(eastLink, "and it goes to the driver");
+  // Next launch the game's binding has all of it, so the driver stops.
+  page.gameStarted();
+  page.fillInputTable(t);
+  check(t.links == 0, "next launch there's nothing left for the driver to do");
+  // An older driver: parts wait, as they did.
+  page.click("bind_reset_wiring");
+  page.setHookFeatures(0);
+  page.click("y:right/input/y");
+  page.click("t:right/input/joystick");
+  page.click("bind_way_north");
+  check(page.status.find("next time") != std::string::npos, "with a driver from before links, it says it waits: " + page.status);
+  page.click("bind_reset_wiring");
+  page.gameStarted();
+
+  // A whole layout, live: the Named Game's Quest layout on your Frame.
+  page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+  page.setGame("steam.app.777", "", "Named Game");
+  page.gameStarted();
+  page.click("bind_scope_game");
+  page.click("bind_layout");
+  check(page.status.find("Live in the game now") != std::string::npos || page.status.find("next time") != std::string::npos, "a layout says which it is: " + page.status);
+  printf("live: the Named Game's Quest layout %s\n", page.status.find("Live in the game now") != std::string::npos ? "goes live" : "waits for the next launch");
+  page.click("bind_dev");
+  page.gameStarted();
+
+  // A combo with a stick push goes live with a driver that knows pushes.
+  page.setGame("steam.app.12345", "", "Fixture Game");
+  page.gameStarted();
+  page.comboClick("combo_new");
+  page.comboClick("c:right/input/a");
+  page.comboClick("c:right/input/a");  // pressed
+  page.comboClick("c:right/input/thumbstick");
+  page.comboClick("combo_part_south");
+  page.comboClick("combo_next");
+  ComboModel cm = page.comboModel("", "");
+  for (const ComboChoice& ch : cm.choices)
+    if (!ch.where.empty()) { page.comboClick(ch.id); break; }
+  check(page.status.find("Live in the game now") != std::string::npos, "a combo with a stick push is live: " + page.status);
+  page.fillInputTable(t);
+  bool south = false;
+  for (uint32_t i = 0; i < t.chords; ++i)
+    for (uint32_t k = 0; k < t.chord[i].count; ++k) south = south || t.chord[i].in[k].onTouch == fhlive::ChordSouth;
+  check(south, "and the driver's told the stick goes down");
+  // Taking it away again can't be live: the game launched with it.
+  page.gameStarted();
+  page.comboClick("combo_del_0");
+  check(page.status.find("next time") != std::string::npos, "removing a combo the game launched with waits: " + page.status);
 }
 
 int main(int argc, char** argv) {
@@ -2274,6 +2437,7 @@ int main(int argc, char** argv) {
   testGuideShots(tmp.generic_u8string(), out);
   testReal(tmp.generic_u8string(), out);
   testPartsReal();
+  testLive(tmp.generic_u8string());
   fs::remove_all(tmp, ec);
   printf("test_bindings: %d checks, %d failures\n", checks, fails);
   return fails ? 1 : 0;
