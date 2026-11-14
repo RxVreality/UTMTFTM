@@ -179,14 +179,26 @@ int main(int argc, char** argv) {
       }
 
       {
-        // DRAFT for J4: the strength row, at 50% of Tuned.
-        DecafModel strong = m;
-        strong.level = 1;
-        strong.strength = 50;
-        std::vector<Button> sb;
-        drawDecaf(cv, strong, sb);
-        cv.savePNG(out + "/decaf_strength_draft.png");
-        CHECK(inBounds(sb, cv) && has(sb, "decaf_strength_50"));
+        // The strength slider (J4, 14 November), at a few places, and held.
+        DecafModel slider = m;
+        slider.level = 1;
+        for (int pct : {25, 50, 100, 150}) {
+          slider.strength = pct;
+          slider.down = pct == 50 ? "decaf_strength" : "";
+          std::vector<Button> sb;
+          drawDecaf(cv, slider, sb);
+          cv.savePNG(out + "/decaf_strength_" + std::to_string(pct) + ".png");
+          CHECK(inBounds(sb, cv) && has(sb, "decaf_strength"));
+          const Button* bar = findButton(sb, "decaf_strength");
+          CHECK(bar && sliderValue(*bar, bar->x + 14, kDecafMinPct, kDecafMaxPct, 5) == 25 && sliderValue(*bar, bar->x + bar->w - 14, kDecafMinPct, kDecafMaxPct, 5) == 150);
+          CHECK(bar && sliderValue(*bar, -500, kDecafMinPct, kDecafMaxPct, 5) == 25 && sliderValue(*bar, 5000, kDecafMinPct, kDecafMaxPct, 5) == 150);  // dragged off either end
+          CHECK(bar && sliderValue(*bar, bar->x + 14 + (bar->w - 28) * 0.6, kDecafMinPct, kDecafMaxPct, 5) == 100);  // 100% sits 60% along
+        }
+        DecafModel off = m;
+        off.level = 0;
+        std::vector<Button> ob;
+        drawDecaf(cv, off, ob);
+        CHECK(!has(ob, "decaf_strength"));  // nothing to make stronger or lighter
       }
 
       DecafModel offM = m;

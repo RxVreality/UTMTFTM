@@ -30,6 +30,9 @@ struct Canvas {
 // enabled=false: drawn greyed; tapping it explains why instead of doing nothing.
 struct Button { double x, y, w, h; std::string id; bool enabled = true; };
 const Button* hitButton(const std::vector<Button>& b, double x, double y);
+const Button* findButton(const std::vector<Button>& b, const std::string& id);
+// Where along a slider's bar x falls, from lo to hi in whole steps. Off either end is the end.
+int sliderValue(const Button& bar, double x, int lo, int hi, int step);
 
 // ---------------------------------------------------------------- dashboard
 enum class Badge { None, GameCustom, GlobalDefault, AllGamesDefault };
@@ -265,6 +268,7 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& butto
 // ---------------------------------------------------------------- Decaffeinate page
 // Smoothing the shake out of a held-still hand (decaf.h): four steps, and how much each hand shakes, live.
 constexpr int kDecafSteps = 4;
+constexpr int kDecafMinPct = 25, kDecafMaxPct = 150;  // the strength slider's ends: decaf::kMinPct and kMaxPct
 const char* decafName(int level);  // "Off", "Tuned", "Strong", "Maximum"
 struct DecafHand {
   bool measured = false;
@@ -279,8 +283,7 @@ struct DecafModel {
   bool ready = true;        // the driver that's loaded can smooth. If not, SteamVR needs a restart
   DecafHand hands[2];
   int pointHand = -1;       // the hand pointing at the dashboard, which is left as tracked so the laser stays sharp. -1: neither
-  // DRAFT for J4 (14 November, MMeNDtal's fine tune idea): how strong the chosen step is, in percent. 0: the row isn't shown.
-  int strength = 0;
+  int strength = 100;       // how much of the step, 25 to 150 percent: the slider (MMeNDtal's fine tune idea, J4's slider)
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;

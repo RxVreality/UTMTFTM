@@ -322,6 +322,20 @@ int main() {
     CHECK(t.ghostMatched[0] && !t.ghostMatched[1] && same(fromOffset(t.ghost[0]), fromOffset(s.ghost[0]), 1e-4f), "ghost pose round trip");
     CHECK(same(fromOffset(t.ghostBase(1)), fromOffset(mirrorOffset(s.ghost[0])), 1e-3f), "unmatched right mirrors left");
     CHECK(t.max_rot >= 180.f, "rotation must never be limited");
+
+    // Decaf's strength slider: kept per game or for all games, like the step.
+    Store d;
+    d.decafAll = 1;
+    d.decafPctAll = 60;
+    d.apps["steam.app.555160"].decafPct = 40;
+    d.apps["steam.app.1"].name = "Other";
+    CHECK(d.save(), "save with strengths");
+    Store e;
+    CHECK(e.load(), "load with strengths");
+    CHECK(e.decafPct("steam.app.555160") == 40 && e.decafPct("steam.app.1") == 60 && e.decafPct("") == 60, "each game's strength, or the all-games one");
+    CHECK(e.decafOwn("steam.app.555160") && !e.decafOwn("steam.app.1"), "a strength of its own counts as the game having its own");
+    Store fresh;
+    CHECK(fresh.decafPct("anything") == 100, "nothing saved: the step as tested");
   }
 
   // F. The name a game without a Steam app id is saved under.

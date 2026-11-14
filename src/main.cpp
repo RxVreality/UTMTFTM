@@ -24,6 +24,9 @@
 #include "store.h"
 #include "ui.h"
 #include "update.h"
+#include "decaf.h"
+
+static_assert(fh::kDecafMinPct == ::decaf::kMinPct && fh::kDecafMaxPct == ::decaf::kMaxPct, "the slider and the filter agree on its ends");
 #include "xform.h"
 
 using namespace fh;
@@ -747,6 +750,7 @@ struct App {
     m.gameHasOwn = !sceneKey.empty() && store.decafOwn(sceneKey);
     m.ready = Store::decafReady();
     m.pointHand = store.dashPointHand;
+    m.strength = store.decafPct(sceneKey);
     for (int h = 0; h < 2; ++h) {
       float raw = 0, out = 0;
       if (!sceneKey.empty() && Store::decafShake(h, raw, out)) m.hands[h] = {true, raw, out};
@@ -777,6 +781,22 @@ struct App {
     else if (level == 0) setStatus("Decaffeinate off " + where + ". Your hands are exactly as tracked.", Good);
     else if (sceneKey.empty()) setStatus(std::string(name) + " " + where + ". It starts working once a game is running.", Good);
     else setStatus(std::string(name) + " " + where + ". Your aim steadies straight away.", Good);
+  }
+
+  // How much of the step: the Decaf page's slider (MMeNDtal's fine tune idea, J4 asked for a slider, 14 November). While the
+  // laser drags it, the hands follow live and nothing's written; letting go saves it, the way Save for says.
+  void setDecafPct(int pct, bool save) {
+    int& slot = saveForGame && !sceneKey.empty() ? store.apps[sceneKey].decafPct : store.decafPctAll;
+    if (saveForGame && !sceneKey.empty() && store.apps[sceneKey].name.empty()) store.apps[sceneKey].name = sceneName;
+    if (!(saveForGame && !sceneKey.empty()) && !sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decafPct = -1;
+    slot = pct;
+    store.publishDecaf();
+    dashPoke = true;
+    if (!save) return;
+    store.save();
+    const std::string where = saveForGame && !sceneKey.empty() ? "for " + sceneName : "for every game";
+    setStatus(std::string(decafName(store.decafLevel(sceneKey))) + " at " + std::to_string(pct) + "% " + where +
+              (pct < 100 ? ". Small moves come through sooner." : pct > 100 ? ". Steadier, and slow moves a little later." : ", as tested."), Good);
   }
 
   // With no game running, SteamVR can show this panel without reporting the dashboard as visible, so ask about the panel too.
@@ -961,10 +981,13 @@ struct App {
       else if (id == "page_decaf") { page = DashPage::Decaf; statusUntil = {}; guarded([&] { if (bindings.loaded()) bindings.recordedClick("macro_leave"); }); }
       else if (id.rfind("decaf_", 0) == 0 && id.size() == 7 && id[6] >= '0' && id[6] < '0' + kDecafSteps) setDecaf(id[6] - '0');
       else if (id == "decaf_use_global") {
-        if (!sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decaf = -1;
+        if (!sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decaf = store.apps[sceneKey].decafPct = -1;
         store.save();
         store.publishDecaf();
-        setStatus(std::string("Back on the all-games step: ") + decafName(store.decafAll) + ".", Good);
+        setStatus(std::string("Back on the all-games step: ") + decafName(store.decafAll) + " at " + std::to_string(store.decafPctAll) + "%.", Good);
+      }
+      else if (id == "decaf_strength") {
+        if (const Button* s = findButton(buttons, id)) setDecafPct(sliderValue(*s, x, kDecafMinPct, kDecafMaxPct, 5), true);
       }
       else if (id == "fine_toggle") { fineAdjust = !fineAdjust; statusUntil = {}; }
       else if (id == "fine_small") fineBig = false;
@@ -1405,9 +1428,24 @@ struct App {
         }
       }
       switch (ev.eventType) {
-        case vr::VREvent_MouseMove: b = hitButton(buttons, x, y); fx.move(b ? b->id : ""); dashPoke = true; break;
+        case vr::VREvent_MouseMove:
+          b = hitButton(buttons, x, y);
+          fx.move(b ? b->id : "");
+          dashPoke = true;
+          // Dragging the Decaf slider: the hands follow as it moves, even with the laser off the bar.
+          if (fx.down == "decaf_strength" && page == DashPage::Decaf)
+            if (const Button* s = findButton(buttons, "decaf_strength")) setDecafPct(sliderValue(*s, x, kDecafMinPct, kDecafMaxPct, 5), false);
+          break;
         case vr::VREvent_MouseButtonDown: b = hitButton(buttons, x, y); fx.press(b ? b->id : ""); dashPoke = true; break;
-        case vr::VREvent_MouseButtonUp: onClick(x, y); break;
+        case vr::VREvent_MouseButtonUp:
+          // A drag that ends off the bar still lands where the slider is.
+          if (fx.down == "decaf_strength" && page == DashPage::Decaf && !(hitButton(buttons, x, y) && hitButton(buttons, x, y)->id == "decaf_strength")) {
+            fx.release();
+            setDecafPct(store.decafPct(sceneKey), true);
+            break;
+          }
+          onClick(x, y);
+          break;
         case vr::VREvent_FocusLeave: fx.leave(); dashPoke = true; break;
         case vr::VREvent_OverlayShown: dashForce = true; break;
         case vr::VREvent_KeyboardDone: {

@@ -39,6 +39,20 @@ inline Params preset(int level) {
   }
 }
 
+// How much of a step to use, in percent: 100 is the step as tested, lower lets small moves through, higher steadies more
+// (MMeNDtal, 0.6.0: even Tuned resisted small aiming corrections). Lower cutoffs and betas smooth more, so both are divided
+// by it. Overlay only: the driver just gets the numbers.
+constexpr int kMinPct = 25, kMaxPct = 150;
+inline Params scaled(Params p, int pct) {
+  if (!p.on()) return p;
+  const float s = float(pct < kMinPct ? kMinPct : pct > kMaxPct ? kMaxPct : pct) / 100.f;
+  p.rotMinHz /= s;
+  p.rotBeta /= s;
+  p.posMinHz /= s;
+  p.posBeta /= s;
+  return p;
+}
+
 // One pose, in the driver's own space. Quaternions are w, x, y, z.
 struct Pose {
   double pos[3], q[4];

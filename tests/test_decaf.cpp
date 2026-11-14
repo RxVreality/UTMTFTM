@@ -470,6 +470,26 @@ int main(int argc, char** argv) {
   for (int lv = 0; lv < decaf::kLevels; ++lv) finite = finite && still[lv].finite;
   check(finite, "never a broken number");
 
+  std::printf("\nThe strength slider on Tuned (MMeNDtal: even Tuned resisted small aiming corrections)\n");
+  {
+    double lastShake = 0, lastLag = 1e9;
+    bool lighter = true, steadier = true;
+    for (int pct : {25, 50, 75, 100, 125, 150}) {
+      Score s = score(decaf::scaled(decaf::preset(1), pct), hand);
+      std::printf("  %3d%%: %.1fx less shake, slow moves %.2f deg behind\n", pct, s.shakeRaw / s.shakeOut, s.trackDeg);
+      if (pct > 25) {
+        steadier = steadier && s.shakeOut < lastShake;
+        lighter = lighter && s.trackDeg > lastLag;
+      }
+      lastShake = s.shakeOut;
+      lastLag = s.trackDeg;
+    }
+    check(steadier, "more strength takes out more shake");
+    check(lighter, "less strength puts slow moves less behind");
+    const decaf::Params same = decaf::scaled(decaf::preset(1), 100), off = decaf::scaled(decaf::preset(0), 50);
+    check(same.rotMinHz == decaf::preset(1).rotMinHz && same.posBeta == decaf::preset(1).posBeta && !off.on(), "100% is the step itself, and off stays off");
+  }
+
   std::printf("\nThe same at other pose rates (it goes by time, not by pose)\n");
   for (double hz : {90.0, 250.0, 1000.0}) {
     Score s = score(decaf::preset(2), hand, hz, 11);

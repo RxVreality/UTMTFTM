@@ -91,9 +91,11 @@ bool Store::load() {
     p.managed = a.get("managed", false).asBool();
     p.live = a.get("live", false).asBool();
     p.decaf = std::clamp(a.get("decaf", -1).asInt(), -1, decaf::kLevels - 1);
+    p.decafPct = a.isMember("decaf_pct") ? std::clamp(a["decaf_pct"].asInt(), decaf::kMinPct, decaf::kMaxPct) : -1;
     apps[k] = p;
   }
   decafAll = std::clamp(v.get("decaf_all", 0).asInt(), 0, decaf::kLevels - 1);
+  decafPctAll = std::clamp(v.get("decaf_pct_all", 100).asInt(), decaf::kMinPct, decaf::kMaxPct);
   return true;
 }
 
@@ -119,9 +121,11 @@ bool Store::save() const {
     a["managed"] = p.managed;
     a["live"] = p.live;
     if (p.decaf >= 0) a["decaf"] = p.decaf;
+    if (p.decafPct >= 0) a["decaf_pct"] = p.decafPct;
     v["apps"][k] = a;
   }
   v["decaf_all"] = decafAll;
+  v["decaf_pct_all"] = decafPctAll;
   return writeJson(dir() + "/profiles.json", v);
 }
 
@@ -318,9 +322,15 @@ int Store::decafLevel(const std::string& app) const {
   return decafAll;
 }
 
+int Store::decafPct(const std::string& app) const {
+  auto it = apps.find(app);
+  if (it != apps.end() && it->second.decafPct >= 0) return it->second.decafPct;
+  return decafPctAll;
+}
+
 bool Store::decafOwn(const std::string& app) const {
   auto it = apps.find(app);
-  return it != apps.end() && it->second.decaf >= 0;
+  return it != apps.end() && (it->second.decaf >= 0 || it->second.decafPct >= 0);
 }
 
 void Store::publishDecaf() const {
@@ -328,7 +338,8 @@ void Store::publishDecaf() const {
   if (!m) return;
   // Only with a game running, the same as offsets: with none there's nothing to steady but SteamVR's own pointers.
   const int level = (scenePid && !sceneKey.empty()) ? decafLevel(sceneKey) : 0;
-  const decaf::Params p = decaf::preset(level);
+  const int pct = (scenePid && !sceneKey.empty()) ? decafPct(sceneKey) : 100;
+  const decaf::Params p = decaf::scaled(decaf::preset(level), pct);
   fhlive::DecafSettings s[2];
   for (int h = 0; h < 2; ++h) {
     const bool pointing = dashboardUp && h == dashPointHand;
@@ -339,7 +350,7 @@ void Store::publishDecaf() const {
   fhlive::seqWriteBegin(d.seq);
   memcpy(d.want, s, sizeof s);
   fhlive::seqWriteEnd(d.seq);
-  logf("decaffeinate: step %d for %s%s", level, sceneKey.empty() ? "(no game)" : sceneKey.c_str(),
+  logf("decaffeinate: step %d at %d%% for %s%s", level, pct, sceneKey.empty() ? "(no game)" : sceneKey.c_str(),
        level && dashboardUp && dashPointHand >= 0 ? (dashPointHand ? ", not the right hand while it points" : ", not the left hand while it points") : "");
 }
 

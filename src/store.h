@@ -23,6 +23,7 @@ struct AppProfile {
   bool managed = false;          // CurrentURL currently points at our file
   bool live = false;             // the driver add-on reaches this game (offsets apply live, no binding)
   int decaf = -1;                // Decaffeinate step for this game, 0 off to 3 Maximum. -1: same as all games
+  int decafPct = -1;             // how much of that step, 25 to 150 percent. -1: same as all games
 };
 
 struct Store {
@@ -58,6 +59,8 @@ struct Store {
 
   // Decaffeinate: smoothing the shake out of both hands (decaf.h), a step from 0 off to 3 Maximum.
   int decafAll = 0;                                  // for every game that hasn't one of its own
+  int decafPctAll = 100;                             // how much of the step, for every game that hasn't one of its own
+  int decafPct(const std::string& app) const;        // what this game uses
   int decafLevel(const std::string& app) const;      // what this game uses
   bool decafOwn(const std::string& app) const;       // it has one of its own
   void publishDecaf() const;                         // hand the running game's step to the driver. Off with no game

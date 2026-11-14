@@ -274,6 +274,20 @@ const Button* hitButton(const std::vector<Button>& b, double x, double y) {
   return nullptr;
 }
 
+const Button* findButton(const std::vector<Button>& b, const std::string& id) {
+  for (const auto& k : b)
+    if (k.id == id) return &k;
+  return nullptr;
+}
+
+// The bar's ends sit 14 px in from the button's, so the handle can be grabbed right at either end.
+int sliderValue(const Button& bar, double x, int lo, int hi, int step) {
+  const double x0 = bar.x + 14, x1 = bar.x + bar.w - 14;
+  const double t = x1 > x0 ? std::max(0.0, std::min(1.0, (x - x0) / (x1 - x0))) : 0;
+  const int v = lo + int(std::lround(t * (hi - lo) / step)) * step;
+  return std::max(lo, std::min(hi, v));
+}
+
 // ---------------------------------------------------------------- text helpers
 std::string friendlyOffset(const Offset& o) {
   if (o.zero()) return "No offset";
@@ -862,24 +876,33 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   segments(c, btn, sx + saveW + 18, ay, R - (sx + saveW + 18), ah,
            {{"scope_game", "This game", m.saveForGame && !m.game.empty(), !m.game.empty()}, {"scope_global", "All games", !m.saveForGame || m.game.empty(), true}}, 21);
 
-  if (m.strength > 0 && m.level > 0) {
-    // DRAFT: how strong the chosen step is, in the Max distance strip's style. MMeNDtal: even Tuned resisted small corrections.
-    const double fy = 640, fh = 44;
-    const double sw = label(c, L, fy + 29, 16, std::string("Strength of ") + decafName(m.level));
-    const int pcts[5] = {25, 50, 75, 100, 125};
-    const double rx = L + sw + 16, rd = fh * kLean, rw = 92;
-    hline(c, rx, rx + 5 * rw, fy + fh - 1, PAPER, 0.45);
-    for (int i = 0; i < 5; ++i) {
-      const double bx = rx + i * rw;
-      const bool on = m.strength == pcts[i];
-      const std::string id = "decaf_strength_" + std::to_string(pcts[i]);
-      if (on) slab(c, bx, fy, rw + rd, fh, PAPER);
-      fxOver(c, bx, fy, rw + rd, fh, id, true, on);
-      caps(c, bx + (rw + rd) / 2, fy + 28, 18, std::to_string(pcts[i]) + "%", on ? INK : PAPER, 1, 1, 1);
-      btn.push_back({bx + rd / 2, fy, rw, fh, id});
+  if (m.level > 0) {
+    // How much of the step: a slider, tapped or dragged with the laser (MMeNDtal's fine tune idea; J4 asked for a slider,
+    // 14 November). The bar goes from 25% to 150%, with 100%, the step as tested, marked.
+    const double fy = 632, fh = 56, ty = fy + 22;
+    label(c, L, fy + 29, 16, "Strength");
+    text(c, L + 104, fy + 31, 26, std::to_string(m.strength) + "%", true, PAPER);
+    const double x0 = L + 220, x1 = R - 24;
+    const auto at = [&](int pct) { return x0 + (x1 - x0) * double(pct - kDecafMinPct) / double(kDecafMaxPct - kDecafMinPct); };
+    const int pct = std::max(kDecafMinPct, std::min(kDecafMaxPct, m.strength));
+    const bool dragging = m.down == "decaf_strength";
+    hline(c, x0, x1, ty, LINE, 1, 6);
+    hline(c, x0, at(pct), ty, SIGNAL, 1, 6);
+    for (int t = kDecafMinPct; t <= kDecafMaxPct; t += 25) {
+      set(c, t == 100 ? PAPER : DIM, t == 100 ? 1 : 0.7);
+      cairo_set_line_width(c, t == 100 ? 2.5 : 1.5);
+      cairo_move_to(c, at(t), ty + 8);
+      cairo_line_to(c, at(t) - 10 * kLean, ty + 18);
+      cairo_stroke(c);
     }
-    text(c, rx + 5 * rw + rd + 20, fy + 20, 16, "100% is the step as tested.", false, DIM, 1, 0, R - (rx + 5 * rw + rd + 20));
-    text(c, rx + 5 * rw + rd + 20, fy + 40, 16, "Lower lets small moves through.", false, DIM, 1, 0, R - (rx + 5 * rw + rd + 20));
+    label(c, x0, fy + 52, 14, "Lighter", DIM);
+    label(c, at(100), fy + 52, 14, "As tested", PAPER, 1);
+    label(c, x1, fy + 52, 14, "Steadier", DIM, 2);
+    // The handle leans like everything else, and turns yellow under the laser or while it's held.
+    const double kw = 20, kh = 38;
+    const bool lit = dragging || m.hover == "decaf_strength";
+    slab(c, at(pct) - kw / 2, ty - kh / 2, kw, kh, lit ? SIGNAL : PAPER);
+    btn.push_back({x0 - 14, fy, x1 - x0 + 28, fh, "decaf_strength"});
   } else {
     text(c, L, 664, 17, "Some games have smoothing or steadying of their own. Try one at a time: two at once can feel late.",
          false, DIM, 1, 0, R - L);
