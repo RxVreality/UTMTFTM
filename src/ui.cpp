@@ -938,7 +938,8 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
   // Which controller to hold yours up against. As many as this SteamVR can draw, so the names shrink to share the line.
   const double chipY = 108, chipH = 36, chipD = chipH * kLean;
   const double compareW = label(c, L, chipY + 24, 16, "Compare with");
-  const double chipX0 = L + compareW + 16, chipSpace = R - chipX0;
+  if (m.canGuide) button(c, btn, R - 130, chipY, 130, chipH, "guide_on", "Guided", Outline);
+  const double chipX0 = L + compareW + 16, chipSpace = R - chipX0 - (m.canGuide ? 146 : 0);
   double size = 16, total = 0;
   for (; size > 11; size -= 1) {
     total = 0;
@@ -1058,10 +1059,11 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
   };
 
   if (m.step == 0) {
-    text(c, L, headY, 27, m.canMake ? "Your combos for " + m.game : "Start a game to make a combo", true, PAPER, 1, 0, R - L - 410);
-    text(c, L, subY, 18, m.canMake ? "Hold two or more controls together to do one thing. Touching counts, and it doesn't press." : m.why, false, DIM, 1, 0, R - L - 410);
+    text(c, L, headY, 27, m.canMake ? "Your combos for " + m.game : "Start a game to make a combo", true, PAPER, 1, 0, R - L - (m.canGuide ? 570 : 410));
+    text(c, L, subY, 18, m.canMake ? "Hold two or more controls together to do one thing. Touching counts, and it doesn't press." : m.why, false, DIM, 1, 0, R - L - (m.canGuide ? 570 : 410));
     button(c, btn, R - 230, 116, 230, 48, "combo_new", "New combo", Primary, m.canMake);
     button(c, btn, R - 390, 116, 150, 48, "page_recorded", "Advanced", Outline);
+    if (m.canGuide) button(c, btn, R - 550, 116, 150, 48, "guide_on", "Guided", Outline);
     pictures();
     const double rowH = 44;
     if (m.saved.empty()) {
@@ -1430,6 +1432,259 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     } else text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
   } else if (m.step == 0 && m.canRecord) {
     text(c, L, baseY, 19, "Close the dashboard and press the button. Macros don't run while the dashboard's open.", false, DIM, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- guided walkthroughs
+std::string guideKey(const GuideModel& m) {
+  std::string k = std::to_string((int)m.tab) + "|" + m.game + "|" + std::to_string((int)m.live) + "|" + m.title + "|" + m.sub + std::to_string(m.subWarn) + "|" + m.step + "|" +
+                  std::to_string(m.pictures) + std::to_string(m.advanced) + "|" + m.bar + "|" + m.foot + std::to_string(m.footLive) + "|" + m.status + std::to_string(m.statusWarn) +
+                  std::to_string(m.statusGood) + std::to_string(m.confirmClose) + "|fx:" + m.hover + "," + m.down + "|" + std::to_string(int(m.phase * 1000)) + "|" +
+                  std::to_string(m.pageNo) + "/" + std::to_string(m.pages) + "|" + std::to_string(m.playing) + "|" + m.chipsLabel + std::to_string(m.stickAxes);
+  for (int h = 0; h < 2; ++h) {
+    k += m.pic[h] ? "p" : "-";
+    for (const GuideRow& r : m.rows[h]) k += r.id + "=" + r.name + "," + r.job + "," + std::to_string((int)r.look) + r.badge + ";";
+  }
+  for (const auto& l : {&m.cards, &m.choices})
+    for (const GuideChoice& c : *l) k += c.id + "=" + c.name + "," + c.where + ";";
+  for (const GuideButton& b : m.buttons) k += b.id + "=" + b.text + std::to_string(b.primary) + std::to_string(b.enabled) + ";";
+  for (const auto& ch : m.chips) k += ch.id + "=" + ch.text + std::to_string(ch.on) + ";";
+  for (const RecordedTile& t : m.tiles) k += t.name + t.hand + std::to_string(t.kind) + std::to_string(t.both) + ";";
+  return k;
+}
+
+static double flash(double t) { return 0.5 - 0.5 * std::cos(2 * M_PI * t); }
+
+// Rings spreading out from a button, the way J4 asked for the buttons to flash.
+static void ripple(cairo_t* c, double x, double y, double t) {
+  for (double k : {0.0, 0.5}) {
+    const double u = std::fmod(t + k, 1.0), r = 6 + 13 * u;
+    set(c, SIGNAL, (1 - u) * 0.9);
+    cairo_set_line_width(c, 2.5);
+    cairo_new_path(c);
+    cairo_arc(c, x, y, r, 0, 2 * M_PI);
+    cairo_stroke(c);
+  }
+}
+
+// One hand, bigger than on the full pages: the controller in the middle, its buttons down either side.
+static void guideHand(cairo_t* c, std::vector<Button>& btn, const ControllerPicture* pic, const std::vector<GuideRow>& rows, double X0, double W, double y0, double H, double t) {
+  const double S = pic ? pic->size() : 240, px = X0 + (W - S) / 2, py = y0 + (H - S) / 2, cellW = (W - S) / 2 - 2, rowH = 48;
+  if (pic) {
+    cairo_set_source_surface(c, pic->image(), px, py);
+    cairo_paint(c);
+  }
+  std::vector<const GuideRow*> col[2];
+  for (const GuideRow& r : rows) {
+    if (r.x >= 0) col[r.x < 0.5 ? 0 : 1].push_back(&r);
+    else col[col[0].size() <= col[1].size() ? 0 : 1].push_back(&r);
+  }
+  const int most = std::max(1, int(H / rowH));
+  for (int a = 0; a < 2; ++a)
+    while (int(col[a].size()) > std::min(most, 6)) {
+      auto nearest = std::min_element(col[a].begin(), col[a].end(), [](const GuideRow* p, const GuideRow* q) { return std::fabs(p->x - 0.5) < std::fabs(q->x - 0.5); });
+      col[1 - a].push_back(*nearest);
+      col[a].erase(nearest);
+    }
+  struct Spot { double x, y; GuideLook look; };
+  std::vector<Spot> spots;
+  struct Badge { double x, y; std::string text; bool now; };
+  std::vector<Badge> badges;
+  for (int a = 0; a < 2; ++a) {
+    std::stable_sort(col[a].begin(), col[a].end(), [](const GuideRow* p, const GuideRow* q) { return p->y < q->y; });
+    const double top = y0 + (H - col[a].size() * rowH) / 2;
+    for (size_t i = 0; i < col[a].size(); ++i) {
+      const GuideRow& r = *col[a][i];
+      const GuideLook lk = r.look;
+      const double cx = a == 0 ? X0 : X0 + W - cellW, cy = top + i * rowH, mid = cy + rowH / 2;
+      const bool solid = lk == GuideLook::Armed || lk == GuideLook::Held;
+      const bool outlined = lk == GuideLook::Changed || lk == GuideLook::Touched;
+      const bool flashing = lk == GuideLook::Pulse || lk == GuideLook::TagPulse;
+      const bool yellow = solid || outlined || flashing;
+      if (solid) slab(c, cx, cy + 2, cellW, rowH - 4, SIGNAL);
+      else if (outlined) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 1, 2);
+      else if (lk == GuideLook::TagPulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 0.25 + 0.75 * flash(t), 2);
+      else if (lk == GuideLook::Pulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 0.15 + 0.55 * flash(t), 1.5);
+      else if (lk == GuideLook::Tag) frame(c, cx, cy + 2, cellW, rowH - 4, PAPER, 0.45, 1.5);
+      if (r.x >= 0) {
+        const double ex = px + r.x * S, ey = py + r.y * S, sx = a == 0 ? cx + cellW : cx;
+        const bool faded = lk == GuideLook::Faded || lk == GuideLook::Plain;
+        set(c, yellow ? SIGNAL : PAPER, faded ? 0.35 : yellow ? 0.9 : 0.6);
+        cairo_set_line_width(c, solid ? 2.2 : 1.2);
+        cairo_move_to(c, sx, mid);
+        cairo_line_to(c, ex, ey);
+        cairo_stroke(c);
+        spots.push_back({ex, ey, lk});
+        if (!r.badge.empty()) badges.push_back({ex, ey, r.badge, lk == GuideLook::Held});
+      }
+      const int align = a == 0 ? 2 : 0;
+      const double tx = a == 0 ? cx + cellW - 12 : cx + 14, tw = cellW - 22;
+      const RGB ink = solid ? INK : lk == GuideLook::Faded ? FAINT : PAPER;
+      const RGB topInk = solid ? INK : lk == GuideLook::Faded ? FAINT : DIM;
+      const RGB jobInk = lk == GuideLook::Changed ? SIGNAL : ink;
+      if (r.job.empty()) {
+        caps(c, tx, mid + 7, 19, r.name, outlined ? SIGNAL : ink, 1, align, 1.2, tw);
+      } else if (textW(c, r.job, 17, true) <= tw) {
+        label(c, tx, cy + 17, 13, r.name, topInk, align);
+        text(c, tx, cy + 39, 19, r.job, true, jobInk, 1, align, tw);
+      } else {
+        // Too long for one line: two, split where the longer half is shortest.
+        std::vector<std::string> words;
+        std::string w;
+        for (char ch : r.job) {
+          if (ch == ' ') { if (!w.empty()) words.push_back(w); w.clear(); }
+          else w += ch;
+        }
+        if (!w.empty()) words.push_back(w);
+        std::string l1 = r.job, l2;
+        double best = 1e9;
+        for (size_t k = 1; k < words.size(); ++k) {
+          std::string a1, a2;
+          for (size_t j = 0; j < words.size(); ++j) (j < k ? a1 : a2) += (j == 0 || j == k ? "" : " ") + words[j];
+          const double m = std::max(textW(c, a1, 15, true), textW(c, a2, 15, true));
+          if (m < best) { best = m; l1 = a1; l2 = a2; }
+        }
+        label(c, tx, cy + 13, 12, r.name, topInk, align);
+        text(c, tx, cy + 29, 15, l1, true, jobInk, 1, align, tw);
+        text(c, tx, cy + 44, 15, l2, true, jobInk, 1, align, tw);
+      }
+      fxOver(c, cx, cy + 2, cellW, rowH - 4, r.id, true, solid);
+      btn.push_back({cx, cy, cellW, rowH, r.id, true});
+    }
+  }
+  for (const Spot& s : spots) {
+    const bool solid = s.look == GuideLook::Armed || s.look == GuideLook::Held;
+    const bool flashing = s.look == GuideLook::Pulse || s.look == GuideLook::TagPulse;
+    if (flashing) ripple(c, s.x, s.y, t);
+    if (s.look == GuideLook::Held) ripple(c, s.x, s.y, std::fmod(t * 2, 1.0));
+    const bool yellow = solid || flashing || s.look == GuideLook::Changed || s.look == GuideLook::Touched;
+    const double dot = solid ? 7 : yellow ? 5.5 : 3.5;
+    slab(c, s.x - dot, s.y - dot, dot * 2.4, dot * 2, yellow ? SIGNAL : PAPER, yellow ? 1 : 0.7);
+  }
+  for (const Badge& b : badges) {
+    const double bh = 30, bw = capsW(c, b.text, 20, 3) + 22 + bh * kLean, bx = b.x + 10, by = b.y - bh - 8;
+    slab(c, bx, by, bw, bh, b.now ? SIGNAL : INK);
+    frame(c, bx, by, bw, bh, SIGNAL, 1, 2);
+    caps(c, bx + bw / 2, by + bh / 2 + 7, 20, b.text, b.now ? INK : SIGNAL, 1, 1, 3);
+  }
+}
+
+void drawGuide(Canvas& cv, const GuideModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK);
+  cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, m.tab);
+
+  const double right = m.advanced ? R - 170 : R;
+  text(c, L, 144, 28, m.title, true, PAPER, 1, 0, right - L - (m.step.empty() ? 20 : 140));
+  if (!m.sub.empty()) {
+    double x = L;
+    if (m.subWarn) { lamp(c, L, 160, 13, ALERT); x += 26; }
+    text(c, x, 173, 18, m.sub, false, m.subWarn ? ALERT : DIM, 1, 0, right - x - 20);
+  }
+  if (!m.step.empty()) caps(c, right, 144, 17, m.step, DIM, 1, 2);
+  if (m.advanced) button(c, btn, R - 150, 116, 150, 44, "guide_advanced", "Advanced", Outline);
+
+  // What the step shows: your controllers, a few big choices, or a list.
+  const double top = 188;
+  hline(c, L, R, top, LINE);
+  const bool tiles = !m.tiles.empty();
+  double below = top + 380;
+  if (m.pictures) {
+    const double H = tiles ? 330 : 380, cw = mid - 12 - L;
+    for (int h = 0; h < 2; ++h) guideHand(c, btn, m.pic[h], m.rows[h], h ? mid + 12 : L, cw, top + 2, H - 4, m.phase);
+    below = top + H;
+    hline(c, L, R, below, LINE);
+  } else if (!m.cards.empty()) {
+    const double y = top + 40, h = 250, gap = 24, d = h * kLean, each = (R - L + d * (m.cards.size() - 1) - gap * (m.cards.size() - 1)) / m.cards.size();
+    for (size_t i = 0; i < m.cards.size(); ++i) {
+      const double x = L + i * (each - d + gap);
+      frame(c, x, y, each, h, PAPER, 0.75, 2);
+      fxOver(c, x, y, each, h, m.cards[i].id);
+      text(c, x + d + 30, y + 110, 34, m.cards[i].name, true, PAPER, 1, 0, each - 2 * d - 50);
+      text(c, x + d + 22, y + 150, 19, m.cards[i].where, false, DIM, 1, 0, each - 2 * d - 50);
+      btn.push_back({x + d / 2, y, each - d, h, m.cards[i].id});
+    }
+  } else if (!m.choices.empty()) {
+    const double gridY = top + 16, h = 62, gap = 6, d = h * kLean, each = (R - L + 2 * d - 2 * 8.0) / 3;
+    for (size_t i = 0; i < m.choices.size(); ++i) {
+      const int col = int(i % 3), row = int(i / 3);
+      const double x = L + col * (each - d + 8), y = gridY + row * (h + gap);
+      const GuideChoice& e = m.choices[i];
+      frame(c, x, y, each, h, PAPER, 0.7, 2);
+      fxOver(c, x, y, each, h, e.id);
+      const double tx = x + d + 12, tw = each - 2 * d - 22;
+      if (e.where.empty()) text(c, tx, y + 39, 21, e.name, true, PAPER, 1, 0, tw);
+      else {
+        text(c, tx, y + 29, 20, e.name, true, PAPER, 1, 0, tw);
+        label(c, tx, y + 50, 13, e.where, DIM);
+      }
+      btn.push_back({x + d / 2, y, each - d, h, e.id});
+    }
+  }
+
+  // Along the bottom: a macro's steps, what's picked, the parts of a stick, and the step's buttons.
+  double y = below + 12;
+  if (tiles) recordedStrip(c, btn, m.tiles, m.playing, L, R - 440, below + 12, 104, 64, 8);
+  const double barH = 58;
+  if (!m.bar.empty()) {
+    slab(c, L, y, R - L, barH, SIGNAL);
+    caps(c, L + 28, y + 38, 22, m.bar, INK, 1, 0, 1.4, R - L - 130 - 170.0 * m.buttons.size());
+    double x = R - 20;
+    for (const GuideButton& b : m.buttons) {
+      const double w = std::max(130.0, capsW(c, upper(b.text), 18, 1.4) + 50);
+      x -= w;
+      button(c, btn, x, y + 8, w, barH - 16, b.id, b.text, OnSignal, b.enabled);
+      x -= 10;
+    }
+    y += barH + 10;
+  } else if (!m.buttons.empty()) {
+    const double h = 50, by = tiles ? below + 18 : std::max(y, 600.0);
+    double x = R;
+    for (const GuideButton& b : m.buttons) {
+      const double w = std::max(150.0, capsW(c, upper(b.text), 19, 1.4) + 56);
+      x -= w;
+      button(c, btn, x, by, w, h, b.id, b.text, b.primary ? Primary : Outline, b.enabled);
+      x -= 12;
+    }
+  }
+  if (!m.chips.empty()) {
+    const double chipY = std::max(y, 640.0), chipH = 40, switchW = 290;
+    const bool ways = std::any_of(m.chips.begin(), m.chips.end(), [](const BindModel::Chip& ch) { return ch.id.find("north") != std::string::npos; });
+    const double lw = label(c, L, chipY + 26, 16, m.chipsLabel);
+    const double x0 = L + lw + 16, x1 = R - (ways ? switchW + 24 : 0);
+    std::vector<Segment> list;
+    for (const BindModel::Chip& ch : m.chips) list.push_back({ch.id, ch.text, ch.on, true});
+    segments(c, btn, x0, chipY, std::min(x1 - x0, 112.0 * list.size()), chipH, list, 16);
+    if (ways) {
+      const double sw = label(c, R - switchW, chipY + 26, 16, "Names");
+      segments(c, btn, R - switchW + sw + 14, chipY, switchW - sw - 14, chipH, {{"guide_dirs_compass", "N E S W", !m.stickAxes, true}, {"guide_dirs_axes", "Y+ X+", m.stickAxes, true}}, 16);
+    }
+  }
+  if (m.pages > 1) {
+    const std::string where = "Page " + std::to_string(m.pageNo + 1) + " of " + std::to_string(m.pages);
+    const double py = 606, w = capsW(c, upper(where), 16, 1.2);
+    button(c, btn, L, py, 44, 36, "guide_page_prev", "", Outline);
+    caps(c, L + 22, py + 24, 18, "<", PAPER, 1, 1, 0);
+    caps(c, L + 60, py + 24, 16, where, PAPER, 1, 0, 1.2);
+    button(c, btn, L + 76 + w, py, 44, 36, "guide_page_next", "", Outline);
+    caps(c, L + 98 + w, py + 24, 18, ">", PAPER, 1, 1, 0);
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (!m.foot.empty()) {
+    double x = L;
+    if (m.footLive) { lamp(c, L, baseY - 14, 14, LIVE); x += 28; }
+    text(c, x, baseY, 19, m.foot, m.footLive, m.footLive ? PAPER : DIM, 1, 0, R - x);
   }
   g_hover = g_down = nullptr;
 }

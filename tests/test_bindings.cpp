@@ -1776,6 +1776,8 @@ static void testGuideShots(const std::string& work, const std::string& out) {
   printf("drew %d games from the table\n", drawn);
 }
 
+static void shotGuide(const GuideModel& m, const std::string& path);
+
 // ---------------------------------------------------------------- the real SteamVR on this machine, if there is one
 static void testReal(const std::string& work, const std::string& out) {
   Dirs d;
@@ -1847,6 +1849,14 @@ static void testReal(const std::string& work, const std::string& out) {
     shot(m, out + "/game_" + g.file + ".png");
     shot(page.model("y:right/input/x", ""), out + "/game_" + g.file + "_hover.png");
     shot(page.model("y:right/input/a", ""), out + "/game_" + g.file + "_hover_a.png");
+    // The walkthrough on a real game's real bindings, as it'll look in the headset.
+    shotGuide(page.guideModel(DashPage::Bindings, "", "", 0.5), out + "/game_" + g.file + "_guide_1.png");
+    page.guideClick(DashPage::Bindings, "g:right/input/a");
+    shotGuide(page.guideModel(DashPage::Bindings, "", "", 0.5), out + "/game_" + g.file + "_guide_2.png");
+    page.guideClick(DashPage::Bindings, "guide_bind_back");
+    page.guideClick(DashPage::Combos, "guide_combo_combo");
+    shotGuide(page.guideModel(DashPage::Combos, "", "", 0.5), out + "/game_" + g.file + "_guide_combo_1.png");
+    page.guideClick(DashPage::Combos, "guide_combo_back");
     if (m.layoutOk) {
       page.click("bind_scope_game");
       page.click("bind_layout");
@@ -2421,6 +2431,194 @@ static void testLive(const std::string& work) {
   check(page.status.find("next time") != std::string::npos, "removing a combo the game launched with waits: " + page.status);
 }
 
+static void shotGuide(const GuideModel& m, const std::string& path) {
+  Canvas cv(1200, 760);
+  std::vector<Button> b;
+  drawGuide(cv, m, b);
+  cv.savePNG(path);
+  for (const Button& x : b) check(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h, path + ": " + x.id + " is on the panel");
+  for (size_t i = 0; i < b.size(); ++i)
+    for (size_t j = i + 1; j < b.size(); ++j) {
+      const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+      check(across <= 24 || down <= 2, path + ": " + b[i].id + " and " + b[j].id + " are on top of each other");
+    }
+}
+
+static const GuideRow* guideRow(const GuideModel& m, const std::string& id) {
+  for (int h = 0; h < 2; ++h)
+    for (const GuideRow& r : m.rows[h]) if (r.id == id) return &r;
+  return nullptr;
+}
+
+static bool hasGuideButton(const GuideModel& m, const std::string& id) {
+  return std::any_of(m.buttons.begin(), m.buttons.end(), [&](const GuideButton& b) { return b.id == id; });
+}
+
+// J4, 13 November: the tabs open on a walkthrough, button first, one question a step, only what that step needs.
+static void testGuide(const std::string& work, const std::string& out) {
+  fixture::writeSteamVR(work + "/guide/steamvr", work + "/guide/config", work + "/guide/games");
+  Dirs d;
+  d.steamvr = work + "/guide/steamvr";
+  d.steam = work + "/guide/steam";
+  d.data = work + "/guide/data";
+  d.config = {work + "/guide/config"};
+  FakeSettings fake;
+  Page page(d, fake.make());
+  page.load();
+  page.setYours("frame_controller", "{frame_controller}frame_controller_left", "{frame_controller}frame_controller_right");
+  giveModels(page, d.steamvr);
+  check(page.guided(DashPage::Bindings) && page.guided(DashPage::Combos), "both tabs open on their walkthrough");
+
+  // No game: it says what it needs, and nothing flashes.
+  page.setGame("", "", "");
+  GuideModel m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(m.title == "Start a game first" && !page.guideFlashing(DashPage::Bindings), "with no game it asks for one: " + m.title);
+  shotGuide(m, out + "/guide_bind_nogame.png");
+
+  page.setGame("steam.app.777", "", "Named Game");
+  page.gameStarted();
+  page.setHookState(true, true);
+  page.setHookFeatures(fhlive::kFeatureLinks | fhlive::kFeatureWays);
+
+  // Step 1: which button. Every button flashes, and that's all there is besides Advanced.
+  m = page.guideModel(DashPage::Bindings, "", "", 0.5);
+  check(m.title == "Which button do you want to change?" && m.step == "Step 1 of 3", "step 1 asks which button");
+  check(m.pic[0] && m.pic[1] && m.pic[0]->size() == 250, "on the big pictures of your controllers");
+  const GuideRow* y = guideRow(m, "g:right/input/y");
+  check(y && y->look == GuideLook::Pulse && y->job == "Reload", "every button flashes, with what it does: " + (y ? y->job : ""));
+  check(m.buttons.empty() && m.advanced, "nothing else to tap but Advanced");
+  check(page.guideFlashing(DashPage::Bindings), "and it wants drawing again for the flashing");
+  shotGuide(m, out + "/guide_bind_1.png");
+
+  // Step 2: what it should do. Its job's in the question, and the other buttons' jobs are what you tap.
+  page.guideClick(DashPage::Bindings, "g:right/input/y");
+  m = page.guideModel(DashPage::Bindings, "", "", 0.5);
+  check(m.title == "Your Y does Reload. What should it do?", "step 2 says what it does now: " + m.title);
+  const GuideRow* bump = guideRow(m, "g:right/input/bumper");
+  check(guideRow(m, "g:right/input/y")->look == GuideLook::Armed && bump && bump->look == GuideLook::TagPulse && bump->job == "Fire the gun", "the button's lit and the others' jobs flash");
+  check(hasGuideButton(m, "guide_bind_back") && hasGuideButton(m, "guide_bind_more"), "with Back and Other jobs");
+  shotGuide(m, out + "/guide_bind_2.png");
+
+  // Tapping another's job swaps them, for this game only, and it's live.
+  page.guideClick(DashPage::Bindings, "g:right/input/bumper");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(m.title == "Done. Y and right Bumper swapped.", "done: " + m.title);
+  const std::string own = "frame_controller>frame_controller|steam.app.777";
+  check(page.wiringChanges.count(own) && page.wiringChanges[own]["right/input/y"] == "right/input/bumper" && page.wiringChanges[own]["right/input/bumper"] == "right/input/y", "saved as this game's own rewiring");
+  check(!page.wiringChanges.count("frame_controller>frame_controller"), "and not for every game");
+  check(guideRow(m, "g:right/input/y")->job == "Fire the gun" && guideRow(m, "g:right/input/bumper")->job == "Reload", "the picture shows them swapped: Y " + guideRow(m, "g:right/input/y")->job + ", bumper " + guideRow(m, "g:right/input/bumper")->job);
+  check(guideRow(m, "g:right/input/y")->look == GuideLook::Changed && guideRow(m, "g:right/input/a")->look == GuideLook::Faded, "lit, and the rest faded");
+  check(m.footLive && m.foot.find("now") != std::string::npos, "and it says it works now: " + m.foot);
+  shotGuide(m, out + "/guide_bind_3.png");
+  {
+    fhlive::InputTable t;
+    page.fillInputTable(t);
+    check(t.links >= 2, "the driver gets the swap");
+  }
+  // Another game doesn't get it.
+  page.setGame("steam.app.12345", "", "Fixture Game");
+  check(page.wiring("frame_controller", "frame_controller").at("right/input/y") == "right/input/y", "another game's Y is still its Y");
+  page.setGame("steam.app.777", "", "Named Game");
+  page.gameStarted();
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(m.step == "Step 1 of 3" && hasGuideButton(m, "guide_bind_reset"), "back on its first step, with a way to put it all back");
+  check(guideRow(m, "g:right/input/y")->job == "Fire the gun", "and the swap's still there");
+  shotGuide(m, out + "/guide_bind_1_changed.png");
+
+  // Other jobs: nothing, or a job on no button.
+  page.guideClick(DashPage::Bindings, "g:right/input/a");
+  page.guideClick(DashPage::Bindings, "guide_bind_more");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(!m.pictures && !m.choices.empty() && m.choices[0].id == "guide_bind_none", "the list starts with Nothing");
+  shotGuide(m, out + "/guide_bind_4.png");
+  page.guideClick(DashPage::Bindings, "guide_bind_none");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(m.title == "Done. Your A does nothing now.", "a button can do nothing: " + m.title);
+  // Undo takes back just that.
+  page.guideClick(DashPage::Bindings, "guide_bind_undo");
+  check(page.wiringChanges[own].count("right/input/a") == 0 && page.wiringChanges[own]["right/input/y"] == "right/input/bumper", "Undo takes back the last change and keeps the one before");
+  // Put it all back.
+  page.guideClick(DashPage::Bindings, "guide_bind_reset");
+  check(!page.wiringChanges.count(own) && !page.games[page.games.count("steam.app.777|frame_controller") ? "steam.app.777|frame_controller" : ""].explicitly, "Put it all back takes the game back to its own");
+  m = page.guideModel(DashPage::Bindings, "", "", 0);
+  check(guideRow(m, "g:right/input/y")->job == "Reload" && !hasGuideButton(m, "guide_bind_reset"), "Y reloads again, and there's nothing left to put back");
+  page.status.clear();
+
+  // Advanced is the full page, and Guided comes back.
+  page.guideClick(DashPage::Bindings, "guide_advanced");
+  check(!page.guided(DashPage::Bindings), "Advanced shows the full page");
+  page.setGuided(DashPage::Bindings, true);
+  check(page.guided(DashPage::Bindings) && page.guideModel(DashPage::Bindings, "", "", 0).step == "Step 1 of 3", "and Guided starts the walkthrough again");
+
+  // ---- Combos: first what to make.
+  m = page.guideModel(DashPage::Combos, "", "", 0);
+  check(!m.pictures && m.cards.size() == 2 && m.title == "What do you want to make?", "the Combos tab asks combo or macro");
+  shotGuide(m, out + "/guide_combo_0.png");
+  page.guideClick(DashPage::Combos, "guide_combo_combo");
+  m = page.guideModel(DashPage::Combos, "", "", 0.5);
+  check(m.title == "What should the combo do?" && guideRow(m, "g:right/input/bumper")->look == GuideLook::TagPulse, "then what it should do, on the controller");
+  shotGuide(m, out + "/guide_combo_1.png");
+  page.guideClick(DashPage::Combos, "g:right/input/bumper");
+  m = page.guideModel(DashPage::Combos, "", "", 0.5);
+  check(m.title == "Tap the buttons you'll hold for Fire the gun", "then which buttons: " + m.title);
+  check(m.bar.empty() && guideRow(m, "g:right/input/a")->look == GuideLook::Pulse, "nothing picked yet, so they all flash");
+  shotGuide(m, out + "/guide_combo_2_empty.png");
+  page.guideClick(DashPage::Combos, "g:left/input/grip");
+  page.guideClick(DashPage::Combos, "g:right/input/a");
+  page.guideClick(DashPage::Combos, "g:right/input/a");  // again: a light touch
+  page.guideClick(DashPage::Combos, "g:right/input/thumbstick");
+  page.guideClick(DashPage::Combos, "guide_part_south");
+  m = page.guideModel(DashPage::Combos, "", "", 0);
+  check(guideRow(m, "g:right/input/a")->look == GuideLook::Touched && guideRow(m, "g:left/input/grip")->look == GuideLook::Armed, "a press is solid and a touch is outlined");
+  check(!m.chips.empty() && m.bar.find("South") != std::string::npos, "a stick offers its ways, and the bar says what's picked: " + m.bar);
+  shotGuide(m, out + "/guide_combo_2.png");
+  page.guideClick(DashPage::Combos, "guide_combo_save");
+  m = page.guideModel(DashPage::Combos, "", "", 0);
+  check(m.title.rfind("Done. ", 0) == 0 && page.combos["steam.app.777|frame_controller"].size() == 1, "saved: " + m.title);
+  check(m.footLive, "and with a driver that knows stick pushes, it's live: " + m.foot);
+  shotGuide(m, out + "/guide_combo_3.png");
+  page.guideClick(DashPage::Combos, "guide_combo_undo");
+  check(page.combos["steam.app.777|frame_controller"].empty(), "Undo takes it away");
+  page.status.clear();
+
+  // ---- A macro: the button first, then the moves, then keep it.
+  page.guideClick(DashPage::Combos, "guide_combo_macro");
+  m = page.guideModel(DashPage::Combos, "", "", 0.5);
+  check(m.title == "Which button plays your macro?" && guideRow(m, "g:right/input/bumper")->look == GuideLook::Pulse, "a macro asks for its button first");
+  shotGuide(m, out + "/guide_macro_1.png");
+  page.guideClick(DashPage::Combos, "g:right/input/bumper");
+  m = page.guideModel(DashPage::Combos, "", "", 0);
+  check(m.title == "Now show it the moves" && guideRow(m, "g:right/input/bumper")->look == GuideLook::Armed, "then the moves, with its button lit");
+  shotGuide(m, out + "/guide_macro_2.png");
+  page.guideClick(DashPage::Combos, "guide_macro_start");
+  page.recordedTick(1000, 0);
+  page.recordedTick(4000, 0);
+  check(page.recordedListening(), "Start records");
+  page.recordedReport(rawOf(5000, 1, "/input/grip/click", 1));
+  page.recordedReport(rawOf(5200, 1, "/input/grip/click", 0));
+  page.recordedReport(rawOf(5400, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(5500, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(5700, 1, "/input/a/click", 1));
+  page.recordedReport(rawOf(5800, 1, "/input/a/click", 0));
+  page.recordedReport(rawOf(6000, 1, "/input/trigger/click", 1));
+  page.recordedReport(rawOf(6100, 1, "/input/trigger/click", 0));
+  page.recordedTick(9000, 9000);
+  m = page.guideModel(DashPage::Combos, "", "", 0.3);
+  check(m.title == "Here's your macro. Keep it?" && m.tiles.size() == 4, "then it shows the take: " + m.title + ", " + std::to_string(m.tiles.size()) + " steps");
+  check(m.subWarn && m.sub.find("stops being") != std::string::npos, "with a warning in red about what the button stops doing: " + m.sub);
+  const GuideRow* a = guideRow(m, "g:right/input/a");
+  check(a && a->badge == "2 3", "A's steps are numbered on the controller: " + (a ? a->badge : ""));
+  check(m.playing == 1 && a->look == GuideLook::Held, "and it plays back, lighting each one in turn");
+  shotGuide(m, out + "/guide_macro_3.png");
+  page.guideClick(DashPage::Combos, "guide_macro_keep");
+  m = page.guideModel(DashPage::Combos, "", "", 0);
+  check(m.title.rfind("Done. ", 0) == 0 && page.recorded["steam.app.777|frame_controller"].size() == 1, "kept: " + m.title);
+  check(page.recorded["steam.app.777|frame_controller"][0].path == "/input/bumper" && page.recorded["steam.app.777|frame_controller"][0].hand == 1, "on the right bumper");
+  shotGuide(m, out + "/guide_macro_4.png");
+  page.guideClick(DashPage::Combos, "guide_combo_undo");
+  check(page.recorded["steam.app.777|frame_controller"].empty(), "and Undo takes it away too");
+}
+
 int main(int argc, char** argv) {
   const std::string out = argc > 1 ? argv[1] : ".";
   std::error_code ec;
@@ -2438,6 +2636,7 @@ int main(int argc, char** argv) {
   testReal(tmp.generic_u8string(), out);
   testPartsReal();
   testLive(tmp.generic_u8string());
+  testGuide(tmp.generic_u8string(), out);
   fs::remove_all(tmp, ec);
   printf("test_bindings: %d checks, %d failures\n", checks, fails);
   return fails ? 1 : 0;

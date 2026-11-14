@@ -130,6 +130,7 @@ struct BindModel {
   std::string game;
   LiveState live = LiveState::NoGame;
   bool hasGame = false;
+  bool canGuide = false;  // there's a walkthrough to go back to
   std::vector<std::string> refs;  // every controller there is to compare with
   std::string ref;
   std::string controls;  // which of the game's sets of controls is showing, when it has several
@@ -168,6 +169,7 @@ struct ComboModel {
   LiveState live = LiveState::NoGame;
   int step = 0;          // 0 what's saved, 1 what you do, 2 what it does
   bool canMake = false;  // there's a game, and bindings for it to add to
+  bool canGuide = false;  // there's a walkthrough to go back to
   std::string why;       // why not, when it can't
   BindSide yours;
   std::vector<ComboEntry> saved;
@@ -234,6 +236,50 @@ struct RecordedModel {
 };
 std::string recordedKey(const RecordedModel& m);
 void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- guided walkthroughs
+// The Bindings and Combos tabs open on these: one question a step, on a big picture of your own controllers, and only what
+// that step needs (J4, 13 November). The full pages are behind Advanced.
+enum class GuideLook { Plain, Pulse, Armed, Tag, TagPulse, Changed, Faded, Held, Touched };
+struct GuideRow {
+  std::string id, name, job;  // "g:right/input/a", "A", "Jump". job empty: the name alone
+  GuideLook look = GuideLook::Plain;
+  std::string badge;          // a macro's step numbers, on the controller by the button: "2 3"
+  double x = -1, y = -1;      // where it sits on the picture, 0..1. Negative: nowhere known
+  bool behind = false;
+};
+struct GuideButton { std::string id, text; bool primary = false; bool enabled = true; };
+struct GuideChoice { std::string id, name, where; };
+struct GuideModel {
+  DashPage tab = DashPage::Bindings;
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  std::string title, sub, step;  // step: "Step 1 of 3"
+  bool subWarn = false;          // the line under the title is a warning, so it's red
+  bool pictures = true;          // your controllers. False: whatever else this step shows takes the room
+  const ControllerPicture* pic[2] = {nullptr, nullptr};
+  std::vector<GuideRow> rows[2];
+  std::vector<GuideChoice> cards;    // a few big choices, each with a line under it
+  std::vector<GuideChoice> choices;  // a list to pick from, a page at a time
+  int pageNo = 0, pages = 1;
+  std::vector<RecordedTile> tiles;   // a macro's steps
+  int playing = -1;                  // the one lit up as it plays back
+  std::string chipsLabel;            // the parts of the control last tapped, under the picture
+  std::vector<BindModel::Chip> chips;
+  bool stickAxes = false;
+  std::string bar;                   // what's picked so far, on a yellow bar. Empty: no bar
+  std::vector<GuideButton> buttons;  // along the bottom, the first on the right
+  std::string foot;                  // the line along the bottom
+  bool footLive = false;             // and it says it works in the game now
+  double phase = 0;                  // how far through its flash everything flashing is, 0..1
+  bool advanced = true;              // the way to the full page
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string guideKey(const GuideModel& m);
+void drawGuide(Canvas& cv, const GuideModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- in-headset instruction panel
 struct PanelModel {

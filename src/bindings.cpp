@@ -1537,6 +1537,12 @@ void Page::setGame(const std::string& key, const std::string& alt, const std::st
   recStep_ = 0;
   editing_ = macro::Recorded{};
   launchKnown_ = false;
+  // The walkthroughs start again for another game, and an Undo from the last one would undo the wrong game's change.
+  gbStep_ = 1;
+  gcStep_ = 0;
+  gbButton_.clear();
+  gmButton_.clear();
+  gUndo_.have = false;
 }
 
 const Found& Page::binding(const std::string& type) {
@@ -1552,7 +1558,21 @@ Wiring Page::wiring(const std::string& theirs, const std::string& yours) const {
   auto it = wiringChanges.find(theirs + ">" + yours);
   if (it != wiringChanges.end())
     for (const auto& [mine, their] : it->second) w[mine] = their;
+  // Then this game's own, from the guided pages.
+  if (!gameKey_.empty() && yours == yours_.type) {
+    auto g = wiringChanges.find(gameWiringKey(theirs));
+    if (g != wiringChanges.end())
+      for (const auto& [mine, their] : g->second) w[mine] = their;
+  }
   return w;
+}
+
+bool Page::rewired(const std::string& from) const {
+  auto all = wiringChanges.find(from + ">" + yours_.type);
+  if (all != wiringChanges.end() && !all->second.empty()) return true;
+  if (gameKey_.empty()) return false;
+  auto one = wiringChanges.find(gameWiringKey(from));
+  return one != wiringChanges.end() && !one->second.empty();
 }
 
 std::string Page::effectiveFrom() const {
@@ -1580,8 +1600,7 @@ bool Page::applyNow(const std::string& from) {
   const Found& f = binding(from);
   if (!f.ok) return false;
   // Your own controller, with nothing rewired: this is only here for its combos, so everything else stays exactly as it was.
-  auto changed = wiringChanges.find(from + ">" + yours_.type);
-  const bool asItWas = from == yours_.type && (changed == wiringChanges.end() || changed->second.empty());
+  const bool asItWas = from == yours_.type && !rewired(from);
   Json::Value out = asItWas ? f.json : translate(f.json, wiring(from, yours_.type), *theirs, *mine);
   std::string layoutName = titleCase(from);
   for (const Headset& h : lib_.headsets) if (h.type == from) { layoutName = shortName(h); break; }
@@ -1688,6 +1707,7 @@ void Page::give(const std::string& model, const Mesh& mesh, const std::vector<Mo
   h.parts = parts;
   h.have = true;
   h.pic.reset();
+  h.big.reset();
 }
 
 // A controller's picture, drawn once and kept. The mesh isn't needed after that.
@@ -1697,6 +1717,7 @@ void Page::bake(const std::string& model) {
   Held& h = it->second;
   const bool left = model.find("left") != std::string::npos;
   h.pic = std::make_shared<ControllerPicture>(bakeController(h.mesh, h.parts, left, 184));
+  h.big = std::make_shared<ControllerPicture>(bakeController(h.mesh, h.parts, left, 250));  // for the guided pages, which have the room
   h.mesh = Mesh{};
 }
 
@@ -2310,8 +2331,7 @@ Found Page::activeBinding() {
   const Profile* mine = lib_.profile(yours_.type);
   if (from.empty() || !mine || !lib_.profile(from)) return Found{};
   Found f = binding(from);
-  auto changed = wiringChanges.find(from + ">" + yours_.type);
-  if (from != yours_.type || (changed != wiringChanges.end() && !changed->second.empty())) f.json = translate(f.json, wiring(from, yours_.type), *lib_.profile(from), *mine);
+  if (from != yours_.type || rewired(from)) f.json = translate(f.json, wiring(from, yours_.type), *lib_.profile(from), *mine);
   return f;
 }
 
@@ -3456,6 +3476,660 @@ bool Page::recordedWantsName(std::string* current) const {
 void Page::recordedSetName(const std::string& name) {
   recWantsName_ = false;
   if (!name.empty()) editing_.name = name.size() > 40 ? name.substr(0, 40) : name;
+}
+
+// ---------------------------------------------------------------- the guided walkthroughs
+// What the Bindings and Combos tabs open on: one question a step, on a big picture of your own controllers, and only what that
+// step needs (J4, 13 November: "only expose them to what is relevant at the time"). Advanced is the full pages. Everything
+// here saves the same way they do, so the two always agree.
+
+static std::string firstJob(const std::string& action) {
+  const size_t both = action.find(" / ");
+  return both == std::string::npos ? action : action.substr(0, both);
+}
+
+void Page::setGuided(DashPage tab, bool on) {
+  if (tab == DashPage::Bindings) {
+    guideBind_ = on;
+    gbStep_ = 1;
+    armed_.clear();
+    target_.clear();
+  } else if (tab == DashPage::Combos) {
+    guideCombo_ = on;
+    if (gcStep_ < 11) gcStep_ = 0;
+    if (!on) comboStep_ = 0;
+  }
+}
+
+void Page::guideRemember() {
+  gUndo_.have = true;
+  gUndo_.wiring = wiringChanges;
+  gUndo_.games = games;
+  gUndo_.combos = combos;
+  gUndo_.recorded = recorded;
+}
+
+void Page::guideUndo() {
+  if (!gUndo_.have) return;
+  // Only which layout the game follows comes back. Whether SteamVR points at our file is what it is now, and reapply sorts that.
+  GameChoice next;
+  auto now = games.find(choiceKey());
+  if (now != games.end()) next = now->second;
+  auto was = gUndo_.games.find(choiceKey());
+  next.from = was != gUndo_.games.end() ? was->second.from : "";
+  next.explicitly = was != gUndo_.games.end() && was->second.explicitly;
+  games[choiceKey()] = next;
+  wiringChanges = gUndo_.wiring;
+  combos = gUndo_.combos;
+  recorded = gUndo_.recorded;
+  gUndo_.have = false;
+  reapply();
+  savePrefs();
+}
+
+std::string Page::guideBase() {
+  std::string from = effectiveFrom();
+  if (from.empty() || !binding(from).ok) from = comboBase();
+  return from;
+}
+
+// Your controller as the game has it right now: every rewiring, layout and job in it, in the set of controls it's mostly in.
+BindSide Page::guideSide() {
+  BindSide side;
+  const Profile* yourP = lib_.profile(yours_.type);
+  if (!yourP) return side;
+  Found active;
+  if (!gameKey_.empty()) active = activeBinding();
+  std::string group;
+  if (active.ok) {
+    const std::vector<ControlGroup> groups = controlGroups(active);
+    if (groups.size() > 1) group = startingGroup(groups);
+  }
+  std::vector<RowText> rows[2];
+  for (int hand = 0; hand < 2; ++hand) {
+    rows[hand] = rowsOn(*yourP, hand ? "right" : "left", active.ok ? &active : nullptr, group);
+    for (RowText& r : rows[hand]) r.unused = active.ok && !r.bound;
+  }
+  if (active.ok) guideOn(rows, *yourP, &active);
+  fillRows(side, "y:", yours_, rows);
+  return side;
+}
+
+void Page::guideRows(GuideModel& m, const std::function<void(GuideRow&, const BindRow&)>& look) {
+  const BindSide side = guideSide();
+  for (int h = 0; h < 2; ++h) {
+    auto it = models_.find(yours_.model[h]);
+    m.pic[h] = it != models_.end() && it->second.big ? it->second.big.get() : side.pic[h];
+    for (const BindRow& r : side.rows[h]) {
+      GuideRow g;
+      g.id = "g:" + r.id.substr(2);
+      g.name = r.name;
+      g.x = r.x;
+      g.y = r.y;
+      g.behind = r.behind;
+      g.job = gameKey_.empty() || r.unused ? "" : firstJob(r.action);
+      look(g, r);
+      m.rows[h].push_back(g);
+    }
+  }
+}
+
+std::string Page::jobOn(const std::string& control) {
+  const BindSide side = guideSide();
+  for (int h = 0; h < 2; ++h)
+    for (const BindRow& r : side.rows[h])
+      if (r.id == "y:" + control) return r.unused || gameKey_.empty() ? "" : firstJob(r.action);
+  return "";
+}
+
+// Everything the game can do in the set of controls it's mostly in, with where each one is now.
+std::vector<GameAction> Page::guideJobs() {
+  const Profile* mine = lib_.profile(yours_.type);
+  if (!mine) return {};
+  const std::vector<GameAction> all = namedActions(activeBinding(), *mine);
+  std::vector<ControlGroup> known;
+  for (const GameAction& a : all) {
+    auto it = std::find_if(known.begin(), known.end(), [&](const ControlGroup& g) { return g.id == a.group; });
+    if (it == known.end()) known.push_back({a.group, a.group, 1});
+    else ++it->labelled;
+  }
+  const std::string group = startingGroup(known);
+  std::vector<GameAction> out;
+  for (const GameAction& a : all)
+    if (a.group == group) out.push_back(a);
+  return out;
+}
+
+bool Page::liveNow() { return afterChange().find("Live in the game now") != std::string::npos; }
+
+std::string Page::liveWords() {
+  return liveNow() ? "Works in " + gameName_ + " now. No restart." : "Works from the next time " + gameName_ + " starts.";
+}
+
+bool Page::guideFlashing(DashPage tab) const {
+  if (gameKey_.empty()) return false;
+  if (tab == DashPage::Bindings) return guideBind_ && (gbStep_ == 1 || gbStep_ == 2);
+  if (tab == DashPage::Combos) return guideCombo_ && (gcStep_ == 1 || (gcStep_ == 2 && picked_.empty()) || gcStep_ == 11 || gcStep_ == 14);
+  return false;
+}
+
+GuideModel Page::guideModel(DashPage tab, const std::string& hover, const std::string& down, double phase) {
+  GuideModel m;
+  m.tab = tab;
+  m.game = gameName_;
+  m.hover = hover;
+  m.down = down;
+  m.phase = phase;
+  m.stickAxes = stickAxes;
+  if (tab == DashPage::Bindings) guideBindModel(m);
+  else guideComboModel(m);
+  return m;
+}
+
+// ---------------- Bindings
+void Page::guideBindModel(GuideModel& m) {
+  const Profile* mine = lib_.profile(yours_.type);
+  if (gameKey_.empty() || !mine) {
+    m.title = gameKey_.empty() ? "Start a game first" : "Turn your controllers on first";
+    m.sub = "Each game puts its own jobs on your buttons, so this works on the one that's running.";
+    guideRows(m, [](GuideRow& g, const BindRow&) { g.job.clear(); g.look = GuideLook::Faded; });
+    m.foot = "Advanced has a layout for every game at once.";
+    return;
+  }
+  const std::string name = gbButton_.empty() ? "" : handedName(*mine, gbButton_, false);
+  if (gbStep_ == 1) {
+    m.title = "Which button do you want to change?";
+    m.sub = "Point at it and tap it.";
+    m.step = "Step 1 of 3";
+    guideRows(m, [](GuideRow& g, const BindRow&) { g.look = GuideLook::Pulse; });
+    bool changed = false;
+    for (const auto& [k, w] : wiringChanges) changed = changed || (!w.empty() && k.size() > gameKey_.size() && k.compare(k.size() - gameKey_.size() - 1, std::string::npos, "|" + gameKey_) == 0);
+    if (changed) m.buttons.push_back({"guide_bind_reset", "Put it all back"});
+    m.foot = "Your " + yours_.name + ", as " + gameName_ + " has it now.";
+    return;
+  }
+  if (gbStep_ == 2) {
+    const std::string job = jobOn(gbButton_);
+    m.title = job.empty() ? "What should your " + name + " do?" : "Your " + name + " does " + job + ". What should it do?";
+    m.sub = "Tap the job you want. The two buttons swap, so nothing's lost.";
+    m.step = "Step 2 of 3";
+    guideRows(m, [&](GuideRow& g, const BindRow& r) {
+      if (g.id == "g:" + gbButton_) g.look = GuideLook::Armed;
+      else if (r.unused) { g.look = GuideLook::Tag; g.job = "Not used"; }
+      else g.look = GuideLook::TagPulse;
+    });
+    m.buttons.push_back({"guide_bind_more", "Other jobs"});
+    m.buttons.push_back({"guide_bind_back", "Back"});
+    return;
+  }
+  if (gbStep_ == 4) {
+    m.pictures = false;
+    m.title = "What should your " + name + " do?";
+    m.step = "Step 2 of 3";
+    std::vector<GuideChoice> all = {{"guide_bind_none", "Nothing", "Your " + name + " does nothing"}};
+    const std::vector<GameAction> jobs = guideJobs();
+    for (size_t i = 0; i < jobs.size(); ++i)
+      if (jobs[i].row.empty() && !jobs[i].nameless) all.push_back({"guide_bind_job_" + std::to_string(i), jobs[i].label, ""});
+    m.sub = all.size() > 1 ? "These aren't on any button now." : gameName_ + " doesn't list anything else, but the button can do nothing.";
+    const size_t per = 18;
+    m.pages = int((all.size() + per - 1) / per);
+    gbListPage_ = std::min(gbListPage_, m.pages - 1);
+    m.pageNo = gbListPage_;
+    for (size_t i = size_t(gbListPage_) * per; i < all.size() && i < size_t(gbListPage_ + 1) * per; ++i) m.choices.push_back(all[i]);
+    m.buttons.push_back({"guide_bind_back", "Back"});
+    if (all.size() > 1) m.foot = "A job that isn't on a button works from the next time " + gameName_ + " starts.";
+    return;
+  }
+  // 3: done
+  m.title = gbDoneTitle_;
+  m.sub = gbDoneSub_;
+  m.step = "Step 3 of 3";
+  guideRows(m, [&](GuideRow& g, const BindRow&) {
+    const bool moved = std::find(gbChanged_.begin(), gbChanged_.end(), g.id.substr(2)) != gbChanged_.end();
+    g.look = moved ? GuideLook::Changed : GuideLook::Faded;
+    if (moved && g.job.empty()) g.job = "Nothing";
+  });
+  m.buttons.push_back({"guide_bind_undo", "Undo"});
+  m.buttons.push_back({"guide_bind_again", "Change another", true});
+  m.foot = liveWords();
+  m.footLive = liveNow();
+}
+
+void Page::guideBindClick(const std::string& id) {
+  if (!gameKey_.empty() && !launchKnown_) noteLaunch();
+  const Profile* mine = lib_.profile(yours_.type);
+  if (gameKey_.empty() || !mine) return;
+  const std::string name = gbButton_.empty() ? "" : handedName(*mine, gbButton_, false);
+  // Saving: this game, on the binding it's on, with this game's own rewiring.
+  const auto apply = [&](const std::string& from) {
+    GameChoice& c = games[choiceKey()];
+    c.from = from;
+    c.explicitly = true;
+    const bool ok = applyNow(from);
+    savePrefs();
+    if (!ok) say("Couldn't write " + gameName_ + "'s binding file. It's in the log.", 2);
+    return ok;
+  };
+  if (id.rfind("g:", 0) == 0) {
+    const std::string control = id.substr(2);
+    if (gbStep_ == 1 || gbStep_ == 3) {
+      gbButton_ = control;
+      gbStep_ = 2;
+      return;
+    }
+    if (gbStep_ != 2 || control == gbButton_) return;
+    const std::string from = guideBase();
+    if (from.empty()) { say("UTMTFTM hasn't seen " + gameName_ + "'s controls yet. Play it once, then come back.", 2); return; }
+    const std::string other = handedName(*mine, control, false), mineJob = jobOn(gbButton_), theirJob = jobOn(control);
+    guideRemember();
+    const Wiring w = wiring(from, yours_.type);
+    auto at = [&](const std::string& k) { auto it = w.find(k); return it == w.end() ? std::string() : it->second; };
+    const std::string a = at(gbButton_), b = at(control);
+    Wiring& mineNow = wiringChanges[gameWiringKey(from)];
+    mineNow[gbButton_] = b;
+    mineNow[control] = a;
+    if (!apply(from)) return;
+    gbChanged_ = {gbButton_, control};
+    gbDoneTitle_ = "Done. " + name + " and " + other + " swapped.";
+    gbDoneSub_.clear();
+    (void)mineJob;
+    (void)theirJob;
+    gbStep_ = 3;
+    return;
+  }
+  if (id == "guide_bind_back") { gbStep_ = gbStep_ == 4 ? 2 : 1; return; }
+  if (id == "guide_bind_more") { gbStep_ = 4; gbListPage_ = 0; return; }
+  if (id == "guide_page_next") { ++gbListPage_; return; }
+  if (id == "guide_page_prev") { gbListPage_ = std::max(0, gbListPage_ - 1); return; }
+  if (id == "guide_bind_again") { gbStep_ = 1; gbButton_.clear(); return; }
+  if (id == "guide_bind_undo") {
+    guideUndo();
+    gbStep_ = 1;
+    gbButton_.clear();
+    say("Undone." + afterChange(), 1);
+    return;
+  }
+  if (id == "guide_bind_reset") {
+    guideRemember();
+    for (auto it = wiringChanges.begin(); it != wiringChanges.end();) {
+      const std::string& k = it->first;
+      if (k.size() > gameKey_.size() && k.compare(k.size() - gameKey_.size() - 1, std::string::npos, "|" + gameKey_) == 0) it = wiringChanges.erase(it);
+      else ++it;
+    }
+    games[choiceKey()].explicitly = false;
+    games[choiceKey()].from.clear();
+    reapply();
+    savePrefs();
+    say("Back to how " + gameName_ + " had it." + afterChange(), 1);
+    return;
+  }
+  if (id == "guide_bind_none" || id.rfind("guide_bind_job_", 0) == 0) {
+    const std::string from = guideBase();
+    if (from.empty()) return;
+    const std::string oldJob = jobOn(gbButton_);
+    guideRemember();
+    wiringChanges[gameWiringKey(from)][gbButton_] = "";
+    std::string now = "nothing";
+    if (id != "guide_bind_none") {
+      const std::vector<GameAction> jobs = guideJobs();
+      const size_t at = size_t(std::atoi(id.c_str() + 15));
+      if (at >= jobs.size()) return;
+      // A job on no button goes on as a combo of just this one button: an ordinary binding of its press.
+      const Input* i = inputAt(*mine, gbButton_);
+      Combo c;
+      c.inputs.push_back({gbButton_, i && !(i->click || i->value || i->force) ? "touch" : "click"});
+      c.output = jobs[at].output;
+      c.label = jobs[at].label;
+      std::vector<Combo>& list = combos[choiceKey()];
+      list.erase(std::remove_if(list.begin(), list.end(), [&](const Combo& o) { return o.inputs.size() == 1 && o.inputs[0].path == gbButton_; }), list.end());
+      list.push_back(c);
+      now = c.label;
+    }
+    if (!apply(from)) return;
+    gbChanged_ = {gbButton_};
+    gbDoneTitle_ = now == "nothing" ? "Done. Your " + name + " does nothing now." : "Done. Your " + name + " does " + now + " now.";
+    gbDoneSub_ = oldJob.empty() ? "" : oldJob + " isn't on a button any more.";
+    gbStep_ = 3;
+    return;
+  }
+}
+
+// ---------------- Combos and macros
+void Page::guideComboModel(GuideModel& m) {
+  m.tab = DashPage::Combos;
+  const Profile* mine = lib_.profile(yours_.type);
+  if (gameKey_.empty() || !mine || comboBase().empty()) {
+    m.pictures = false;
+    m.title = gameKey_.empty() ? "Start a game first" : !mine ? "Turn your controllers on first" : "Play " + gameName_ + " once first";
+    m.sub = gameKey_.empty() ? "Combos and macros belong to one game, so this works on the one that's running."
+                             : "UTMTFTM learns a game's controls the first time it runs.";
+    return;
+  }
+  // A macro that was recording: its take is in, or it stopped with nothing.
+  if (gcStep_ == 13 && !recordedListening() && !recWaitShut_) {
+    if (recStep_ == 3 && !editing_.steps.empty()) {
+      const size_t slash = gmButton_.find('/');
+      editing_.hand = gmButton_.rfind("right/", 0) == 0 ? 1 : 0;
+      editing_.path = slash == std::string::npos ? gmButton_ : gmButton_.substr(slash);
+      editing_.onTouch = false;
+      gcStep_ = 14;
+    } else if (recStep_ == 0 || (recStep_ == 3 && editing_.steps.empty())) {
+      gcStep_ = 12;
+    }
+  }
+  const std::string who = gmButton_.empty() ? "" : handedName(*mine, gmButton_, true);
+  switch (gcStep_) {
+    case 0: {
+      m.pictures = false;
+      m.title = "What do you want to make?";
+      m.cards = {{"guide_combo_combo", "A combo", "Hold buttons together to do one job."}, {"guide_combo_macro", "A macro", "One button plays a run of presses for you."}};
+      auto r = recorded.find(choiceKey());
+      const size_t have = combosHere().size() + (r == recorded.end() ? 0 : r->second.size());
+      if (have) m.buttons.push_back({"guide_combo_saved", "Yours (" + std::to_string(have) + ")"});
+      return;
+    }
+    case 1: {
+      m.title = "What should the combo do?";
+      m.sub = "Tap a job on your controller.";
+      m.step = "Step 1 of 3";
+      guideRows(m, [](GuideRow& g, const BindRow& r) {
+        if (r.unused) { g.look = GuideLook::Faded; g.job = "Not used"; }
+        else g.look = GuideLook::TagPulse;
+      });
+      const std::vector<GameAction> jobs = guideJobs();
+      if (std::any_of(jobs.begin(), jobs.end(), [](const GameAction& a) { return a.row.empty() && !a.nameless; })) m.buttons.push_back({"guide_combo_more", "Other jobs"});
+      m.buttons.push_back({"guide_combo_back", "Back"});
+      return;
+    }
+    case 4: {
+      m.pictures = false;
+      m.title = "What should the combo do?";
+      m.sub = "These aren't on any button now.";
+      m.step = "Step 1 of 3";
+      std::vector<GuideChoice> all;
+      const std::vector<GameAction> jobs = guideJobs();
+      for (size_t i = 0; i < jobs.size(); ++i)
+        if (jobs[i].row.empty() && !jobs[i].nameless) all.push_back({"guide_combo_job_" + std::to_string(i), jobs[i].label, ""});
+      const size_t per = 18;
+      m.pages = std::max(1, int((all.size() + per - 1) / per));
+      gcListPage_ = std::min(gcListPage_, m.pages - 1);
+      m.pageNo = gcListPage_;
+      for (size_t i = size_t(gcListPage_) * per; i < all.size() && i < size_t(gcListPage_ + 1) * per; ++i) m.choices.push_back(all[i]);
+      m.buttons.push_back({"guide_combo_back", "Back"});
+      m.foot = "A combo for a job that isn't on a button works from the next time " + gameName_ + " starts.";
+      return;
+    }
+    case 2:
+    case 3: {
+      const bool done = gcStep_ == 3;
+      m.title = done ? gcDoneTitle_ : "Tap the buttons you'll hold for " + gcJobName_;
+      m.sub = done ? "" : "Tap one again to make it a light touch instead of a press.";
+      m.step = done ? "Step 3 of 3" : "Step 2 of 3";
+      guideRows(m, [&](GuideRow& g, const BindRow&) {
+        const std::string control = g.id.substr(2);
+        auto it = picked_.find(control);
+        g.job.clear();
+        if (it == picked_.end()) { g.look = done ? GuideLook::Faded : picked_.empty() ? GuideLook::Pulse : GuideLook::Plain; return; }
+        const std::string& state = it->second;
+        g.name = state == "touch" ? "Touch " + g.name : state == "click" ? "Press " + g.name : g.name + " " + directionName(state);
+        g.look = state == "touch" ? GuideLook::Touched : done ? GuideLook::Changed : GuideLook::Armed;
+      });
+      std::vector<ComboInput> ins;
+      for (const auto& [path, state] : picked_) ins.push_back({path, state});
+      if (done) {
+        m.buttons.push_back({"guide_combo_undo", "Undo"});
+        m.buttons.push_back({"guide_combo_again", "Make another", true});
+        m.foot = liveWords();
+        m.footLive = liveNow();
+        return;
+      }
+      if (!ins.empty()) {
+        m.bar = comboText(ins, *mine, stickAxes);
+        m.buttons.push_back({"guide_combo_save", "Done"});
+        m.buttons.push_back({"guide_combo_back", "Back"});
+      } else {
+        m.buttons.push_back({"guide_combo_back", "Back"});
+      }
+      // The stick last tapped: touch it, press it, or push it one way.
+      if (!comboStick_.empty()) {
+        const Input* s = inputAt(*mine, comboStick_);
+        auto it = picked_.find(comboStick_);
+        const std::string now = it == picked_.end() ? "" : it->second;
+        if (s) {
+          m.chipsLabel = handedName(*mine, comboStick_, false);
+          if (s->click || s->value || s->force) m.chips.push_back({"guide_part_click", "Press", now == "click"});
+          if (s->touch) m.chips.push_back({"guide_part_touch", "Touch", now == "touch"});
+          const std::vector<std::string> ways = stickAxes ? std::vector<std::string>{"north", "south", "east", "west"} : std::vector<std::string>{"north", "east", "south", "west"};
+          for (const std::string& way : ways) m.chips.push_back({"guide_part_" + way, directionName(way), now == way});
+        }
+      }
+      return;
+    }
+    case 11: {
+      m.title = "Which button plays your macro?";
+      m.sub = "Point at it and tap it.";
+      m.step = "Step 1 of 3";
+      guideRows(m, [](GuideRow& g, const BindRow&) { g.look = GuideLook::Pulse; });
+      m.buttons.push_back({"guide_macro_back", "Back"});
+      return;
+    }
+    case 12:
+    case 13: {
+      const bool going = gcStep_ == 13;
+      m.title = going ? "Recording" : "Now show it the moves";
+      m.sub = going ? "Do the moves with the dashboard shut. A sign in front of you says when." : "Tap Start. The dashboard shuts, a sign counts you in, then do the moves. It stops by itself.";
+      m.step = "Step 2 of 3";
+      if (!hookOk_) { m.sub = "SteamVR needs a restart before UTMTFTM can hear your buttons."; m.subWarn = true; }
+      guideRows(m, [&](GuideRow& g, const BindRow&) {
+        if (g.id == "g:" + gmButton_) { g.look = GuideLook::Armed; g.job = "Plays it"; }
+        else g.look = GuideLook::Faded;
+      });
+      if (going) m.buttons.push_back({"guide_macro_cancel", "Cancel"});
+      else {
+        m.buttons.push_back({"guide_macro_start", "Start", true, hookOk_});
+        m.buttons.push_back({"guide_macro_back", "Back"});
+      }
+      return;
+    }
+    case 14: {
+      m.title = "Here's your macro. Keep it?";
+      const std::string job = jobOn(gmButton_);
+      if (!job.empty()) {
+        m.sub = who + " plays it, and stops being " + job + ".";
+        m.subWarn = true;
+      } else m.sub = who + " plays it.";
+      m.step = "Step 3 of 3";
+      const std::vector<macro::Step> shown = macro::shown(editing_.steps, editing_.withTouches);
+      const std::vector<macro::Tile> tl = macro::tilesOf(shown);
+      m.tiles = tilesFor(shown, false);
+      const int n = int(m.tiles.size());
+      m.playing = n ? std::min(n - 1, int(m.phase * n)) : -1;
+      std::map<std::string, std::vector<int>> stepsOn;  // "right/input/a" -> its step numbers
+      std::string playingOn;
+      for (size_t i = 0; i < tl.size(); ++i) {
+        const macro::Step& s = shown[size_t(tl[i].first)];
+        const std::string control = std::string(s.hand ? "right" : "left") + s.path;
+        stepsOn[control].push_back(int(i) + 1);
+        if (int(i) == m.playing) playingOn = control;
+      }
+      guideRows(m, [&](GuideRow& g, const BindRow&) {
+        const std::string control = g.id.substr(2);
+        g.job.clear();
+        if (control == gmButton_) { g.look = GuideLook::Armed; g.job = "Plays it"; return; }
+        auto it = stepsOn.find(control);
+        if (it == stepsOn.end()) { g.look = GuideLook::Faded; return; }
+        for (int k : it->second) g.badge += (g.badge.empty() ? "" : " ") + std::to_string(k);
+        g.look = control == playingOn ? GuideLook::Held : GuideLook::Changed;
+      });
+      m.buttons.push_back({"guide_macro_again", "Do it again"});
+      m.buttons.push_back({"guide_macro_keep", "Keep", true});
+      return;
+    }
+    default: {  // 15: done
+      m.title = gcDoneTitle_;
+      m.step = "Step 3 of 3";
+      guideRows(m, [&](GuideRow& g, const BindRow&) {
+        if (g.id == "g:" + gmButton_) { g.look = GuideLook::Changed; g.job = "Plays it"; }
+        else { g.look = GuideLook::Faded; g.job.clear(); }
+      });
+      m.buttons.push_back({"guide_combo_undo", "Undo"});
+      m.buttons.push_back({"guide_combo_again", "Make another", true});
+      m.foot = "Works in " + gameName_ + " as soon as you close the dashboard.";
+      m.footLive = true;
+      return;
+    }
+  }
+}
+
+void Page::guideComboClick(const std::string& id) {
+  if (!gameKey_.empty() && !launchKnown_) noteLaunch();
+  const Profile* mine = lib_.profile(yours_.type);
+  if (gameKey_.empty() || !mine) return;
+  if (id == "guide_combo_combo") {
+    if (combosHere().size() >= 6) { say("Six combos per game for now, because that's what fits. Remove one under Yours first.", 2); return; }
+    picked_.clear();
+    comboStick_.clear();
+    gcStep_ = 1;
+    return;
+  }
+  if (id == "guide_combo_macro") {
+    auto it = recorded.find(choiceKey());
+    if (it != recorded.end() && it->second.size() >= 5) { say("Five macros per game for now, because that's what fits. Remove one under Yours first.", 2); return; }
+    gmButton_.clear();
+    gcStep_ = 11;
+    return;
+  }
+  if (id == "guide_combo_saved") { setGuided(DashPage::Combos, false); return; }
+  if (id == "guide_combo_back" || id == "guide_macro_back") {
+    if (gcStep_ == 4) gcStep_ = 1;
+    else if (gcStep_ == 2) { picked_.clear(); comboStick_.clear(); gcStep_ = 1; }
+    else if (gcStep_ == 12) gcStep_ = 11;
+    else gcStep_ = 0;
+    return;
+  }
+  if (id == "guide_combo_more") { gcStep_ = 4; gcListPage_ = 0; return; }
+  if (id == "guide_page_next") { ++gcListPage_; return; }
+  if (id == "guide_page_prev") { gcListPage_ = std::max(0, gcListPage_ - 1); return; }
+  if (id == "guide_combo_again") { picked_.clear(); comboStick_.clear(); gcStep_ = 0; return; }
+  if (id == "guide_combo_undo") {
+    guideUndo();
+    picked_.clear();
+    comboStick_.clear();
+    gcStep_ = 0;
+    say("Undone." + afterChange(), 1);
+    return;
+  }
+  if (id == "guide_dirs_compass" || id == "guide_dirs_axes") { stickAxes = id == "guide_dirs_axes"; savePrefs(); return; }
+  if (id.rfind("guide_combo_job_", 0) == 0) {
+    const std::vector<GameAction> jobs = guideJobs();
+    const size_t at = size_t(std::atoi(id.c_str() + 16));
+    if (at >= jobs.size()) return;
+    gcJob_ = jobs[at].output;
+    gcJobName_ = jobs[at].label;
+    picked_.clear();
+    comboStick_.clear();
+    gcStep_ = 2;
+    return;
+  }
+  if (id.rfind("guide_part_", 0) == 0) {
+    if (gcStep_ != 2 || comboStick_.empty()) return;
+    const std::string part = id.substr(11);
+    auto it = picked_.find(comboStick_);
+    if (it != picked_.end() && it->second == part) picked_.erase(it);
+    else picked_[comboStick_] = part;
+    return;
+  }
+  if (id.rfind("g:", 0) == 0) {
+    const std::string control = id.substr(2);
+    if (gcStep_ == 1) {
+      // The job on that control, in the set of controls the game's mostly in.
+      for (const GameAction& a : guideJobs())
+        if (a.row == control) {
+          gcJob_ = a.output;
+          gcJobName_ = a.label;
+          picked_.clear();
+          comboStick_.clear();
+          gcStep_ = 2;
+          return;
+        }
+      say("That one doesn't do anything in " + gameName_ + ".");
+      return;
+    }
+    if (gcStep_ == 2) {
+      // Press first, then a light touch, then off. A stick also offers its directions underneath.
+      const Input* i = inputAt(*mine, control);
+      if (!i) return;
+      if (is2D(*i)) comboStick_ = control;
+      const bool canPress = i->click || i->value || i->force;
+      auto it = picked_.find(control);
+      if (it == picked_.end()) picked_[control] = canPress ? "click" : "touch";
+      else if (it->second == "click" && i->touch) it->second = "touch";
+      else picked_.erase(it);
+      return;
+    }
+    if (gcStep_ == 11) {
+      gmButton_ = control;
+      gcStep_ = 12;
+      return;
+    }
+    return;
+  }
+  if (id == "guide_combo_save") {
+    if (picked_.empty() || gcJob_.empty()) return;
+    guideRemember();
+    Combo c;
+    for (const auto& [path, state] : picked_) c.inputs.push_back({path, state});
+    c.output = gcJob_;
+    c.label = gcJobName_;
+    std::vector<Combo>& list = combos[choiceKey()];
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const Combo& o) {
+      if (o.inputs.size() != c.inputs.size()) return false;
+      for (size_t i = 0; i < c.inputs.size(); ++i) if (o.inputs[i].path != c.inputs[i].path || o.inputs[i].state != c.inputs[i].state) return false;
+      return true;
+    }), list.end());
+    list.push_back(c);
+    const bool ok = reapply();
+    savePrefs();
+    if (!ok) { say("Couldn't write " + gameName_ + "'s binding file. It's in the log.", 2); return; }
+    gcDoneTitle_ = "Done. " + comboText(c.inputs, *mine, stickAxes) + ": " + gcJobName_;
+    gcStep_ = 3;
+    return;
+  }
+  if (id == "guide_macro_start") {
+    if (!hookOk_ || gmButton_.empty()) return;
+    const bool interview = macroInterview;
+    macroInterview = false;  // the walkthrough asks its own questions
+    recordedClick("macro_record");
+    macroInterview = interview;
+    if (recStep_ == 1) gcStep_ = 13;
+    return;
+  }
+  if (id == "guide_macro_cancel") {
+    recordedClick("macro_cancel");
+    gcStep_ = 12;
+    return;
+  }
+  if (id == "guide_macro_again") {
+    recordedClick("macro_again");
+    gcStep_ = 13;
+    return;
+  }
+  if (id == "guide_macro_keep") {
+    if (editing_.hand < 0 || editing_.steps.empty()) return;
+    guideRemember();
+    const std::string name = editing_.name;
+    recordedClick("macro_save");
+    status.clear();  // the done page says it
+    gcDoneTitle_ = "Done. " + handedName(*mine, gmButton_, true) + " plays " + name + ".";
+    gcStep_ = 15;
+    return;
+  }
+}
+
+void Page::guideClick(DashPage tab, const std::string& id) {
+  if (id == "guide_advanced") { setGuided(tab, false); return; }
+  if (tab == DashPage::Bindings) guideBindClick(id);
+  else guideComboClick(id);
 }
 
 }  // namespace bind
