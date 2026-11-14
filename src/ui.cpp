@@ -832,7 +832,7 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   segments(c, btn, sx + saveW + 18, ay, R - (sx + saveW + 18), ah,
            {{"scope_game", "This game", m.saveForGame && !m.game.empty(), !m.game.empty()}, {"scope_global", "All games", !m.saveForGame || m.game.empty(), true}}, 21);
 
-  text(c, L, 664, 17, "Some games have smoothing of their own, like H3VR2's Controller Filtering. Use one or the other: two at once feel late.",
+  text(c, L, 664, 17, "Some games have smoothing or steadying of their own. Try one at a time: two at once can feel late.",
        false, DIM, 1, 0, R - L);
 
   hline(c, L, R, 700);

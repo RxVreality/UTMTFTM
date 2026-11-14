@@ -108,6 +108,10 @@ Each arrow changes one of the six numbers and saves it, like anything else on th
 
 Normally both hands stand aside while the dashboard's open, so its pointers point true. While you're fine adjusting, the hand that isn't holding the laser stays moved, which is what lets you watch it. `GetPrimaryDashboardDevice` says which that is, and if it says neither, both stand aside as usual. Whether you can see the hand behind the dashboard is up to the game.
 
+## Decaffeinate
+
+The driver smooths each hand's pose before the hand offset goes on, so offsets are unchanged by it. It smooths the velocity SteamVR uses to predict the pose too, or the shake would come back through the prediction. The hand you point with isn't smoothed while the dashboard is open, so the laser stays accurate. It costs about 160 nanoseconds a pose, roughly 0.03% of one CPU core at 1000 poses a second on both hands, measured on Windows and ARM64. The figures on each step's tile come from `tests/test_decaf.cpp`, on a simulated trembling hand, not from a headset.
+
 ## Buttons
 
 The driver also hooks `IVRDriverInput`, the call every controller driver reports its buttons through. Valve's own drivers use `IVRDriverInput_005`, which isn't in the public SDK, but its first four functions line up with the SDK's `_003`, and those are the only ones hooked. To see them being set up and learn their names, the add-on has to load before the controllers do, so its settings ask for a high `loadPriority`.
@@ -115,7 +119,8 @@ The driver also hooks `IVRDriverInput`, the call every controller driver reports
 This is what makes two things possible that SteamVR's bindings can't do:
 
 - **Macros.** SteamVR's chords go many to one: hold these and that happens. A macro goes one to many: press this and a whole sequence plays, with its own timing.
-- **Changes that work right away.** A running game keeps the bindings it launched with. If your A should now do what's on the game's B, the driver can send your A's press as B's, so it works without a restart. If nothing on the controller has that action right now, there's no press to send, so that waits for the next launch.
+- **Changes that work right away.** A running game keeps the bindings it launched with. The overlay keeps a copy of that binding and compares it with the one the game would load now, part by part: each control's press, touch, pull, movement and each way of pushing a stick, and what each sets off, by hand, action set and action. Wherever they differ, it looks for parts of the launch binding that set off exactly what's wanted now, and tells the driver to send your part as those. That can be one report sent as another's, which happens in the hook as it arrives, or something `RunFrame` does: a stick pushed past 0.6 one way pressing a button, a button holding a stick at full, or one press setting several parts. If nothing in the launch binding set off what you want, there's no press to send, so that waits for the next launch. Against the 42 Quest bindings on my PC, a button pushing the stick up and a stick push pressing B both go live in all of them.
+- **Swaps that follow a game's hands.** OpenXR games ask for each action once per hand, and plenty of them name actions after the input, so the left D-pad's `facebuttonbottom` is a different thing to the game from the right A's, even with the same name. A binding file can't move a job to the other hand. Swaps made on the guided Bindings page are done by the driver instead, as one control's reports sent as the other's, for that game every time it runs, and the binding is left alone. Only controls that report the same things are swapped this way. Anything else goes in the binding.
 
 A VR button isn't one thing the way a mouse button is: there's a thumb resting on it, the press itself, and how far a trigger is pulled, each reported separately. Recording folds those into one step, and playing that step sets all of them, so a game reading any of them sees a press.
 
@@ -145,7 +150,8 @@ None of these need a headset or SteamVR. Run them with `build.cmd`, or `build.sh
 
 ## Not tested yet
 
-- Changes that work right away in a game: rewiring one button, or a new combo whose action is already on a button. The tests and the simulated SteamVR cover them, but I haven't tried them in a real game.
+- Anything on PC VR in this version. I've tried it on my Frame.
+- Changes that work right away for a stick pushed one way, or for another controller's layout, in a real game. The tests check them against the bindings on my PC, and the simulated SteamVR runs a swap through the real program and driver, but a game is the only real proof.
 - Recording with the dashboard shut on the Frame itself. It's how recording works streaming to a Frame over Steam Link, where I've used it, and the simulated SteamVR runs it on ARM64, but not yet on the headset.
 - A macro on any controller other than the Steam Frame's, on the headset or streamed from a PC. On 7 November one played in Titan Isles on a real Frame, so `driver_cv` does report through `IVRDriverInput` and sets its controllers up after the add-on loads. `tests/real_steamvr/run.ps1` runs the hook against the real SteamVR on Windows with its null headset and a pretend controller, which shows the calls line up for the rest.
 - Touches recorded on a real Frame. On 7 November one take with Capacitive touches on had none, probably because the thumb moved during the countdown. The log now says what each take heard (`macros: stopped listening`), so the next one can be read back.

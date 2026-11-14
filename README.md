@@ -67,9 +67,29 @@ If a hand's nearly right, **Fine adjust** on the page puts arrows next to each n
 
 It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-on moves the controller inside SteamVR, so nothing gets loaded into the game. Pavlov has been fine with that, but I can't speak for every anti-cheat out there.
 
+## Decaf
+
+Decaffeinate takes the little shakes out of your hands while you hold them still, which is mostly what you notice aiming at something far away. It should let go the moment you move, so turning and flicking to a new target feel the same as before.
+
+It's on the **Decaf** tab. Pick **Off**, **Tuned**, **Strong** or **Maximum**, and save it for this game or all games, the same way as on the Hands tab. **Use the all-games step** puts a game back on the shared one. It's off until you turn it on, and changes take effect straight away.
+
+While the dashboard is open, the hand you point with isn't smoothed, so the laser stays where you aim it. The other hand stays smoothed so you can see it working. Smoothing happens before your hand offset goes on, so your offsets don't change. If a game has its own smoothing or steadying option, try one at a time, because two at once can feel late.
+
+The figures on each step, like how much less shake, come from a simulated trembling hand in the tests, not from a headset. I've only had a quick try of Maximum in Pavlov Shack and Titan Isles on my Frame. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
+
 ## Bindings
 
-I never got on with Steam's binding screen, so there's a simpler one here. The **Bindings** tab at the top of the page shows your controllers at the bottom and any other controller you pick at the top, both at once. Every button has a line to its spot on the controller. Point the laser at one and its line lights up, along with its match on the other controller. If the game names its buttons, the match is whichever button does the same thing.
+I never got on with Steam's binding screen, so there's a simpler one here. With a game running, the **Bindings** tab opens on your own controllers with every button flashing, and asks which one you want to change. Point at it on the picture and tap, then tap the job you'd like it to have on another button. The two buttons swap, and it works in the game straight away.
+
+![Picking a new job for A in No Man's Sky on a Steam Frame](docs/guided-bindings.png)
+
+**Other jobs** lists what the game has that isn't on any button, and **Nothing** switches a button off. Those two go in the game's binding, so they take effect the next time the game starts, and the page says so. **Undo** takes back the last change. **Put it all back**, on the first screen, takes back everything you changed for that game.
+
+Lots of games tie a job to a hand. Titan Isles only jumps from the right hand's A, and a binding file can't move that to the left hand, so swaps here are done by the add-on instead: it sends one button's presses as the other's whenever that game runs. Changes made here are saved for the game you're in and nowhere else.
+
+### Advanced
+
+**Advanced**, at the top right of the walkthrough, opens the full page from before, and **Guided** brings you back. It shows your controllers at the bottom and any other controller you pick at the top, both at once. Every button has a line to its spot on the controller. Point the laser at one and its line lights up, along with its match on the other controller. If the game names its buttons, the match is whichever button does the same thing.
 
 ![Steam Frame controllers on the Quest layout in Pavlov, with the laser on X](docs/bindings.png)
 
@@ -83,13 +103,16 @@ If you don't like what the developer picked for your controller:
 
 1. Pick the controller whose layout you'd rather have.
 2. Next to **This game uses**, tap its layout, like **Quest layout**. **Developer's** puts it back.
-3. Restart the game. A new layout doesn't apply until then.
+
+It works in the game straight away when everything on the new layout was on a button of the old one. If it wasn't, the page says to restart the game.
 
 SteamVR already translates between controllers when a game has nothing for yours, and this starts from the same translation. Here you can see it and choose it, even for games that have their own bindings for your controller.
 
 ### Changing one button
 
 Tap the button on your own controller, and a yellow bar asks what it should do. Tap that on the controller above, or **Nothing** to switch it off. If you just want to swap your own buttons around, pick your own controller to compare with. **Undo rewiring** takes it all back.
+
+You can also change one part of a control, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of yours and pick under **Or one part**: one way of pushing the stick, its press, or its touch. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before. Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, and the **Names** switch at the end of that row changes it.
 
 **Save for** picks between this game and every game. With **All games**, any game that has bindings for the other controller picks up the layout once you've played it and started it again.
 
@@ -99,8 +122,7 @@ Tap the button on your own controller, and a yellow bar asks what it should do. 
 - Those are the default controls, so a setting, a left-handed mode or a game update can change them. If you spot a wrong one, please tell me.
 - You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
-- Layouts don't switch mid-game. SteamVR's own binding screen can do that, but it uses a locked internal API that I've left alone.
-- Rewiring one button does work mid-game, when what you want it to do is already on another button. The add-on just sends that press as the other one until the next launch. The page says whether you got that or have to restart the game. I haven't tried this in a game myself yet, so if it doesn't take, restart the game.
+- Most changes should work mid-game. The add-on compares the bindings the game started with against the ones it would start with now, and makes up the difference by sending your presses and stick pushes as the ones the game is listening for, until the next launch. A job that wasn't on any button when the game started has to wait, because there's no press for it to send, and so does changing what a stick push already did. SteamVR's own binding screen can reload a game's bindings, but it uses a locked internal API that I've left alone. The page always says whether you got it now or have to restart the game. I've tried swaps and stick directions on my Frame, but not a layout or a combo with a stick push mid-game, so if one doesn't take, restart the game.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
 - I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
 
@@ -110,34 +132,35 @@ There's more on how it finds all this in [docs/how-it-works.md](docs/how-it-work
 
 With a combo, you hold two or more controls together and they do one thing in the game. Touching counts and doesn't press anything, so your thumb on A and B can be its own action without setting off A or B. VRChat players build these by hand in Steam's binding screen, and this is the same thing without the binding screen.
 
-![Picking touch A, touch B and press grip for a combo in Pavlov](docs/combos.png)
+![Making thumb on A and B show the HUD in No Man's Sky](docs/guided-combos.png)
 
-1. With a game running, open the **Combos** tab and tap **New combo**.
-2. Tap each control you want in it: once for touch, again for press, and again to clear it.
-3. Tap **Next** and pick what it should do.
-4. If what it sets off is already on a button, it should work straight away, though I haven't tried that in a game yet. Otherwise restart the game.
+1. With a game running, open the **Combos** tab and tap **A combo**.
+2. Tap the job it should do on your controller, or pick one from **Other jobs**.
+3. Tap the buttons you'll hold. Once is a press, again makes it a light touch, and a third time drops it. Tap a stick and a row underneath offers pushing it one way.
+4. Tap **Done**. If the job is already on a button, it works straight away. Otherwise it starts with the next launch, and the page says which.
 
-**Remove** takes one out again. Each game can have six.
+**Undo** takes it back. Your saved combos are under **Yours** on the first screen, which opens the Advanced page, where **Remove** takes one out. Each game can have six.
 
-I've used combos and macros in games on my Frame, and macros from my PC over Steam Link too. Combos are written the same way Steam's binding screen does it, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove**, restart the game and please [open an issue](../../issues/new) with the game's name.
+I've used combos and macros in games on my Frame, and macros from my PC over Steam Link too. Combos are written the same way Steam's binding screen does it, and I'm least sure about OpenXR games. SteamVR doesn't say whether a combo stops its buttons doing what they normally do, so pressing something that's already in use might do both, and the Combos tab warns you about that. If one misbehaves, tap **Remove** on the Advanced page, restart the game and please [open an issue](../../issues/new) with the game's name.
 
 ### Macros
 
-Under **Advanced** on the Combos tab. It's the other way round from a combo: one button plays a whole sequence. Say you want B to hold A, pull the trigger, then let go of both.
+It's the other way round from a combo: one button plays a whole sequence. Say you want B to hold A, pull the trigger, then let go of both.
 
-1. With a game running, open **Combos**, then **Advanced**, then **Record new**.
-2. Close the dashboard when it asks. A sign in front of you counts down, then do what you'd like the button to do. The game doesn't get your presses while it's recording. It stops by itself 2 seconds after your last press, and the dashboard opens again.
-3. Check the steps. Each press is one tile. Tap one to move it or delete it.
-4. Tap **Choose a button**, close the dashboard again and press the one that should play it. That button stops doing its usual job in that game while this is saved, and the page says so in red.
-5. **Save**, and close the dashboard. There's no need to restart the game.
+1. With a game running, open **Combos** and tap **A macro**.
+2. Tap the button that should play it. That button stops doing its usual job in that game while the macro's saved, and the page says so in red.
+3. Tap **Start** and close the dashboard. A sign in front of you counts down, then do what you'd like the button to do. The game doesn't get your presses while it's recording. It stops by itself 2 seconds after your last press, and the dashboard opens again.
+4. It plays your steps back on the controller, numbered, so you can see what it heard. **Keep** saves it, **Do it again** records it again. There's no need to restart the game.
+
+**Advanced** has the full page, where **Record new** records first and asks for the button after, and you can move or delete each step, rename it, or change the timing.
 
 It records with the dashboard shut because when you stream to a Frame over Steam Link, the headset runs the dashboard and the PC hears none of your buttons while it's open. It works that way on the headset too, because recording in the game is easier. Opening the dashboard part way through stops it and keeps what it heard.
 
-It plays at the pace you did it, or with **Quick**, 50 ms between every step. It plays once per press, or over and over while you hold the button.
+It plays at the pace you did it, or with **Quick** on the full page, 50 ms between every step. It plays once per press, or over and over while you hold the button.
 
 Holding the controller the way you play doesn't add anything. Whatever you were already holding when it started is left out, and a grip or trigger you keep squeezing doesn't keep the recording going. Only the controls SteamVR lists for your controller count, so the Frame's raw hand sensor, which no game can bind, stays out.
 
-Two switches at the bottom of the list:
+Two switches at the bottom of the full page's list:
 
 - **Interview** asks one question at a time instead: what the button should do, whether that's right, which button, what holding it does, how fast, and a name.
 - **Capacitive touches** lets resting a thumb on something count, as well as pressing it. With it on you can record touches, and choose a button that plays the macro when your thumb rests on it. Checking the steps then always has a Capacitive touches row, where you keep or drop touches that didn't end in a press, and it says so when there weren't any. It's off to begin with, because a thumb brushes past a lot of things.
@@ -177,6 +200,8 @@ Anything else, like PSVR2, depends on SteamVR mapping one of these bindings acro
 **No yellow hand in the dashboard.** Same fix. The program closes itself when the add-on is switched off, on purpose.
 
 **A game's buttons stopped working after picking a layout.** Tap **Developer's** on the Bindings tab and restart the game. If you'd tell me which game and which layout, I'd like to know.
+
+**A change didn't take in the game.** Restart the game. If it works after that and not before, please tell me which game, because the page should have said it needed a restart.
 
 The logs are `utmtftm.log` and `driver.log`, in `%LOCALAPPDATA%\UTMTFTM` on Windows and `~/.local/share/UTMTFTM` on a Frame. Please attach them to bug reports.
 
@@ -221,7 +246,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved.
+[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved. Stick directions on the Bindings tab were their idea too.
 
 ## License
 

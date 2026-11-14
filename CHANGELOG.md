@@ -1,18 +1,22 @@
 # Changelog
 
-## Next (test build, not released yet)
+## 0.6.0
 
-Stick directions on the Bindings tab, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of your controls and pick "Or one part" underneath: one way of pushing the stick, its press, or its touch, then tap what that should do. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before.
+The Bindings and Combos tabs now start with a simple mode that asks one thing at a time, on a picture of your own controllers. On Bindings every button flashes: tap the one you want to change, then tap the job you'd like it to have on another button, and the two swap. Combos asks whether you want a combo or a macro and takes you through either, and a macro plays back on the controller, numbered, before you keep it. **Advanced**, at the top right, opens the full pages from before.
 
-Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, whichever you think in. The Names switch at the end of that row changes it, and it's remembered.
+Lots of games tie a job to a hand. Titan Isles only jumps from the right A, and a binding file can't move that to the left hand, so a swap made this way is done by the add-on, for that game, every time it runs. Rewiring in the simple mode is saved for the game you're in. Before, rewiring for one game could carry over to another on the same controller.
 
-Combos can push a stick one way too. Tap a stick while making a combo and a row under it offers Touch, Press and each of its four ways, with the same Names switch. A combo with a push in it takes effect the next time the game launches, because live combos only know touches and presses so far.
+Most changes should now work without restarting the game, including swaps, stick directions and combos. The add-on compares the bindings the game started with against the ones it would start with now, and makes up the difference until the next launch. A job that wasn't on any button when the game started still waits for the next launch, and the page says when that's the case. I've tried swaps and stick directions this way on my Frame, but not another controller's layout or a combo with a stick push.
 
-A button's press and its touch can do different things now, or one of them nothing. Anything that can't work in the game you're in, like a stick push onto a stick the game reads as a stick, gets turned down with the reason, rather than saved and quietly doing nothing.
+Decaffeinate is new in this version, on its own **Decaf** tab. It takes the little shakes out of your hands while you hold them still, which is mostly what you notice aiming at something far away, and it should let go the moment you move. There are four steps, Off, Tuned, Strong and Maximum, set for one game or for all of them, and it changes with no game restart. It's off until you turn it on. If a game has its own smoothing or steadying option, try one at a time, because two at once can feel late. I've only had a quick try of Maximum in Pavlov Shack and Titan Isles on my Frame. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
 
-These change the game's binding file, so they take effect the next time the game launches. I've checked them against the bindings of 40 games on my PC, but haven't tried them in a game yet.
+Stick directions on the Bindings tab, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Under **Advanced**, tap one of your controls and pick "Or one part" underneath: one way of pushing the stick, its press, or its touch, then tap what that should do. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before. Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, and the Names switch changes it. Combos can push a stick one way too.
+
+A button's press and its touch can do different things now, or one of them nothing. Things that can't work in the game you're in, like a stick push onto a stick the game reads as a stick, are refused, and the page says why.
 
 Fixed: a game that binds X or Y on a Quest's right hand, which has no X or Y, lost those on the Frame's layout. Budget Cuts 2 does this, and the Frame's right X lost Inventory. SteamVR keeps them on your buttons of the same name, and now so does this.
+
+I've tried this version on my Frame. I haven't tried it on PC VR yet. The add-on changed, so it needs one SteamVR restart after installing.
 
 ## 0.5.0
 
