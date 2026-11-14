@@ -4,7 +4,7 @@ Most changes should now work without restarting the game, including swaps, stick
 
 **Decaffeinate** is new, on its own **Decaf** tab. It takes the little shakes out of your hands while you hold them still, like when you're aiming at something far away, and should let go the moment you move. It's off until you turn it on. I've only had a quick try of Maximum, in Pavlov Shack and Titan Isles. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
 
-[MMeNDtal](https://github.com/MMeNDtal) asked for stick directions on the Bindings tab, and co-authored the Combos tab. Thank you.
+@MMeNDtal asked for stick directions on the Bindings tab, gave me the idea for Decaffeinate, and co-authored the Combos tab. Thank you.
 
 **Tested on my Steam Frame only.** I haven't tried this version on PC VR yet, so if something's off there, please open an issue.
 

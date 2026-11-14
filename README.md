@@ -246,7 +246,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved. Stick directions on the Bindings tab were their idea too.
+[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved. Stick directions on the Bindings tab and the idea for Decaffeinate came from them too.
 
 ## License
 
