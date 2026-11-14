@@ -136,16 +136,46 @@ struct InputChannel {
   InputTable table;
 };
 
+// ---------------------------------------------------------------- Decaffeinate
+// Smoothing the shake out of each hand, in the same pose call the offsets go through. The filter is in decaf.h.
+constexpr uint32_t kDecafMagic = 0x31464344;  // "DCF1": the driver that's loaded can smooth
+
+struct DecafSettings {
+  float rotMinHz, rotBeta, posMinHz, posBeta, speedHz;  // see decaf::Params. rotMinHz 0: off
+};
+struct DecafChannel {
+  std::atomic<uint32_t> magic;    // the driver writes this
+  // The overlay writes these. Seqlock: seq is odd mid-update. The settings themselves come from the overlay, so the four
+  // steps can be retuned without touching the driver or restarting SteamVR.
+  std::atomic<uint32_t> seq;
+  DecafSettings want[2];          // left, right
+  std::atomic<uint32_t> measure;  // while the page that shows it is open: measure the shake even with smoothing off
+  // The driver writes these: how much each hand shakes while held still, before and after smoothing. Thousandths of a
+  // degree, and micrometres.
+  std::atomic<uint32_t> rotRaw[2], rotOut[2], posRaw[2], posOut[2];
+  uint32_t reserved;
+  std::atomic<uint64_t> smoothed[2];  // poses smoothed for each hand: a moving count means it's working on this controller
+};
+
+// Decaffeinate sits at a fixed place in the file, well past the end of input, so input can grow without moving it. A
+// driver and an overlay from different versions then still agree where it is, and an older file is simply made longer,
+// with zeros: off.
+constexpr size_t kDecafAt = 64 * 1024;
+
 struct Shared {
   DriverChannel driver;
   // After driver, so an older driver that's still loaded never sees it. Its magic says whether this one is really there.
   InputChannel input;
+  unsigned char room[kDecafAt - sizeof(DriverChannel) - sizeof(InputChannel)];  // for input to grow into. Nothing reads it
+  DecafChannel decaf;
 };
 
 // Two programs read this file, and a torn or misaligned atomic faults on ARM rather than just misbehaving.
 static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free, "the atomics have to work across processes");
 static_assert(sizeof(DeviceOffset) == 28 && offsetof(DriverChannel, poseUpdates) == 72 && offsetof(DriverChannel, handUpdates) == 216, "the file layout changed");
 static_assert(sizeof(InputEvent) == 48 && sizeof(WireStep) == 32 && sizeof(WireRoute) == 56 && sizeof(WireChord) == 140 && alignof(InputChannel) == 8, "the file layout changed");
+static_assert(sizeof(DecafSettings) == 20 && offsetof(DecafChannel, measure) == 48 && offsetof(DecafChannel, smoothed) == 88 && sizeof(DecafChannel) == 104 &&
+              offsetof(Shared, input) == sizeof(DriverChannel) && offsetof(Shared, decaf) == kDecafAt, "the file layout changed");
 static_assert(sizeof(WireLink) == 56 && offsetof(InputTable, link) == 16 + sizeof(WireMacro) * kMaxMacros + sizeof(WireRoute) * kMaxRoutes + sizeof(WireChord) * kMaxChords, "links go after everything that was there before");
 static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "features sits where a plain number was");
 

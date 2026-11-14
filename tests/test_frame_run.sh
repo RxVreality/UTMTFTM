@@ -138,6 +138,17 @@ expect "the combo was saved" "grep -q '\"recorded\"' '$DATA/bindings.json' && gr
 expect "the driver took the button hook" "grep -q 'IVRDriverInput_005: hooked' '$DATA/driver.log'"
 rm -f "$DATA/bindings.json"
 
+echo "--- Decaffeinate"
+: > "$FAKE_STEAMVR_LOG"
+rm -f "$DATA/profiles.json"  # the fine adjust run left the left hand turned 3 degrees, which this would count as shake
+FAKE_STEAMVR_SCENARIO=decaf timeout 90 "$APP/utmtftm" 2>"$OUT/stderr-decaf.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/decaf.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+expect "the step was saved for the game" "grep -q '\"decaf\" : 3' '$DATA/profiles.json'"
+
 echo "--- updating over the top"
 : > "$FAKE_STEAMVR_LOG"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null

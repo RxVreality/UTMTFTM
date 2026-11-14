@@ -146,6 +146,7 @@ struct App {
   // The bindings page. It reads nothing until it's opened, or until a game starts when there's a layout saved.
   DashPage page = DashPage::Hands;
   bool fineAdjust = false, fineBig = false;  // the arrows on the Hands page, and how far they go
+  bool decafMeter = false;  // the driver's measuring the shake for the Decaf page
   bind::Page bindings{bindDirs(), bindSettings()};
   ModelLoader bindLoader;
   std::string bindLoading, bindChecked, bindCheckedRaw, bindCheckedName;
@@ -686,12 +687,55 @@ struct App {
     return m;
   }
 
+  DecafModel decafModel() {
+    DecafModel m;
+    m.game = sceneKey.empty() ? "" : sceneName;
+    m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::Live;
+    m.level = store.decafLevel(sceneKey);
+    m.saveForGame = saveForGame && !sceneKey.empty();
+    m.gameHasOwn = !sceneKey.empty() && store.decafOwn(sceneKey);
+    m.ready = Store::decafReady();
+    for (int h = 0; h < 2; ++h) {
+      float raw = 0, out = 0;
+      if (!sceneKey.empty() && Store::decafShake(h, raw, out)) m.hands[h] = {true, raw, out};
+    }
+    if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+    m.confirmClose = Clock::now() < confirmUntil;
+    m.hover = fx.hover;
+    m.down = fx.down;
+    return m;
+  }
+
+  // A step tapped. Saved the way the page's Save for says, and live straight away.
+  void setDecaf(int level) {
+    const char* name = decafName(level);
+    if (saveForGame && !sceneKey.empty()) {
+      AppProfile& p = store.apps[sceneKey];
+      if (p.name.empty()) p.name = sceneName;
+      p.decaf = level;
+    } else {
+      store.decafAll = level;
+      // "All games" includes the game you're in, the same as offsets.
+      if (!sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decaf = -1;
+    }
+    store.save();
+    store.publishDecaf();
+    const std::string where = saveForGame && !sceneKey.empty() ? "for " + sceneName : "for every game";
+    if (!Store::decafReady()) setStatus(std::string("Saved ") + name + " " + where + ". SteamVR needs restarting once before it works.", Warn, 10);
+    else if (level == 0) setStatus("Decaffeinate off " + where + ". Your hands are exactly as tracked.", Good);
+    else if (sceneKey.empty()) setStatus(std::string(name) + " " + where + ". It starts working once a game is running.", Good);
+    else setStatus(std::string(name) + " " + where + ". Your aim steadies straight away.", Good);
+  }
+
   // With no game running, SteamVR can show this panel without reporting the dashboard as visible, so ask about the panel too.
   bool panelShowing() const { return vr::VROverlay()->IsDashboardVisible() || vr::VROverlay()->IsOverlayVisible(dash); }
 
   // The first image is drawn straight away, shown or not, so the panel can never open blank. After that only when
   // it's on screen, or the laser is on it.
   void refreshDashboard() {
+    // The driver measures the shake only while the Decaf page is up to show it.
+    const bool meter = page == DashPage::Decaf && panelShowing();
+    if (meter != decafMeter) { decafMeter = meter; Store::decafMeasure(meter); }
     bool first = dashDrawn.empty();
     if (!first && !dashPoke && !panelShowing()) { dashForce = true; return; }
     // SteamVR can take a new image without showing it until the one after, so a change that stops there gets sent twice.
@@ -767,6 +811,13 @@ struct App {
         drawRecorded(dashCv, m, buttons);
         drawn = true;
       });
+    else if (page == DashPage::Decaf) {
+      DecafModel m = decafModel();
+      key = decafKey(m);
+      if (!dashForce && key == dashDrawn) return;
+      drawDecaf(dashCv, m, buttons);
+      drawn = true;
+    }
     if (drawn && key == dashDrawn && !dashForce) return;
     if (!drawn) {
       DashModel m = dashModel();
@@ -801,7 +852,7 @@ struct App {
         dashForce = true;
         return;
       }
-      if (page != DashPage::Hands && id != "close" && id.rfind("page_", 0) != 0) {
+      if (page != DashPage::Hands && page != DashPage::Decaf && id != "close" && id.rfind("page_", 0) != 0) {
         const bool combos = page == DashPage::Combos, rec = page == DashPage::Recorded;
         const bool guide = (page == DashPage::Bindings || combos) && bindings.loaded() && bindings.guided(page);
         guarded([&] {
@@ -837,6 +888,14 @@ struct App {
       else if (id == "page_bindings") { page = DashPage::Bindings; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
       else if (id == "page_combos") { page = DashPage::Combos; statusUntil = {}; guarded([&] { syncBindings(); bindings.recordedClick("macro_leave"); }); }
       else if (id == "page_recorded") { page = DashPage::Recorded; statusUntil = {}; guarded([&] { syncBindings(); }); }
+      else if (id == "page_decaf") { page = DashPage::Decaf; statusUntil = {}; guarded([&] { if (bindings.loaded()) bindings.recordedClick("macro_leave"); }); }
+      else if (id.rfind("decaf_", 0) == 0 && id.size() == 7 && id[6] >= '0' && id[6] < '0' + kDecafSteps) setDecaf(id[6] - '0');
+      else if (id == "decaf_use_global") {
+        if (!sceneKey.empty() && store.apps.count(sceneKey)) store.apps[sceneKey].decaf = -1;
+        store.save();
+        store.publishDecaf();
+        setStatus(std::string("Back on the all-games step: ") + decafName(store.decafAll) + ".", Good);
+      }
       else if (id == "fine_toggle") { fineAdjust = !fineAdjust; statusUntil = {}; }
       else if (id == "fine_small") fineBig = false;
       else if (id == "fine_big") fineBig = true;
@@ -1309,10 +1368,18 @@ struct App {
         if (pointing == store.device[0]) liveHand = 1;
         else if (pointing == store.device[1]) liveHand = 0;
       }
-      if (dashUp != store.dashboardUp || liveHand != store.dashLiveHand) {  // the driver moves the controller, and the dashboard's pointers with it
+      // Decaffeinate leaves the laser alone: the hand pointing at the dashboard.
+      int pointHand = -1;
+      if (dashUp) {
+        const uint32_t pointing = vr::VROverlay()->GetPrimaryDashboardDevice();
+        pointHand = pointing == store.device[0] ? 0 : pointing == store.device[1] ? 1 : -1;
+      }
+      if (dashUp != store.dashboardUp || liveHand != store.dashLiveHand || pointHand != store.dashPointHand) {  // the driver moves the controller, and the dashboard's pointers with it
         store.dashboardUp = dashUp;
         store.dashLiveHand = liveHand;
+        store.dashPointHand = pointHand;
         if (mode != Mode::Placing) store.publishLive();
+        else store.publishDecaf();
       }
       // Macros and rewired buttons are for games, not for the dashboard's laser, and not while a hand's being placed.
       const bool wantInput = !sceneKey.empty() && !dashUp && mode == Mode::Idle;

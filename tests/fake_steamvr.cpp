@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -32,6 +33,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -605,6 +607,28 @@ void click(const std::string& id) {
     return;
   }
   check(false, ("there's no button called " + id).c_str());
+}
+
+// The same, on the Decaf page.
+void clickDecaf(const std::string& id) {
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::DecafModel m;
+  m.game = "Simulated Game";
+  m.live = fh::LiveState::Live;
+  fh::drawDecaf(cv, m, buttons);
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    return;
+  }
+  check(false, ("there's no button called " + id + " on the Decaf page").c_str());
 }
 
 // The same, on the bindings page. The buttons come from the page's own code, reading the same files the program does.
@@ -1200,6 +1224,85 @@ void scenarioFine() {
   finish();
 }
 
+// Decaffeinate: tapped on its page in the real program, steadying both hands through the real driver.
+// Both hands shake by about a third of a degree and a millimetre, the way tracking noise and tremor do; this measures how
+// much of that reaches SteamVR, and so every game.
+void scenarioDecaf() {
+  startServer(true);
+  setScene(kGamePid);
+  wait(3500);
+  std::mt19937 rng(5);
+  std::normal_distribution<double> n01(0, 1);
+  auto shaken = [&](const Pose& base) {
+    Pose p = base;
+    const double q[4] = {1, n01(rng) * 0.0015, n01(rng) * 0.0015, n01(rng) * 0.0015};  // half-angles: about 0.3 degrees all told
+    double r[4] = {q[0] * base.rot[0] - q[1] * base.rot[1] - q[2] * base.rot[2] - q[3] * base.rot[3],
+                   q[0] * base.rot[1] + q[1] * base.rot[0] + q[2] * base.rot[3] - q[3] * base.rot[2],
+                   q[0] * base.rot[2] - q[1] * base.rot[3] + q[2] * base.rot[0] + q[3] * base.rot[1],
+                   q[0] * base.rot[3] + q[1] * base.rot[2] - q[2] * base.rot[1] + q[3] * base.rot[0]};
+    const double n = std::sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[3] * r[3]);
+    for (int i = 0; i < 4; ++i) p.rot[i] = r[i] / n;
+    for (int i = 0; i < 3; ++i) p.pos[i] += n01(rng) * 0.001;
+    return p;
+  };
+  // Shakes both hands for a while, and says how far each one SteamVR sees strays from where it really is, typically.
+  auto shake = [&](int ms, double& left, double& right) {
+    double sl = 0, sr = 0;
+    int n = 0;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    const auto settle = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms / 3);
+    while (std::chrono::steady_clock::now() < end) {
+      fakeserver::setDevicePose(kLeft, shaken(kLeftStart));
+      fakeserver::setDevicePose(kRight, shaken(kRightStart));
+      wait(4);
+      if (std::chrono::steady_clock::now() < settle) continue;
+      const double l = turn(fakeserver::seenPose(kLeft), kLeftStart), r = turn(fakeserver::seenPose(kRight), kRightStart);
+      sl += l * l; sr += r * r;
+      ++n;
+    }
+    fakeserver::setDevicePose(kLeft, kLeftStart);
+    fakeserver::setDevicePose(kRight, kRightStart);
+    left = std::sqrt(sl / std::max(n, 1));
+    right = std::sqrt(sr / std::max(n, 1));
+  };
+
+  setPointing(kRight);
+  click("page_decaf");
+  wait(400);
+  double offL, offR;
+  shake(1500, offL, offR);
+  say("off: left hand shakes %.3f degrees, right %.3f", offL, offR);
+  check(offL > 0.1 && offR > 0.1, "with it off, the shake gets through to the game as it is (degrees)", offL);
+
+  clickDecaf("decaf_2");  // Strong, for this game
+  wait(400);
+  check(logHas("decaffeinate: step 2 for steam.app.12345"), "the program handed the driver the step for this game");
+  double onL, onR;
+  shake(2400, onL, onR);
+  say("Strong with the dashboard open, the right hand pointing: left %.3f degrees, right %.3f", onL, onR);
+  check(onL < offL / 3, "Strong takes at least two thirds of the left hand's shake out (degrees)", onL);
+  check(onR > offR * 0.7, "the hand pointing at the dashboard is left alone, so its laser is true (degrees)", onR);
+
+  setDashboard(false);
+  wait(300);
+  double shutL, shutR;
+  shake(2400, shutL, shutR);
+  say("Strong with the dashboard shut: left %.3f degrees, right %.3f", shutL, shutR);
+  check(shutL < offL / 3 && shutR < offR / 3, "with the dashboard shut, both hands steady (degrees, right)", shutR);
+
+  setDashboard(true);
+  wait(300);
+  clickDecaf("decaf_0");
+  wait(400);
+  double backL, backR;
+  shake(1500, backL, backR);
+  check(backL > offL * 0.7, "Off puts the hands back exactly as tracked (degrees)", backL);
+  clickDecaf("decaf_3");  // left on Maximum, so the run can check it was saved
+  wait(400);
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  finish();
+}
+
 // Making a combo on the page, in the real program, and what lands in SteamVR's setting and the binding file.
 void scenarioCombos() {
   const std::string steamvr = fh::platform::steamvrDir(), config = fh::platform::configDirs()[0];
@@ -1298,6 +1401,7 @@ class ClientCore {
     if (type == vr::VRApplication_Overlay && g_scenarioName == "fine") g_scenario = std::thread(scenarioFine);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "combos") g_scenario = std::thread(scenarioCombos);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "recorded") g_scenario = std::thread(scenarioRecorded);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "decaf") g_scenario = std::thread(scenarioDecaf);
     return vr::VRInitError_None;
   }
   virtual void Cleanup() {

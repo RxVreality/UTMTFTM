@@ -36,6 +36,7 @@
 #include <string>
 #include <vector>
 
+#include "../decaf.h"
 #include "../live.h"
 
 namespace {
@@ -257,6 +258,96 @@ void publishTrue(fhlive::DriverChannel* ch, int hand, const vr::DriverPose_t& p)
   fhlive::seqWriteEnd(ch->trueSeq[hand]);
 }
 
+// ---------------------------------------------------------------- Decaffeinate
+// Smoothing each hand's pose before its offset goes on (decaf.h). One filter per hand, shared by whichever thread reports
+// that hand: in practice that's always the same one, so the lock is only ever taken, never waited on.
+std::atomic<fhlive::DecafChannel*> g_dc{nullptr};
+
+struct HandFilter {
+  std::atomic_flag busy = ATOMIC_FLAG_INIT;
+  uint32_t device = fhlive::kNoDevice;
+  uint32_t count = 0;
+  decaf::Filter f;
+};
+HandFilter g_hf[2];
+
+struct DecafCache {
+  uint32_t seq = 1;  // odd: never matches a published sequence
+  decaf::Params p[2];
+};
+thread_local DecafCache t_decaf;
+
+decaf::Params settingsFrom(const fhlive::DecafSettings& s) {
+  decaf::Params p;
+  // Whatever's in the file, nothing silly gets through: a cutoff of 0 or less is off, and the rest is held to sane ranges.
+  if (!(s.rotMinHz > 0.f)) return p;
+  p.rotMinHz = std::min(s.rotMinHz, 30.f);
+  p.rotBeta = std::isfinite(s.rotBeta) ? std::clamp(s.rotBeta, 0.f, 1000.f) : 0.f;
+  p.posMinHz = std::isfinite(s.posMinHz) && s.posMinHz > 0.f ? std::min(s.posMinHz, 30.f) : 30.f;
+  p.posBeta = std::isfinite(s.posBeta) ? std::clamp(s.posBeta, 0.f, 1000.f) : 0.f;
+  p.speedHz = std::isfinite(s.speedHz) && s.speedHz > 0.f ? std::min(s.speedHz, 30.f) : 2.f;
+  return p;
+}
+
+void refreshDecaf(fhlive::DecafChannel* dc, DecafCache& c) {
+  for (int tries = 0; tries < 8; ++tries) {
+    uint32_t s0 = dc->seq.load(std::memory_order_acquire);
+    if (s0 & 1) { spinPause(); continue; }
+    fhlive::DecafSettings w[2];
+    memcpy(w, dc->want, sizeof w);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (dc->seq.load(std::memory_order_acquire) != s0) continue;
+    for (int h = 0; h < 2; ++h) c.p[h] = settingsFrom(w[h]);
+    c.seq = s0;
+    return;
+  }
+}
+
+double secondsNow() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Smooths moved in place, for this hand. False if it left it alone.
+bool smoothHand(fhlive::DecafChannel* dc, int hand, uint32_t which, const decaf::Params& prm, bool measure, vr::DriverPose_t& moved) {
+  HandFilter& hf = g_hf[hand];
+  while (hf.busy.test_and_set(std::memory_order_acquire)) spinPause();
+  // A different controller in that hand, or one that's lost tracking: start again from wherever it is next.
+  if (hf.device != which || !moved.poseIsValid || moved.result != vr::TrackingResult_Running_OK) {
+    hf.device = which;
+    hf.f.reset();
+  }
+  bool did = false;
+  if (moved.poseIsValid && moved.result == vr::TrackingResult_Running_OK) {
+    decaf::Pose p;
+    for (int i = 0; i < 3; ++i) {
+      p.pos[i] = moved.vecPosition[i]; p.vel[i] = moved.vecVelocity[i]; p.acc[i] = moved.vecAcceleration[i];
+      p.angVel[i] = moved.vecAngularVelocity[i]; p.angAcc[i] = moved.vecAngularAcceleration[i];
+    }
+    p.q[0] = moved.qRotation.w; p.q[1] = moved.qRotation.x; p.q[2] = moved.qRotation.y; p.q[3] = moved.qRotation.z;
+    hf.f.step(p, secondsNow(), prm, measure);
+    if (prm.on()) {
+      for (int i = 0; i < 3; ++i) {
+        moved.vecPosition[i] = p.pos[i]; moved.vecVelocity[i] = p.vel[i]; moved.vecAcceleration[i] = p.acc[i];
+        moved.vecAngularVelocity[i] = p.angVel[i]; moved.vecAngularAcceleration[i] = p.angAcc[i];
+      }
+      moved.qRotation.w = p.q[0]; moved.qRotation.x = p.q[1]; moved.qRotation.y = p.q[2]; moved.qRotation.z = p.q[3];
+      did = true;
+    }
+    // Hand the overlay its shake meter now and then: there's no need to on every pose.
+    if ((++hf.count & 31) == 0) {
+      auto put = [](std::atomic<uint32_t>& a, double v) { a.store(uint32_t(std::min(v, 4.0e9)), std::memory_order_relaxed); };
+      const double mdeg = 180.0 / decaf::kPi * 1000.0;
+      put(dc->rotRaw[hand], hf.f.rotShakeRaw() * mdeg);
+      put(dc->rotOut[hand], hf.f.rotShakeOut() * mdeg);
+      put(dc->posRaw[hand], hf.f.posShakeRaw() * 1e6);
+      put(dc->posOut[hand], hf.f.posShakeOut() * 1e6);
+    }
+  }
+  hf.busy.clear(std::memory_order_release);
+  if (did) dc->smoothed[hand].store(dc->smoothed[hand].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+  return did;
+}
+
 using PoseFn = void (*)(void* self, uint32_t which, const vr::DriverPose_t& pose, uint32_t size);
 
 thread_local bool t_inPose = false;
@@ -276,12 +367,24 @@ void onPose(PoseFn next, void* self, uint32_t which, const vr::DriverPose_t& pos
   constexpr uint32_t kMaxPose = 512;
   alignas(vr::DriverPose_t) unsigned char copy[kMaxPose];
   const vr::DriverPose_t* out = &pose;
-  if (hand >= 0 && c.on[hand] && known && size <= kMaxPose) {
+  // Decaffeinate: off unless the overlay's asked for it on this hand, or wants its shake measured.
+  fhlive::DecafChannel* dc = g_dc.load(std::memory_order_relaxed);
+  bool smooth = false, measure = false;
+  if (dc && hand >= 0) {
+    DecafCache& d = t_decaf;
+    if (dc->seq.load(std::memory_order_acquire) != d.seq) refreshDecaf(dc, d);
+    measure = dc->measure.load(std::memory_order_relaxed) != 0;
+    smooth = d.p[hand].on();
+  }
+  if (hand >= 0 && known && size <= kMaxPose && (c.on[hand] || smooth || measure)) {
     memcpy(copy, &pose, size);
     vr::DriverPose_t& moved = *reinterpret_cast<vr::DriverPose_t*>(copy);
-    applyOffset(moved, c.o[hand]);
-    out = &moved;
+    bool changed = false;
+    if (smooth || measure) changed = smoothHand(dc, hand, which, t_decaf.p[hand], measure, moved);
+    if (c.on[hand]) { applyOffset(moved, c.o[hand]); changed = true; }
+    if (changed) out = &moved;
   }
+  // Switched off and on again later, a filter starts from where the hand is then: the gap since its last pose is too long to glide over.
   t_inPose = true;
   next(self, which, *out, size);
   t_inPose = false;
@@ -1073,14 +1176,20 @@ class Provider : public vr::IServerTrackedDeviceProvider {
     fhlive::seqWriteEnd(ch->seq);
     fhlive::DeviceOffset none[2] = {kIdentity, kIdentity};
     publishApplied(ch, none);
+    // Decaffeinate's settings stay from last time, like the offsets: they only act once the overlay says which devices are the hands.
+    for (int h = 0; h < 2; ++h) shm->decaf.smoothed[h].store(0, std::memory_order_relaxed);
+    g_dc.store(&shm->decaf, std::memory_order_release);
     installHooks(ctx);
     startInput(ctx, &shm->input);
+    shm->decaf.magic.store(fhlive::kDecafMagic, std::memory_order_release);
     logf("loaded");
     return vr::VRInitError_None;
   }
   void Cleanup() override {
     stopInput();
+    if (fhlive::DecafChannel* dc = g_dc.load(std::memory_order_relaxed)) dc->magic.store(0, std::memory_order_release);
     removeHooks();
+    g_dc.store(nullptr, std::memory_order_release);
     closeShared();
     VR_CLEANUP_SERVER_DRIVER_CONTEXT();
   }

@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 
+#include "decaf.h"
 #include "live.h"
 #include "platform.h"
 
@@ -89,8 +90,10 @@ bool Store::load() {
     p.settings_key = a.get("settings_key", "").asString();
     p.managed = a.get("managed", false).asBool();
     p.live = a.get("live", false).asBool();
+    p.decaf = std::clamp(a.get("decaf", -1).asInt(), -1, decaf::kLevels - 1);
     apps[k] = p;
   }
+  decafAll = std::clamp(v.get("decaf_all", 0).asInt(), 0, decaf::kLevels - 1);
   return true;
 }
 
@@ -115,8 +118,10 @@ bool Store::save() const {
     a["settings_key"] = p.settings_key;
     a["managed"] = p.managed;
     a["live"] = p.live;
+    if (p.decaf >= 0) a["decaf"] = p.decaf;
     v["apps"][k] = a;
   }
+  v["decaf_all"] = decafAll;
   return writeJson(dir() + "/profiles.json", v);
 }
 
@@ -304,6 +309,63 @@ void Store::publishLive(const HandPair* drag) const {
     toQuat(dev, d.want[h].rot);
   }
   fhlive::seqWriteEnd(d.seq);
+  publishDecaf();  // it follows the game the same way, and does nothing if that hasn't changed
+}
+
+int Store::decafLevel(const std::string& app) const {
+  auto it = apps.find(app);
+  if (it != apps.end() && it->second.decaf >= 0) return it->second.decaf;
+  return decafAll;
+}
+
+bool Store::decafOwn(const std::string& app) const {
+  auto it = apps.find(app);
+  return it != apps.end() && it->second.decaf >= 0;
+}
+
+void Store::publishDecaf() const {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m) return;
+  // Only with a game running, the same as offsets: with none there's nothing to steady but SteamVR's own pointers.
+  const int level = (scenePid && !sceneKey.empty()) ? decafLevel(sceneKey) : 0;
+  const decaf::Params p = decaf::preset(level);
+  fhlive::DecafSettings s[2];
+  for (int h = 0; h < 2; ++h) {
+    const bool pointing = dashboardUp && h == dashPointHand;
+    s[h] = pointing ? fhlive::DecafSettings{} : fhlive::DecafSettings{p.rotMinHz, p.rotBeta, p.posMinHz, p.posBeta, p.speedHz};
+  }
+  fhlive::DecafChannel& d = m->decaf;
+  if (!memcmp(d.want, s, sizeof s)) return;
+  fhlive::seqWriteBegin(d.seq);
+  memcpy(d.want, s, sizeof s);
+  fhlive::seqWriteEnd(d.seq);
+  logf("decaffeinate: step %d for %s%s", level, sceneKey.empty() ? "(no game)" : sceneKey.c_str(),
+       level && dashboardUp && dashPointHand >= 0 ? (dashPointHand ? ", not the right hand while it points" : ", not the left hand while it points") : "");
+}
+
+bool Store::decafReady() {
+  fhlive::Shared* m = platform::mapLive();
+  return m && m->decaf.magic.load(std::memory_order_acquire) == fhlive::kDecafMagic;
+}
+
+void Store::decafMeasure(bool on) {
+  fhlive::Shared* m = platform::mapLive();
+  if (m) m->decaf.measure.store(on ? 1 : 0, std::memory_order_relaxed);
+}
+
+bool Store::decafShake(int hand, float& rawDeg, float& outDeg) {
+  fhlive::Shared* m = platform::mapLive();
+  if (!m || hand < 0 || hand > 1) return false;
+  const uint32_t r = m->decaf.rotRaw[hand].load(std::memory_order_relaxed), o = m->decaf.rotOut[hand].load(std::memory_order_relaxed);
+  if (!r) return false;
+  rawDeg = r / 1000.f;
+  outDeg = o / 1000.f;
+  return true;
+}
+
+uint64_t Store::decafSmoothed() {
+  fhlive::Shared* m = platform::mapLive();
+  return m ? m->decaf.smoothed[0].load(std::memory_order_relaxed) + m->decaf.smoothed[1].load(std::memory_order_relaxed) : 0;
 }
 
 uint64_t Store::driverPoseUpdates() {

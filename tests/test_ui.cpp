@@ -78,6 +78,67 @@ int main(int argc, char** argv) {
     DashModel m2 = m; m2.cards[0].applied.pos[2] -= 0.001f;
     CHECK(dashKey(m) != dashKey(m2));
   }
+
+  // Decaffeinate: its own tab, with the shake meter.
+  {
+    auto inBounds = [](const std::vector<Button>& b, const Canvas& cv) {
+      bool ok = true;
+      for (auto& x : b) ok = ok && x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h;
+      return ok;
+    };
+    auto has = [](const std::vector<Button>& b, const std::string& id) {
+      for (auto& x : b) if (x.id == id) return true;
+      return false;
+    };
+    {
+      Canvas cv(1200, 760);
+      DecafModel m;
+      m.game = "Pavlov";
+      m.live = LiveState::Live;
+      m.level = 2;
+      m.hands[0] = {true, 0.31f, 0.038f};
+      m.hands[1] = {true, 0.27f, 0.035f};
+      std::vector<Button> b;
+      drawDecaf(cv, m, b);
+      cv.savePNG(out + "/decaf_strong.png");
+      CHECK(inBounds(b, cv));
+      for (int i = 0; i < kDecafSteps; ++i) CHECK(has(b, "decaf_" + std::to_string(i)));
+      CHECK(has(b, "page_decaf") && has(b, "scope_game") && has(b, "scope_global"));
+      DecafModel m2 = m; m2.hands[0].out = 0.05f;
+      CHECK(decafKey(m) != decafKey(m2));  // the meter moving redraws the page
+
+      DecafModel offM = m;
+      offM.level = 0;
+      offM.hands[1] = {};
+      drawDecaf(cv, offM, b);
+      cv.savePNG(out + "/decaf_off.png");
+
+      DecafModel own = m;
+      own.game = "H3VR";
+      own.level = 1;
+      own.gameHasOwn = true;
+      own.hover = "decaf_3";
+      drawDecaf(cv, own, b);
+      cv.savePNG(out + "/decaf_own_hover.png");
+      CHECK(has(b, "decaf_use_global"));
+
+      DecafModel old = m;
+      old.ready = false;
+      old.hands[0] = old.hands[1] = {};
+      drawDecaf(cv, old, b);
+      cv.savePNG(out + "/decaf_needs_restart.png");
+
+      DashModel d;
+      d.game = "The Light Brigade: Definitive Edition";
+      d.live = LiveState::Live;
+      d.cards[0].applied = off(3.2f, -1.0f, 0.5f, 12, 0, -8); d.cards[0].badge = Badge::GameCustom;
+      d.cards[1].badge = Badge::GameCustom;
+      d.gameHasCustom = true;
+      drawDashboard(cv, d, b);
+      cv.savePNG(out + "/decaf_hands_tab.png");
+      CHECK(inBounds(b, cv) && has(b, "page_decaf"));
+    }
+  }
   // fine adjust: arrows either side of every number, on both hands, all on the panel, and each says what it does
   {
     Canvas cv(1200, 760);

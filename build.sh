@@ -7,6 +7,8 @@ cmake --build build
 [ "${1:-}" = notest ] && exit 0
 dist/test_ghost
 dist/test_macro
+mkdir -p build/decaf
+dist/test_decaf build/decaf
 dist/test_session
 dist/test_driver
 dist/test_controllers
