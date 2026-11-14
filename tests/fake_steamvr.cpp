@@ -1276,7 +1276,8 @@ void scenarioDecaf() {
 
   clickDecaf("decaf_2");  // Strong, for this game
   wait(400);
-  check(logHas("decaffeinate: step 2 for steam.app.12345"), "the program handed the driver the step for this game");
+  // At full strength: nothing's set on the strength slider, and this game isn't one that weights your hands.
+  check(logHas("decaffeinate: step 2 at 100% for steam.app.12345"), "the program handed the driver the step for this game");
   double onL, onR;
   shake(2400, onL, onR);
   say("Strong with the dashboard open, the right hand pointing: left %.3f degrees, right %.3f", onL, onR);
