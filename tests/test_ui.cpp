@@ -116,22 +116,35 @@ int main(int argc, char** argv) {
       CHECK(inBounds(b, cv));
       CHECK(decafKey(pointing) != decafKey(m));
 
-      // ---- a newer version: the two places J4 picks between, and the Update page (14 November)
+      // ---- a newer version: the bottom line (J4's pick of two drafts, 14 November) in each of its states, and the Update page
       {
         DashModel hands;
         hands.game = "Pavlov";
         hands.live = LiveState::Live;
-        for (int spot = 0; spot < 2; ++spot) {
-          g_updateSpot = spot;
-          for (int needed = 0; needed < 2; ++needed) {
-            setUpdateNote({needed ? UpdateNote::Needed : UpdateNote::Ready, "0.6.2"});
-            std::vector<Button> hb;
-            drawDashboard(cv, hands, hb);
-            cv.savePNG(out + "/update_spot" + std::to_string(spot) + (needed ? "_needed" : "_ready") + ".png");
-            CHECK(inBounds(hb, cv) && has(hb, "update_open"));
-          }
+        const struct { UpdateNote::Kind kind; const char* name; bool button; } kinds[] = {
+            {UpdateNote::Ready, "ready", true}, {UpdateNote::Needed, "needed", true}, {UpdateNote::Busy, "busy", false}, {UpdateNote::Installed, "installed", false}};
+        for (const auto& k : kinds) {
+          setUpdateNote({k.kind, "0.10.12"});  // a long version number, so the longest line is the one checked
+          std::vector<Button> hb;
+          drawDashboard(cv, hands, hb);
+          cv.savePNG(out + "/update_note_" + k.name + ".png");
+          CHECK(inBounds(hb, cv) && has(hb, "update_open") == k.button);
+          DecafModel d = m;
+          std::vector<Button> db;
+          drawDecaf(cv, d, db);
+          cv.savePNG(out + "/update_note_decaf_" + k.name + ".png");
+          CHECK(inBounds(db, cv) && has(db, "update_open") == k.button);
         }
-        g_updateSpot = 0;
+        setUpdateNote({UpdateNote::Ready, "0.6.2"});
+        DashModel told = hands;
+        told.status = "Saved for Pavlov.";
+        std::vector<Button> tb;
+        drawDashboard(cv, told, tb);
+        CHECK(!has(tb, "update_open"));  // what you just did comes first, and the note's back after
+        setUpdateNote({});
+        std::vector<Button> plain;
+        drawDashboard(cv, hands, plain);
+        CHECK(!has(plain, "update_open"));  // nothing newer: the page's own words as always
         setUpdateNote({UpdateNote::Ready, "0.6.2"});
         UpdateModel u;
         u.game = "Pavlov";

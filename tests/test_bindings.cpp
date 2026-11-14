@@ -98,6 +98,14 @@ static void shotRecorded(const RecordedModel& m, const std::string& path) {
   noOverlap(b, path);
 }
 
+// The same page with a newer version on its bottom line (J4's pick, 14 November): the Update button lands on nothing.
+template <class Model, class Shoot>
+static void withUpdate(const Model& m, Shoot shoot, const std::string& path) {
+  setUpdateNote({UpdateNote::Needed, "0.10.12"});
+  shoot(m, path);
+  setUpdateNote({});
+}
+
 static Json::Value readFile(const std::string& path) {
   Json::Value v;
   std::ifstream in(fs::u8path(path));
@@ -300,6 +308,7 @@ static void testFixture(const std::string& work, const std::string& out) {
   check(m.layoutOn, "the page shows it's on");
   check(page.status.find("next time") != std::string::npos, "and says when it takes effect");
   shot(m, out + "/fixture_layout.png");
+  withUpdate(m, shot, out + "/update_fixture_layout.png");
 
   // Rewiring: tap yours, tap theirs. It's saved and written straight away.
   page.click("y:right/input/x");
@@ -476,6 +485,7 @@ static void testFixture(const std::string& work, const std::string& out) {
   ComboModel cm = page.comboModel("", "");
   check(cm.canMake && cm.step == 0 && cm.saved.empty(), "a game with bindings can have combos, and starts with none");
   shotCombo(cm, out + "/fixture_combos_empty.png");
+  withUpdate(cm, shotCombo, out + "/update_fixture_combos_empty.png");
   check(!fake.values.count(namedKey), "and just looking changes nothing");
   auto markOf = [](const ComboModel& m, const std::string& id) {
     for (int h = 0; h < 2; ++h)
@@ -846,6 +856,7 @@ static void testRecorded(const std::string& work, const std::string& out) {
   m = page.recordedModel("", "");
   check(m.canRecord && m.step == 0 && m.saved.empty(), "otherwise it's ready, with nothing saved");
   shotRecorded(m, out + "/recorded_empty.png");
+  withUpdate(m, shotRecorded, out + "/update_recorded_empty.png");
   fhlive::InputTable t;
   page.fillInputTable(t);
   check(t.macros == 0 && t.routes == 0 && t.chords == 0, "nothing goes to the driver until there's something to do");
@@ -2584,6 +2595,7 @@ static void testGuide(const std::string& work, const std::string& out) {
   check(m.buttons.empty() && m.advanced, "nothing else to tap but Advanced");
   check(page.guideFlashing(DashPage::Bindings), "and it wants drawing again for the flashing");
   shotGuide(m, out + "/guide_bind_1.png");
+  withUpdate(m, shotGuide, out + "/update_guide_bind_1.png");
 
   // Step 2: what it should do. Its job's in the question, and the other buttons' jobs are what you tap.
   page.guideClick(DashPage::Bindings, "g:right/input/y");
@@ -2685,6 +2697,7 @@ static void testGuide(const std::string& work, const std::string& out) {
   m = page.guideModel(DashPage::Combos, "", "", 0);
   check(!m.pictures && m.cards.size() == 2 && m.title == "What do you want to make?", "the Combos tab asks combo or macro");
   shotGuide(m, out + "/guide_combo_0.png");
+  withUpdate(m, shotGuide, out + "/update_guide_combo_0.png");
   page.guideClick(DashPage::Combos, "guide_combo_combo");
   m = page.guideModel(DashPage::Combos, "", "", 0.5);
   check(m.title == "What should the combo do?" && guideRow(m, "g:right/input/bumper")->look == GuideLook::TagPulse, "then what it should do, on the controller");

@@ -436,27 +436,24 @@ void drawHandPreview(Canvas& cv, double x, double y, double size, bool left, con
 // ---------------------------------------------------------------- dashboard
 // The top of both pages: the mark and name, which page this is, what's running and how it's connected, and Close.
 static UpdateNote g_update;
-int g_updateSpot = 0;
 void setUpdateNote(const UpdateNote& n) { g_update = n; }
-std::string updateNoteKey() { return "u" + std::to_string(int(g_update.kind)) + g_update.version + std::to_string(g_updateSpot); }
+std::string updateNoteKey() { return "u" + std::to_string(int(g_update.kind)) + g_update.version; }
 
-static std::string updateWords(bool shortForm) {
-  switch (g_update.kind) {
-    case UpdateNote::Ready: return shortForm ? "Update ready: " + g_update.version : "UTMTFTM " + g_update.version + " is ready to install.";
-    case UpdateNote::Needed: return shortForm ? "Update needed: " + g_update.version : "Update to " + g_update.version + ": this version may not work properly with today's SteamVR.";
-    case UpdateNote::Busy: return shortForm ? "Updating to " + g_update.version : "Fetching UTMTFTM " + g_update.version + "...";
-    case UpdateNote::Installed: return shortForm ? g_update.version + ": restart SteamVR" : "UTMTFTM " + g_update.version + " is installed. Restart SteamVR to start using it.";
-    default: return "";
-  }
-}
-
-// Draft 1: the line along the bottom of a page, in place of its usual words.
+// A newer version, on the line along the bottom of every page, with an Update button: J4's pick of two drafts, 14 November.
+// It takes the place of a page's plain help words only. What you just did, warnings and choices still come first.
 static bool updateLine(cairo_t* c, std::vector<Button>& btn, double L, double R, double baseY) {
-  if (g_updateSpot != 1 || g_update.kind == UpdateNote::None) return false;
+  std::string words;
+  switch (g_update.kind) {
+    case UpdateNote::Ready: words = "UTMTFTM " + g_update.version + " is ready to install."; break;
+    case UpdateNote::Needed: words = "UTMTFTM " + g_update.version + " is out, and this version may not work properly any more."; break;
+    case UpdateNote::Busy: words = "Fetching UTMTFTM " + g_update.version + "..."; break;
+    case UpdateNote::Installed: words = "UTMTFTM " + g_update.version + " is installed. Restart SteamVR to start using it."; break;
+    default: return false;
+  }
   const bool warn = g_update.kind == UpdateNote::Needed;
-  lamp(c, L, baseY - 14, 14, warn ? ALERT : g_update.kind == UpdateNote::Installed ? LIVE : SIGNAL);
   const bool canTap = g_update.kind == UpdateNote::Ready || warn;
-  text(c, L + 28, baseY, 20, updateWords(false), true, PAPER, 1, 0, R - L - 28 - (canTap ? 190 : 0));
+  lamp(c, L, baseY - 14, 14, warn ? ALERT : g_update.kind == UpdateNote::Installed ? LIVE : SIGNAL);
+  text(c, L + 28, baseY, 20, words, true, PAPER, 1, 0, R - L - 28 - (canTap ? 190 : 0));
   if (canTap) button(c, btn, R - 170, baseY - 30, 170, 42, "update_open", "Update", warn ? Danger : Primary);
   return true;
 }
@@ -465,18 +462,7 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   const double L = 44, R = width - 44;
   markTile(c, L, 20, 80, 64);
   caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
-  // Draft 0: a newer version takes the place of the motto, as a strip you can tap.
-  if (g_updateSpot == 0 && g_update.kind != UpdateNote::None && page != DashPage::Update) {
-    const bool warn = g_update.kind == UpdateNote::Needed, done = g_update.kind == UpdateNote::Installed;
-    const std::string words = updateWords(true);
-    const double w = capsW(c, upper(words), 15, 1.4) + 46 + 26 * kLean;
-    slab(c, L + 92, 66, w, 26, warn ? ALERT : done ? LIVE : SIGNAL);
-    fxOver(c, L + 92, 66, w, 26, "update_open", true, true);
-    caps(c, L + 92 + 18, 85, 15, words + "  >", INK, 1, 0, 1.4);
-    btn.push_back({L + 92, 60, w, 34, "update_open"});
-  } else {
-    label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  }
+  label(c, L + 95, 82, 15, "Use the medium to fix the medium");
   const int nTabs = 4;
   const double tabX = 456, tabY = 34, tabH = 42, tabW = 104, tabD = tabH * kLean;
   const struct { DashPage p; const char* id; const char* name; } tabs[4] = {
@@ -754,12 +740,12 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   hline(c, L, R, 700);
   const double baseY = 734;
   std::string st = m.status;
-  if (st.empty() && updateLine(c, btn, L, R, baseY)) {
-  } else if (!st.empty()) {
+  if (!st.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, st, true, PAPER, 1, 0, R - L - 28);
   } else if (!m.hint.empty()) {
     text(c, L, baseY, 19, m.hint, false, PAPER, 1, 0, R - L);
+  } else if (updateLine(c, btn, L, R, baseY)) {
   } else {
     if (m.armed || m.live == LiveState::NoGame || m.fine) {}  // the line above the hands already says it
     else if (m.live == LiveState::Live) st = "Changes show on your in-game hands as you move them.";
@@ -904,6 +890,7 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   if (!m.status.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (m.ready && updateLine(c, btn, L, R, baseY)) {
   } else {
     const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
                      : m.live == LiveState::NoGame ? "It only works with a game running, so SteamVR's own pointers stay as they are."
@@ -1238,6 +1225,7 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
   } else if (!m.status.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (updateLine(c, btn, L, R, baseY)) {
   } else {
     const std::string st = m.hasGame ? "Point at a button to find it on the other controller. Tap one of yours to change what it does."
                                      : "No game running, so this shows how the buttons match up. Tap one of yours to change it.";
@@ -1391,6 +1379,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
   } else if (m.step == 2 && !m.note.empty()) {
     text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
+  } else if (updateLine(c, btn, L, R, baseY)) {
   } else if (m.canMake) {
     text(c, L, baseY, 19, "A new combo works right away if what it sets off is already on a button. Otherwise, from the next launch.", false, DIM, 1, 0, R - L);
   }
@@ -1650,6 +1639,7 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
       lamp(c, L, baseY - 14, 14, ALERT);
       text(c, L + 28, baseY, 19, m.note, true, ALERT, 1, 0, R - L - 28);
     } else text(c, L, baseY, 19, m.note, false, PAPER, 1, 0, R - L);
+  } else if (m.step == 0 && updateLine(c, btn, L, R, baseY)) {  // not while it's counting down, recording or choosing
   } else if (m.step == 0 && m.canRecord) {
     text(c, L, baseY, 19, "Close the dashboard and press the button. Macros don't run while the dashboard's open.", false, DIM, 1, 0, R - L);
   }
@@ -1901,6 +1891,7 @@ void drawGuide(Canvas& cv, const GuideModel& m, std::vector<Button>& btn) {
   if (!m.status.empty()) {
     lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (!m.footLive && updateLine(c, btn, L, R, baseY)) {  // "Live in the game now" after a change still comes first
   } else if (!m.foot.empty()) {
     double x = L;
     if (m.footLive) { lamp(c, L, baseY - 14, 14, LIVE); x += 28; }

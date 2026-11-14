@@ -74,8 +74,6 @@ struct UpdateNote {
 };
 void setUpdateNote(const UpdateNote& n);  // every page shows it from its next draw
 std::string updateNoteKey();              // goes in each page's redraw key
-// Drafts for J4 to pick from (14 November): 0, under the name at the top of every page. 1, the line along the bottom.
-extern int g_updateSpot;
 
 struct UpdateModel {
   std::string game;
