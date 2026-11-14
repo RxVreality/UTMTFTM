@@ -1,12 +1,18 @@
-The **Bindings** and **Combos** tabs now start with a simple mode that asks one thing at a time, on a picture of your own controllers. On Bindings every button flashes: tap the one you want to change, then tap the job you'd like it to have on another button, and the two swap. Combos asks whether you want a combo or a macro and takes you through either. **Advanced**, at the top right, opens the full pages from before.
+Mostly fixes, from @MMeNDtal's testing of 0.6.0 on PC VR (#2). Thank you.
 
-Most changes should now work without restarting the game, including swaps, stick directions and combos. A few still wait for the next launch, like giving a button a job that wasn't on any button, and the page tells you which. Swaps are done by the add-on, because games like Titan Isles tie a job to one hand and a binding file can't move it to the other.
+- The Steam Frame's D-pad left and right no longer point at each other's arm on the Bindings pictures.
+- The **Guided** button no longer covers the last controller on the advanced Bindings page.
+- Setting one way of a stick to **Nothing** now really does nothing in the game. The add-on holds that way at the middle while you play.
+- A macro recorded on the advanced Macros page takes you back to choose its button, not to the Combos page.
+- The Decaf tab says why the hand pointing at the menu isn't steadied (so the laser stays sharp).
 
-**Decaffeinate** is new, on its own **Decaf** tab. It takes the little shakes out of your hands while you hold them still, like when you're aiming at something far away, and should let go the moment you move. It's off until you turn it on. I've only had a quick try of Maximum, in Pavlov Shack and Titan Isles. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
+**Strength** on the Decaf tab, also MMeNDtal's idea: a slider from 25% to 150% of the step you picked. If Tuned pushes back on small aiming corrections, try 50%.
 
-@MMeNDtal asked for stick directions on the Bindings tab, gave me the idea for Decaffeinate, and co-authored the Combos tab. Thank you.
+Some games give your hands weight of their own or smooth your aim themselves, and Decaf adds to that. The Decaf page now says when you're in one of them, and starts lighter where the sources are solid.
 
-**Tested on my Steam Frame only.** I haven't tried this version on PC VR yet, so if something's off there, please open an issue.
+**From this version on, UTMTFTM updates itself.** When there's a newer version, the bottom of the page shows an **Update** button. It installs while you play and starts with SteamVR next time. This one you'll install by hand, as before.
+
+I haven't tried this version in a headset yet.
 
 **On a Frame:** turn on Developer Mode in Steam's System settings, open Konsole from the **+** on the bottom bar, and paste this:
 

@@ -47,6 +47,16 @@ After that, **Play** on UTMTFTM just opens the yellow hand's page. For a new ver
 
 It installs into your home folder and doesn't need sudo. At the end it restarts SteamVR to load the add-on, which closes anything that's running, so don't do this in the middle of a game. Konsole closes too, and when everything comes back the yellow hand is in the dashboard.
 
+### Updates
+
+From 0.6.1 on, UTMTFTM checks for a newer version by itself. When there is one, the line along the bottom of the page says so, with an **Update** button. That button downloads the new version, checks it's exactly the file on the release page, and installs it while you play. Nothing closes, and the new version starts the next time you start SteamVR. Your offsets, layouts, combos and macros stay as they are.
+
+If a SteamVR update ever breaks something and a fixed version is out, the line turns red and says this version may not work properly any more.
+
+To check, it asks GitHub which release is newest when it starts and every six hours after that, the same way a browser would open the releases page. There's no account and nothing else goes with it. To turn it off, set the environment variable `UTMTFTM_NO_UPDATE_CHECK=1`.
+
+You'll need to install 0.6.1 itself by hand, the way you did the first time.
+
 ## Using it
 
 Start your game first, then:
@@ -73,7 +83,11 @@ Decaffeinate takes the little shakes out of your hands while you hold them still
 
 It's on the **Decaf** tab. Pick **Off**, **Tuned**, **Strong** or **Maximum**, and save it for this game or all games, the same way as on the Hands tab. **Use the all-games step** puts a game back on the shared one. It's off until you turn it on, and changes take effect straight away.
 
-While the dashboard is open, the hand you point with isn't smoothed, so the laser stays where you aim it. The other hand stays smoothed so you can see it working. Smoothing happens before your hand offset goes on, so your offsets don't change. If a game has its own smoothing or steadying option, try one at a time, because two at once can feel late.
+**Strength**, under the steps, makes the one you picked lighter or heavier, from 25% to 150%. 100% is the step as I tuned it. Tap the bar or drag it, and your hands change as you drag. It's saved the same way as the step. If even Tuned feels like it pushes back on small aiming corrections, try 50%: in the tests, slow moves trail half as far behind there, and most of the shake still goes.
+
+While the dashboard is open, the hand you point with isn't smoothed, so the laser stays where you aim it. Its side of the page says so. The other hand stays smoothed so you can see it working. Smoothing happens before your hand offset goes on, so your offsets don't change.
+
+Some games give your hands weight of their own, so your in-game hands or weapons trail behind your real ones on purpose, and some smooth or steady your aim themselves. Decaf adds to that. There's a list of these games in `input/hand_weights.json`, from developer notes, reviews and players, and when you're in one, the bottom of the Decaf page says so. Where the sources are solid, a game that weights your hands starts at 50% strength until you set your own. Where only players say it might, the note says "may" and nothing changes by itself. If a game is missing or wrong, please open an issue.
 
 The figures on each step, like how much less shake, come from a simulated trembling hand in the tests, not from a headset. I've only had a quick try of Maximum in Pavlov Shack and Titan Isles on my Frame. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
 
@@ -112,7 +126,7 @@ SteamVR already translates between controllers when a game has nothing for yours
 
 Tap the button on your own controller, and a yellow bar asks what it should do. Tap that on the controller above, or **Nothing** to switch it off. If you just want to swap your own buttons around, pick your own controller to compare with. **Undo rewiring** takes it all back.
 
-You can also change one part of a control, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of yours and pick under **Or one part**: one way of pushing the stick, its press, or its touch. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before. Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, and the **Names** switch at the end of that row changes it.
+You can also change one part of a control, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of yours and pick under **Or one part**: one way of pushing the stick, its press, or its touch. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before. Set one way to **Nothing** and pushing the stick that way stops reaching the game, while the other ways still work. Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, and the **Names** switch at the end of that row changes it.
 
 **Save for** picks between this game and every game. With **All games**, any game that has bindings for the other controller picks up the layout once you've played it and started it again.
 
@@ -191,7 +205,7 @@ Anything else, like PSVR2, depends on SteamVR mapping one of these bindings acro
 - Games that skip SteamVR aren't affected. That means native Oculus PC games, and games running on Virtual Desktop's own OpenXR runtime.
 - Hand tracking isn't supported.
 - Offsets pause while the dashboard is open and when no game is running, so your laser pointer comes from where the controller really is. On a Frame that includes streaming from a PC, so if you stream, set your offsets on the PC.
-- The add-on hooks into a part of SteamVR that Valve doesn't officially offer for this, so a SteamVR update could break it. If that happens, switch it off in Manage Add-ons and SteamVR goes back to normal.
+- The add-on hooks into a part of SteamVR that Valve doesn't officially offer for this, so a SteamVR update could break it. If that happens, switch it off in Manage Add-ons and SteamVR goes back to normal, and look out for an update on the page.
 
 ## Problems
 
@@ -246,7 +260,7 @@ To add a controller, add a file to `input/` and list it in `input/actions.json`.
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
 
-[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved. Stick directions on the Bindings tab and the idea for Decaffeinate came from them too.
+[MMeNDtal](https://github.com/MMeNDtal) (u/MMeNDtal on Reddit) co-authored the Combos tab, both combos and macros. They asked for macros, explained what they should do using a Logitech mouse's macros as the example, and found the bug where tapping on the page didn't show until the laser moved. Stick directions on the Bindings tab and the idea for Decaffeinate came from them too, and so did the bug reports and the strength slider idea that 0.6.1 is built around.
 
 ## License
 

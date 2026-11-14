@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.1
+
+Mostly fixes, from [MMeNDtal](https://github.com/MMeNDtal)'s testing of 0.6.0 on PC VR ([issue #2](https://github.com/RxVreality/UTMTFTM/issues/2)). Thank you.
+
+Fixed:
+
+- On the Steam Frame's pictures, the lines for D-pad left and D-pad right pointed at each other's arm.
+- On the advanced Bindings page, the **Guided** button sat on top of the last controller, Focus 3. The controller names now make room for it, and if a SteamVR ever lists more controllers than fit, the rest go behind a **More** button.
+- Setting one way of a stick to **Nothing** said it worked and didn't. A game that reads the stick as a stick can't have one way taken out by its bindings, so the add-on now holds that way at the middle while you play. The dashboard still gets the whole stick.
+- After making a macro with the guided steps, a macro recorded on the advanced Macros page sent you to the Combos page instead of back to choose its button.
+- On the Decaf tab it looked like only one hand was being steadied. That's on purpose: the hand pointing at the menu isn't, so the laser stays sharp. Its side of the page now says so.
+
+Still the same: a few changes only reach a game the next time it starts, like giving a button a job no button had when the game started. Making those live too would mean going through a part of SteamVR that's locked on purpose, so for now the page keeps saying when a restart is needed.
+
+**Strength** on the Decaf tab, also MMeNDtal's idea: a slider that makes the step you picked lighter or heavier, from 25% to 150%. If Tuned pushes back on small aiming corrections, try 50%. In the tests, slow moves trail half as far behind there and most of the shake still goes.
+
+Some games give your hands weight of their own, or smooth your aim themselves, and Decaf adds to that. There's now a list of these games, and the bottom of the Decaf page says when you're in one. Where developer notes, reviews or my own play say a game weights your hands, Decaf starts at 50% strength there until you set your own. Where only players say a game may, the note says "may" in yellow and nothing changes by itself. Corrections to the list are welcome.
+
+UTMTFTM now checks GitHub for a newer version, at start and every six hours, and the bottom of the page shows an **Update** button when there is one. It installs while you play, without closing SteamVR, and the new version starts with SteamVR next time. This version you'll install by hand, the way you did before.
+
+The add-on changed, so it needs one SteamVR restart after installing.
+
 ## 0.6.0
 
 The Bindings and Combos tabs now start with a simple mode that asks one thing at a time, on a picture of your own controllers. On Bindings every button flashes: tap the one you want to change, then tap the job you'd like it to have on another button, and the two swap. Combos asks whether you want a combo or a macro and takes you through either, and a macro plays back on the controller, numbered, before you keep it. **Advanced**, at the top right, opens the full pages from before.
