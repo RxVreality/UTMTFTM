@@ -3,7 +3,8 @@
 # Result: build\rt\result.txt, ending in "finished". after.ps1 closes everything, because the PC's guard takes this SteamVR for J4
 # playing and cuts this script as soon as the check program ends. That's expected, and the other jobs wait about a minute for it.
 # -Gate, or UTMTFTM_HEAVY_GATE, is an optional script that queues heavy jobs on a busy PC. Without one it just runs.
-param([string]$Root = (Resolve-Path "$PSScriptRoot\..\..").Path, [string]$Gate = $env:UTMTFTM_HEAVY_GATE)
+# -Check picks the program: real_hook_check (the button hook, the default) or real_upload_check (overlay pictures with a busy graphics card).
+param([string]$Root = (Resolve-Path "$PSScriptRoot\..\..").Path, [string]$Gate = $env:UTMTFTM_HEAVY_GATE, [string]$Check = 'real_hook_check')
 $ErrorActionPreference = 'Continue'
 $useGate = $Gate -and (Test-Path $Gate)
 $rt = "$Root\build\rt"
@@ -12,7 +13,7 @@ New-Item -ItemType Directory -Force "$rt\config", "$rt\logs", "$rt\localapp", "$
 "waiting for its turn on the PC" | Set-Content $out
 
 $owner = $PID
-if ($useGate) { & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -session "UTMTFTM" -what "real SteamVR hook check" -owner $owner -ram_gb 4 }
+if ($useGate) { & powershell -NoProfile -ExecutionPolicy Bypass -File $Gate -session "UTMTFTM" -what "real SteamVR $Check" -owner $owner -ram_gb 4 }
 if ($useGate -and $LASTEXITCODE -ne 0) { "gave up waiting for the PC`nfinished" | Set-Content $out; exit 4 }
 
 $running = @(Get-Process vrserver, vrcompositor, vrmonitor -ErrorAction SilentlyContinue)
@@ -44,7 +45,7 @@ $env:LOCALAPPDATA = "$rt\localapp"
 Set-Location "$Root\dist\real_steamvr"
 $started = (Get-Date).AddSeconds(-1).ToString('o')
 "start $(Get-Date)" | Set-Content $out
-$proc = Start-Process -FilePath "$Root\dist\real_steamvr\real_hook_check.exe" -RedirectStandardOutput "$rt\check_out.txt" -RedirectStandardError "$rt\check_err.txt" -PassThru -WindowStyle Hidden
+$proc = Start-Process -FilePath "$Root\dist\real_steamvr\$Check.exe" -RedirectStandardOutput "$rt\check_out.txt" -RedirectStandardError "$rt\check_err.txt" -PassThru -WindowStyle Hidden
 
 # Started apart from this script, so it isn't cut along with it.
 $cmd = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSScriptRoot\after.ps1`" -CheckPid $($proc.Id) -Owner $owner -Rt `"$rt`" -Gate `"$Gate`" -Started `"$started`""

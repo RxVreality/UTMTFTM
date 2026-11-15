@@ -159,6 +159,10 @@ if(WIN32)
   add_executable(real_hook_check tests/real_steamvr/real_hook_check.cpp)
   target_link_libraries(real_hook_check PRIVATE openvr_api d3d11 dxgi)
   set_target_properties(real_hook_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist/real_steamvr)
+  # The overlay picture hand-over against the real SteamVR, with the card idle and with a pretend heavy game. run.ps1 -Check real_upload_check.
+  add_executable(real_upload_check tests/real_steamvr/real_upload_check.cpp src/d3dupload.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+  target_link_libraries(real_upload_check PRIVATE openvr_api d3d11 dxgi d3dcompiler ${JSON_LIBS} ${CAIRO_LIBS})
+  set_target_properties(real_upload_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist/real_steamvr)
   add_custom_command(TARGET real_hook_check POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/third_party/openvr/bin/openvr_api.dll ${CMAKE_SOURCE_DIR}/dist/real_steamvr/
     VERBATIM)

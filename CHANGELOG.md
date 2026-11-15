@@ -8,6 +8,7 @@ Fixed:
 
 - Placing a hand while streaming to the headset, like with Virtual Desktop, the hand you were dragging trailed behind the hand dragging it. Streaming adds a delay that SteamVR makes up for by predicting where your hands will be, and placing now uses those same predicted positions, so the two stay together.
 - With a large distance limit, the bubble around your hand hid the instructions. They now sit above the bubble.
+- On Windows, in a heavy game like Pavlov, the whole menu lagged, and after placing a hand it could stay stuck to the other one for a second or two after you let go. UTMTFTM now asks Windows for a little more priority, and hands its pictures to SteamVR without waiting for the graphics card. It costs about what it did: under 8% of one processor core with the menu open, and next to nothing with it shut. The Steam Frame never had this.
 - On the Steam Frame's pictures, the lines for D-pad left and D-pad right pointed at each other's arm.
 - On the advanced Bindings page, the **Guided** button sat on top of the last controller, Focus 3. The controller names now make room for it, and if a SteamVR ever lists more controllers than fit, the rest go behind a **More** button.
 - Setting one way of a stick to **Nothing** said it worked and didn't. A game that reads the stick as a stick can't have one way taken out by its bindings, so the add-on now holds that way at the middle while you play. The dashboard still gets the whole stick.

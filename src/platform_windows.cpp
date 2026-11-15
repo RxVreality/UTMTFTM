@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
+#include <psapi.h>
 
 #include <json/json.h>
 
@@ -135,6 +136,42 @@ fhlive::Shared* mapLive() {
   void* v = MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(fhlive::Shared));
   CloseHandle(map);
   return m = static_cast<fhlive::Shared*>(v);
+}
+
+static double fileSecs(const FILETIME& f) { return double((uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime) / 1e7; }
+
+double threadCpuSeconds() {
+  FILETIME created, exited, kernel, user;
+  if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return 0;
+  return fileSecs(kernel) + fileSecs(user);
+}
+
+bool systemCpu(double* busy, double* total) {
+  FILETIME idle, kernel, user;
+  if (!GetSystemTimes(&idle, &kernel, &user)) return false;
+  *total = fileSecs(kernel) + fileSecs(user);  // kernel time includes idle time
+  *busy = *total - fileSecs(idle);
+  return true;
+}
+
+uint64_t pageFaults() {
+  PROCESS_MEMORY_COUNTERS c{};
+  c.cb = sizeof c;
+  return GetProcessMemoryInfo(GetCurrentProcess(), &c, sizeof c) ? c.PageFaultCount : 0;
+}
+
+// J4, Pavlov over Virtual Desktop, 2026-11-14: drawing the bubble, all CPU work, took 18-54 ms instead of 6, and the program
+// went up to 2.3 s between turns, while the same steps measured under 0.1 ms with SteamVR and a busy graphics card in the lab.
+// A program with no window at normal priority waits behind a game that's in front and busy. SteamVR's own programs run above it.
+std::string raisePriority() {
+  std::string out;
+  out += SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) ? "processor priority above normal" : "processor priority unchanged (refused)";
+  PROCESS_POWER_THROTTLING_STATE pt{};
+  pt.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+  pt.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+  pt.StateMask = 0;  // neither: full speed, and the timer as asked
+  out += SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &pt, sizeof pt) ? ", no power throttling" : ", power throttling unchanged";
+  return out;
 }
 
 double cpuSeconds() {

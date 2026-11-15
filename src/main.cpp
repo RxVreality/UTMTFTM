@@ -216,7 +216,7 @@ struct App {
   float bubbleR = -1, planeSize = kGhostS;
   M planeXf = ident();
   bool planeValid = false;
-  double renderMs = 0; int renderN = 0;
+  double renderMs = 0, presentMs = 0; int renderN = 0;
   // What this program costs, said in the log once a minute while a game runs (J4, 14 November: "the last thing you want
   // to do is impact performance with this overlay mod"). images: pictures handed to SteamVR, each one work for the GPU.
   struct Cost { Clock::time_point since = Clock::now(); double cpu0 = platform::cpuSeconds(); uint64_t images = 0; } cost;
@@ -231,7 +231,71 @@ struct App {
     uint64_t poses0 = 0;
   } drag;
 
+  // Where each turn of the loop goes, for the log once a minute and when a placed hand is let go. J4, 14 November: in Pavlov
+  // the whole UI lagged, and the first two guesses at why (the graphics card, and SteamVR's calls) measured fine in the lab
+  // with SteamVR and a busy card. This says whether a slow turn was this program working or waiting for the processor.
+  struct LoopStats {
+    uint64_t turns = 0;
+    double workMs = 0, workMax = 0, cpuMs = 0;  // a turn's work, by the clock, and the processor time this thread got for it
+    double worst[5] = {};                       // the slowest turn: events, controllers, placing, menu, everything else
+    double napLateMs = 0, napLateMax = 0;       // how much later than asked it woke from its naps
+    double sysBusy0 = 0, sysTotal0 = 0;
+    uint64_t faults0 = 0;
+    Clock::time_point since = Clock::now();
+    void start() {
+      *this = LoopStats{};
+      platform::systemCpu(&sysBusy0, &sysTotal0);
+      faults0 = platform::pageFaults();
+    }
+    void add(double work, double cpu, const double part[5], double late) {
+      ++turns;
+      workMs += work;
+      cpuMs += cpu;
+      if (work > workMax) { workMax = work; for (int i = 0; i < 5; ++i) worst[i] = part[i]; }
+      napLateMs += late;
+      napLateMax = std::max(napLateMax, late);
+    }
+  } loopMin, loopDrag;
+  static std::string loopText(const LoopStats& L) {
+    if (!L.turns) return "";
+    double busy = 0, total = 0;
+    platform::systemCpu(&busy, &total);
+    const double pcBusy = total > L.sysTotal0 ? (busy - L.sysBusy0) / (total - L.sysTotal0) * 100 : 0;
+    const double secs = std::chrono::duration<double>(Clock::now() - L.since).count();
+    char b[600];
+    snprintf(b, sizeof b,
+             "; the loop: %llu turns (%.0f a second), a turn's work took %.1f ms on average and %.0f ms at worst, and the processor ran this "
+             "program for %.0f%% of that time; the slowest turn: events %.0f, controllers %.0f, placing %.0f, menu %.0f, the rest %.0f ms; naps "
+             "ended %.1f ms late on average, %.0f ms at worst; the PC's processors were %.0f%% busy; %llu page faults",
+             (unsigned long long)L.turns, secs > 0 ? L.turns / secs : 0.0, L.workMs / L.turns, L.workMax, L.workMs > 0 ? L.cpuMs / L.workMs * 100 : 0.0,
+             L.worst[0], L.worst[1], L.worst[2], L.worst[3], L.worst[4], L.napLateMs / L.turns, L.napLateMax, pcBusy,
+             (unsigned long long)(platform::pageFaults() - L.faults0));
+    return b;
+  }
+
   OverlayUploader uploader;
+  // How long pictures take to reach SteamVR, and what handing them over costs the loop: per minute and per held hand.
+  OverlayUploader::Stats upCost, upDrag;
+  static void addUp(OverlayUploader::Stats& to, const OverlayUploader::Stats& s) {
+    to.given += s.given; to.replaced += s.replaced; to.calls += s.calls;
+    to.lagMsSum += s.lagMsSum; to.lagMsMax = std::max(to.lagMsMax, s.lagMsMax);
+    to.callMsSum += s.callMsSum; to.callMsMax = std::max(to.callMsMax, s.callMsMax);
+    to.shared = s.shared;
+  }
+  void takeUploadStats() {
+    const OverlayUploader::Stats s = uploader.takeStats();
+    addUp(upCost, s);
+    addUp(upDrag, s);
+  }
+  static std::string upText(const OverlayUploader::Stats& s) {
+    if (!s.given && !s.calls) return "";
+    char b[256];
+    snprintf(b, sizeof b, "; pictures reached SteamVR %.1f ms after drawing on average, %.0f ms at worst (%s), %llu replaced by newer ones on the way; "
+             "handing them over took %.2f ms of the loop on average, %.1f ms at worst",
+             s.given ? s.lagMsSum / s.given : 0.0, s.lagMsMax, s.shared ? "shared textures" : "copied by SteamVR", (unsigned long long)s.replaced,
+             s.calls ? s.callMsSum / s.calls : 0.0, s.callMsMax);
+    return b;
+  }
   Clock::time_point lastRawStream{};
   int uploadFails = 0;
 
@@ -286,6 +350,8 @@ struct App {
     store.handWeights = Store::loadHandWeights(g_root + "/input/hand_weights.json");
     in.init();
     std::string gpu;
+    logf("%s", platform::raisePriority().c_str());
+    loopMin.start();
     if (uploader.init(&gpu)) logf("overlay images via the GPU: %s", gpu.c_str());
     else logf("no GPU path (%s): falling back to SetOverlayRaw", gpu.c_str());
     refreshControllers();
@@ -326,8 +392,11 @@ struct App {
     if (s < 60) return;
     const double cpu = platform::cpuSeconds();
     if (!sceneKey.empty())
-      logf("cost over the last %.0f s: %.2f%% of one processor core, %llu pictures handed to SteamVR (%.1f a second)%s", s, (cpu - cost.cpu0) / s * 100,
-           (unsigned long long)cost.images, cost.images / s, mode == Mode::Placing ? ", placing a hand" : panelShowing() ? ", menu open" : "");
+      logf("cost over the last %.0f s: %.2f%% of one processor core, %llu pictures handed to SteamVR (%.1f a second)%s%s", s, (cpu - cost.cpu0) / s * 100,
+           (unsigned long long)cost.images, cost.images / s, mode == Mode::Placing ? ", placing a hand" : panelShowing() ? ", menu open" : "",
+           (upText(upCost) + loopText(loopMin)).c_str());
+    upCost = OverlayUploader::Stats{};
+    loopMin.start();
     cost = Cost{};
     cost.since = now;
     cost.cpu0 = cpu;
@@ -695,13 +764,14 @@ struct App {
   }
 
   void logDrag() {
+    takeUploadStats();
     const double s = std::chrono::duration<double>(Clock::now() - drag.start).count();
     if (s <= 0 || drag.loops < 2) return;
     const uint64_t poses = Store::driverHandUpdates() - drag.poses0;
     logf("while held, %.1f s: %d updates (%.0f a second, longest gap %.0f ms); the hand was drawn %.1f cm from where it was held on average, %.1f cm at worst; "
-         "the controllers reported %.0f poses a second between them; drawing the bubble took %.1f ms a frame; the driver moved it itself on %llu poses",
+         "the controllers reported %.0f poses a second between them; drawing the bubble took %.1f ms a frame, %.1f of it handing it over; the driver moved it itself on %llu poses%s",
          s, drag.loops, drag.loops / s, drag.worstGapMs, drag.trailSum / (drag.loops - 1), drag.trailMax, poses / s, renderN ? renderMs / renderN : 0.0,
-         (unsigned long long)(Store::dragMoved() - dragMoved0));
+         renderN ? presentMs / renderN : 0.0, (unsigned long long)(Store::dragMoved() - dragMoved0), (upText(upDrag) + loopText(loopDrag)).c_str());
   }
 
   void logPlacing(const char* what) {
@@ -1321,6 +1391,10 @@ struct App {
         drag = DragStats{};
         drag.start = drag.last = Clock::now();
         drag.poses0 = Store::driverHandUpdates();
+        takeUploadStats();
+        upDrag = OverlayUploader::Stats{};
+        renderMs = 0; renderN = 0; presentMs = 0;
+        loopDrag.start();
         // The driver moves it from here on, on every pose, whatever this program's drawing is doing.
         if (live && driverOn && !match && Store::dragReady()) {
           Store::startDrag(f, o, Store::appliedDeviceOffset(f));
@@ -1488,7 +1562,9 @@ struct App {
     ghost3d.drawMesh(anchorDot, translate(a.x, a.y, a.z), plane, eyes, 2, 3.0f);
     if (len(a - c) > 0.01f) ghost3d.drawTether(plane, eyes, 2, c, a, 0.6f);
     ghost3d.drawMesh(bubbleMesh, translate(c.x, c.y, c.z), plane, eyes, 2, 0.85f, true);
+    const auto t1 = Clock::now();
     present();
+    presentMs += std::chrono::duration<double, std::milli>(Clock::now() - t1).count();
     renderMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
     if (++renderN == 600) { logf("bubble render+upload avg %.2f ms", renderMs / renderN); renderN = 0; renderMs = 0; }
   }
@@ -1503,7 +1579,9 @@ struct App {
     ghost3d.clear();
     ghost3d.drawMesh(handMesh, W, plane, eyes, 2);
     if (tether) ghost3d.drawTether(plane, eyes, 2, pos(controllerGrip), xfP(W, joints[1]));
+    const auto t1 = Clock::now();
     present();
+    presentMs += std::chrono::duration<double, std::milli>(Clock::now() - t1).count();
     renderMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
     if (++renderN == 600) { logf("ghost render+upload avg %.2f ms", renderMs / renderN); renderN = 0; renderMs = 0; }
   }
@@ -1584,7 +1662,13 @@ struct App {
 
   void run() {
     auto last = Clock::now();
-    while (events()) {
+    double napLate = 0;
+    for (;;) {
+      const auto turn0 = Clock::now();
+      const double cpu0 = platform::threadCpuSeconds();
+      double part[5] = {};
+      if (!events()) break;
+      part[0] = std::chrono::duration<double, std::milli>(Clock::now() - turn0).count();
       auto now = Clock::now();
       float dt = std::chrono::duration<float>(now - last).count();
       last = now;
@@ -1632,17 +1716,39 @@ struct App {
       if (panelDrawn != "#message") messageGoesWithDash = false;
       bool wantTrue = mode != Mode::Idle && store.useDriver;
       if (wantTrue != askedTrue) { Store::askTruePoses(wantTrue); askedTrue = wantTrue; }
+      auto p0 = Clock::now();
       if (mode != Mode::Idle) { in.poll(mode == Mode::Placing, secondsToPhotons()); truePoses(); }  // controllers only matter while placing
+      part[1] = std::chrono::duration<double, std::milli>(Clock::now() - p0).count();
       checkScene();
       loadControllerModels();
       loadBindModels();
+      p0 = Clock::now();
       tickSession(dt);
+      part[2] = std::chrono::duration<double, std::milli>(Clock::now() - p0).count();
       if (mode == Mode::Idle && !signUp && !panelDrawn.empty()) {
         if (panelDrawn == "#message" && now < messageUntil) placePanel(nullptr);
         else { vr::VROverlay()->HideOverlay(hint); panelDrawn.clear(); }
       }
+      p0 = Clock::now();
       refreshDashboard();
-      platform::sleepMs(busy ? 11 : 100);  // in the background (dashboard shut, not placing): 10 wakeups/s
+      part[3] = std::chrono::duration<double, std::milli>(Clock::now() - p0).count();
+      // A picture on its way goes to SteamVR the moment the card has copied it, so the nap is taken in small steps until then.
+      // The pictures never wait for the card (d3dupload.cpp says why), and nor does this loop.
+      const auto wake = Clock::now() + std::chrono::milliseconds(busy ? 11 : 100);
+      uploader.pump();
+      const double work = std::chrono::duration<double, std::milli>(Clock::now() - turn0).count();
+      part[4] = std::max(0.0, work - part[0] - part[1] - part[2] - part[3]);
+      const double cpu = (platform::threadCpuSeconds() - cpu0) * 1000;
+      loopMin.add(work, cpu, part, napLate);
+      loopDrag.add(work, cpu, part, napLate);
+      while (uploader.waiting() && Clock::now() + std::chrono::milliseconds(1) < wake) {
+        platform::sleepMs(1);
+        uploader.pump();
+      }
+      takeUploadStats();
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(wake - Clock::now()).count();
+      if (left > 0) platform::sleepMs(int(left));  // in the background (dashboard shut, not placing): 10 wakeups/s
+      napLate = std::max(0.0, std::chrono::duration<double, std::milli>(Clock::now() - wake).count());
     }
     // closing: leave the game exactly as saved
     Store::endDrag();

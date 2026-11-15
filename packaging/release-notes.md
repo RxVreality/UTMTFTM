@@ -1,6 +1,7 @@
 Mostly fixes, from @MMeNDtal's testing of 0.6.0 on PC VR (#2). Thank you.
 
 - Placing a hand while streaming, like with Virtual Desktop, no longer leaves the dragged hand trailing behind, and the instructions sit above the bubble instead of inside it.
+- On Windows, the menu no longer lags in heavy games like Pavlov, and a placed hand no longer sticks to the other one after you let go.
 - The Steam Frame's D-pad left and right no longer point at each other's arm on the Bindings pictures.
 - The **Guided** button no longer covers the last controller on the advanced Bindings page.
 - Setting one way of a stick to **Nothing** now really does nothing in the game. The add-on holds that way at the middle while you play.
@@ -13,7 +14,7 @@ Some games give your hands weight of their own or smooth your aim themselves, an
 
 **From this version on, UTMTFTM updates itself.** When there's a newer version, the bottom of the page shows an **Update** button. It installs while you play and starts with SteamVR next time. This one you'll install by hand, as before.
 
-I haven't tried this version in a headset yet.
+I've tried this version on my PC with a Quest 3 over Virtual Desktop, in Pavlov: placing hands, the menu pages and Decaf. I haven't tried it on a Frame yet.
 
 **On a Frame:** turn on Developer Mode in Steam's System settings, open Konsole from the **+** on the bottom bar, and paste this:
 

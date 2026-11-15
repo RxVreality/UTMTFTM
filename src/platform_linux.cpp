@@ -160,6 +160,32 @@ fhlive::Shared* mapLive() {
   return m = static_cast<fhlive::Shared*>(v);
 }
 
+double threadCpuSeconds() {
+  rusage u{};
+  if (getrusage(RUSAGE_THREAD, &u) != 0) return 0;
+  return double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6;
+}
+
+bool systemCpu(double* busy, double* total) {
+  std::ifstream f("/proc/stat");
+  std::string cpu;
+  unsigned long long v[8] = {};
+  if (!(f >> cpu) || cpu != "cpu") return false;
+  for (auto& x : v) f >> x;
+  const double hz = double(sysconf(_SC_CLK_TCK));
+  const unsigned long long all = v[0] + v[1] + v[2] + v[3] + v[4] + v[5] + v[6] + v[7];
+  *total = double(all) / hz;
+  *busy = double(all - v[3] - v[4]) / hz;  // less idle and waiting for the disk
+  return true;
+}
+
+uint64_t pageFaults() {
+  rusage u{};
+  return getrusage(RUSAGE_SELF, &u) == 0 ? uint64_t(u.ru_minflt + u.ru_majflt) : 0;
+}
+
+std::string raisePriority() { return "processor priority unchanged (the Frame never needed it)"; }
+
 double cpuSeconds() {
   rusage u{};
   if (getrusage(RUSAGE_SELF, &u) != 0) return 0;

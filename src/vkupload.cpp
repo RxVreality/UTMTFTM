@@ -123,7 +123,7 @@ OverlayUploader::OverlayUploader() : p(new Impl) {}
 OverlayUploader::~OverlayUploader() { shutdown(); delete p; }
 bool OverlayUploader::ready() const { return p->dev != VK_NULL_HANDLE; }
 
-bool OverlayUploader::init(std::string* info) {
+bool OverlayUploader::init(std::string* info, int, bool) {  // card priority and shared textures are the Windows side's
   auto fail = [&](const std::string& e) {
     if (info) *info = e;
     shutdown();
@@ -292,6 +292,11 @@ vr::EVROverlayError OverlayUploader::upload(vr::VROverlayHandle_t o, const uint8
   vr::Texture_t tex{&vk, vr::TextureType_Vulkan, vr::ColorSpace_Auto};
   return vr::VROverlay()->SetOverlayTexture(o, &tex);
 }
+
+// Here upload() finishes each picture itself, which the Steam Frame has always been fine with (J4, 2026-11-14).
+void OverlayUploader::pump() {}
+bool OverlayUploader::waiting() const { return false; }
+OverlayUploader::Stats OverlayUploader::takeStats() { return Stats{}; }
 
 void OverlayUploader::shutdown() {
   if (p->dev) {

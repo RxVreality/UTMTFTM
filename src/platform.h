@@ -21,6 +21,14 @@ std::vector<std::string> configDirs();  // SteamVR's config folders, the ones in
 void sleepMs(int ms);        // accurate to about a millisecond below 50 ms, without changing the system timer
 uint32_t currentPid();
 double cpuSeconds();          // processor time this program has used so far, user and kernel, in seconds
+double threadCpuSeconds();    // the same for the calling thread only
+// The whole PC's processors since it started, in seconds summed over every processor: busy and in all. Take two and
+// subtract to get how busy the PC was in between.
+bool systemCpu(double* busy, double* total);
+uint64_t pageFaults();        // page faults this program has taken so far
+// Asks for the processor to come to this program promptly even with a game in front taking most of it: a notch above
+// normal priority, and no power throttling. Says what it got, for the log. Windows only; the Frame never needed it.
+std::string raisePriority();
 
 // "exe.<name>" for that process ("" if it can't be read): the key for games with no Steam app id.
 // On Linux a process Steam started says its app id even when SteamVR doesn't know it, giving "steam.app.<id>".

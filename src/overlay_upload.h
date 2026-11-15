@@ -21,11 +21,33 @@ class OverlayUploader {
   OverlayUploader& operator=(const OverlayUploader&) = delete;
 
   // Call after VR_Init. false = no usable device; callers fall back to SetOverlayRaw.
-  bool init(std::string* info);
+  // gpuPriority (Windows): asked of the graphics card for our little copies, -7 to 7. The card may say no; info says which.
+  // sharedTextures false (Windows): the old way, TextureType_DirectX, which waits for the card. For comparing in tests.
+  bool init(std::string* info, int gpuPriority = 7, bool sharedTextures = true);
   bool ready() const;
 
   // Copy straight-alpha RGBA8 pixels into this overlay's next texture and hand it to SteamVR.
+  // On Windows this never waits for the graphics card: the picture reaches SteamVR from pump() once the card has copied it,
+  // and a newer picture for the same overlay replaces one still waiting. None means taken.
   vr::EVROverlayError upload(vr::VROverlayHandle_t o, const uint8_t* rgba, uint32_t w, uint32_t h);
+
+  // Call every loop: hands SteamVR each picture the card has finished copying, and starts the next one. Never waits.
+  void pump();
+  // A picture is still on its way to SteamVR, so pump() has something to do.
+  bool waiting() const;
+
+  // What the hand-over cost since the last call (Windows; zeros elsewhere).
+  struct Stats {
+    uint64_t given = 0;      // pictures SteamVR was given
+    uint64_t replaced = 0;   // pictures a newer one replaced before the card got to them
+    double lagMsSum = 0;     // from upload() to SteamVR having it, summed over given
+    double lagMsMax = 0;
+    double callMsSum = 0;    // time spent inside upload() and pump(), so the loop's own cost
+    double callMsMax = 0;
+    uint64_t calls = 0;
+    bool shared = true;      // false once SteamVR refused a shared texture and the old way took over
+  };
+  Stats takeStats();
 
   // Release everything. Valve: call VR_Shutdown BEFORE destroying textures handed to SteamVR.
   void shutdown();
