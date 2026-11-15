@@ -6,18 +6,18 @@ Mostly fixes, from [MMeNDtal](https://github.com/MMeNDtal)'s testing of 0.6.0 on
 
 Fixed:
 
-- Placing a hand while streaming to the headset, like with Virtual Desktop, the hand you were dragging trailed behind the hand dragging it. Streaming adds a delay that SteamVR makes up for by predicting where your hands will be, and placing now uses those same predicted positions, so the two stay together.
+- Placing a hand while streaming to the headset, like with Virtual Desktop, the hand you were dragging trailed behind your other hand. Streaming adds a delay that SteamVR makes up for by predicting where your hands will be, and placing now uses those same predicted positions, so the two stay together.
 - With a large distance limit, the bubble around your hand hid the instructions. They now sit above the bubble.
-- On Windows, in a heavy game like Pavlov, the whole menu lagged, and after placing a hand it could stay stuck to the other one for a second or two after you let go. UTMTFTM now asks Windows for a little more priority, and hands its pictures to SteamVR without waiting for the graphics card. It costs about what it did: under 8% of one processor core with the menu open, and next to nothing with it shut. The Steam Frame never had this.
+- On Windows, in a heavy game like Pavlov, the whole menu lagged, and after placing a hand it could stay stuck to the other one for a second or two after you let go. UTMTFTM now asks Windows for a little more priority, and stops waiting on the graphics card when it sends its pictures to SteamVR. Processor use is about the same as before: under 8% of one core with the menu open, and next to nothing with it shut. I never saw this on my Frame.
 - On the Steam Frame's pictures, the lines for D-pad left and D-pad right pointed at each other's arm.
 - On the advanced Bindings page, the **Guided** button sat on top of the last controller, Focus 3. The controller names now make room for it, and if a SteamVR ever lists more controllers than fit, the rest go behind a **More** button.
 - Setting one way of a stick to **Nothing** said it worked and didn't. A game that reads the stick as a stick can't have one way taken out by its bindings, so the add-on now holds that way at the middle while you play. The dashboard still gets the whole stick.
 - After making a macro with the guided steps, a macro recorded on the advanced Macros page sent you to the Combos page instead of back to choose its button.
 - On the Decaf tab it looked like only one hand was being steadied. That's on purpose: the hand pointing at the menu isn't, so the laser stays sharp. Its side of the page now says so.
 
-Still the same: a few changes only reach a game the next time it starts, like giving a button a job no button had when the game started. Making those live too would mean going through a part of SteamVR that's locked on purpose, behind a password SteamVR only gives its own screens, so for now the page keeps saying when a restart is needed. The README's Limitations section has more on why.
+Still the same: a few changes only reach a game the next time it starts, like giving a button a job no button had when the game started. Making those live too would mean going through a part of SteamVR that's locked on purpose, behind a password SteamVR only gives its own screens, so for now the page keeps saying when a restart is needed. [The README](README.md#why-some-changes-still-need-a-game-restart) explains why.
 
-The Windows version is now called a beta: in the installer, in Windows' list of apps and at the top of every page. There's more between your hands and the game on a PC (streaming apps, lots of headsets, Windows itself), and it's had less testing than the Frame version, which runs natively on the headset.
+The Windows version is now called a beta: in the installer, in Windows' list of apps and at the top of every page. It has more to deal with than the Frame version, which runs natively on the headset, and I've used it less. [The README](README.md#windows-beta) says more.
 
 **Strength** on the Decaf tab, also MMeNDtal's idea: a slider that makes the step you picked lighter or heavier, from 25% to 150%. If Tuned pushes back on small aiming corrections, try 50%. In the tests, slow moves trail half as far behind there and most of the shake still goes.
 

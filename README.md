@@ -18,7 +18,7 @@ It's free, and I'm sharing it in case it's useful to someone else.
 
 Use this one if you play PC VR, including when you stream to a Steam Frame.
 
-The Windows version is a beta. UTMTFTM started on the Frame, where it runs natively on the headset, and that's where most of my testing happens. On a PC there's more in between: streaming apps like Virtual Desktop, Quest Link and Steam Link, lots of different headsets and controllers, and Windows deciding which program runs when. 0.6.1 fixed a lag that only showed up there, in heavy games like Pavlov. Expect a few rough edges, and if something feels off, please [open an issue](../../issues/new) and attach your logs.
+The Windows version is a beta. UTMTFTM started on the Frame, where it runs natively on the headset, and that's where I've used it most. On a PC there's more in between: streaming apps like Virtual Desktop, Quest Link and Steam Link, lots of different headsets and controllers, and Windows deciding which program runs when. 0.6.1 fixed a lag that only showed up there, in heavy games like Pavlov. It may have bugs the Frame version doesn't, so if something feels off, please [open an issue](../../issues/new) and attach your logs.
 
 1. Close SteamVR.
 2. Download `UTMTFTM-Setup` from the [latest release](../../releases/latest) and run it. It doesn't need admin rights. It isn't code-signed, so Windows may show a blue warning: click **More info**, then **Run anyway**.
@@ -211,9 +211,9 @@ Anything else, like PSVR2, depends on SteamVR mapping one of these bindings acro
 
 ### Why some changes still need a game restart
 
-SteamVR has a way to tell a running game "your buttons changed, load them again", and its own controller binding screen uses it. But it's behind a password: a secret key SteamVR hands only to its own screens, and it turns away anything else that asks. Valve doesn't offer other programs a way to get that key. The only ways I know of mean digging it out of SteamVR's private memory, which any SteamVR update could break, and it's a lock Valve put there on purpose, so I've left it alone.
+SteamVR has a way to tell a running game "your buttons changed, load them again", and its own controller binding screen uses it. But it's behind a password: a secret key SteamVR hands only to its own screens, and it turns away anything else that asks. Valve doesn't offer other programs a way to get that key. The only ways I know of mean reading it out of SteamVR's memory in ways Valve doesn't support, which any SteamVR update could break, and the lock is there on purpose, so I've left it alone.
 
-So the add-on works around it. When you move a job to another button, it sends that button's presses as the ones the game is already listening for, until the game's next launch. That covers most changes. What it can't cover is a job that wasn't on any button when the game started, because there's no press for it to send, so for those the page tells you to restart the game. This is the same on Windows and on the Frame. If Valve ever opens a public way in, UTMTFTM will use it.
+So the add-on works around it. When you move a job to another button, it turns your press of the new button into a press of the old one, which the game is already listening for, until the game next starts. That covers most changes. What it can't cover is a job, like jump, that wasn't on any button when the game started, because there's no old button to press, so for those the page tells you to restart the game. It's the same on Windows and on the Frame. If Valve ever offers a public way, I'll switch to it.
 
 ## Problems
 
