@@ -93,6 +93,20 @@ Some games give your hands weight of their own, so your in-game hands or weapons
 
 The figures on each step, like how much less shake, come from a simulated trembling hand in the tests, not from a headset. I've only had a quick try of Maximum in Pavlov Shack and Titan Isles on my Frame. It felt good, but I haven't tried the other steps in a game, so I'd really like to hear how it feels for you.
 
+### Stick drift
+
+A worn stick doesn't come back to the middle when you let go, so your character creeps or your view slowly turns. Quest controllers are known for it. Tap **Sticks** at the top right of the Decaf tab, then **Check my sticks**. It takes about half a minute:
+
+1. Let go of both sticks and keep still for a few seconds.
+2. Roll each stick slowly round its edge.
+3. Flick each stick up, right, down and left, letting it spring back, twice each way.
+
+From that it works out where each stick really rests, how far off it lands each time you let go, and how far it still reaches each way. After that the game sees the middle whenever you let go, and a full push still goes all the way, even on a side that's worn short. While your thumb is off the stick it keeps learning where the stick rests, since anything a stick says with nobody touching it is drift. The odd one-off spike from a worn stick is ignored.
+
+It's saved per controller, so a different controller gets its own check. It works in every game and in SteamVR's own menus, and nothing changes until you run the check. **Fix drift** turns it off and on. A stick with no drift is left alone. The Steam Frame's sticks use magnets and don't wear this way, so the Sticks page doesn't show on a Frame.
+
+So far it's only been tested on made-up worn sticks in the tests and in a simulated SteamVR, not on a real drifting controller. If you have one, I'd love to hear how it does.
+
 ## Bindings
 
 I never got on with Steam's binding screen, so there's a simpler one here. With a game running, the **Bindings** tab opens on your own controllers with every button flashing, and asks which one you want to change. Point at it on the picture and tap, then tap the job you'd like it to have on another button. The two buttons swap, and it works in the game straight away.
