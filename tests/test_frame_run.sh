@@ -149,6 +149,19 @@ expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
 expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
 expect "the step was saved for the game" "grep -q '\"decaf\" : 3' '$DATA/profiles.json'"
 
+echo "--- stick drift"
+: > "$FAKE_STEAMVR_LOG"
+rm -f "$DATA/drift.json"
+FAKE_STEAMVR_SCENARIO=drift timeout 120 "$APP/utmtftm" 2>"$OUT/stderr-drift.txt"
+code=$?
+cat "$FAKE_STEAMVR_LOG"
+cp "$FAKE_STEAMVR_LOG" "$OUT/drift.log"
+expect "the program ran and quit cleanly (exit $code)" "[ $code -eq 0 ]"
+expect "every check inside the run passed" "grep -q 'RESULT PASS' '$FAKE_STEAMVR_LOG'"
+expect "the driver found both sticks and their touch" "grep -q 'stick drift: left hand, /input/thumbstick, feels a thumb' '$DATA/driver.log' && grep -q 'stick drift: right hand' '$DATA/driver.log'"
+expect "what the check found was saved, for that controller" "grep -q 'SIM-LEFT-1' '$DATA/drift.json' && grep -q '\"drifts\" : true' '$DATA/drift.json'"
+cp "$DATA/drift.json" "$OUT/drift.json" 2>/dev/null
+
 echo "--- updating over the top"
 : > "$FAKE_STEAMVR_LOG"
 sh "$WORK/unpack/UTMTFTM/install.sh" --no-restart >/dev/null

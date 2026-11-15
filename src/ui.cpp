@@ -27,7 +27,6 @@ bool g_betaTag = true;
 #else
 bool g_betaTag = false;
 #endif
-int g_driftDraft = -1;  // -1: as released, no drift page yet
 
 // ---------------------------------------------------------------- canvas
 Canvas::Canvas(int W, int H) : w(W), h(H) {
@@ -489,20 +488,18 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
     caps(c, x + w / 2 - 2, y + 19, 15, "Beta", SIGNAL, 1, 1, 2.0);
   }
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
-  // Draft A of the stick drift page gives it a fifth tab, so the tabs get narrower and the game's name loses room.
-  const int nTabs = g_driftDraft == 0 ? 5 : 4;
-  const double tabX = 456, tabY = 34, tabH = 42, tabW = nTabs == 5 ? 94 : 104, tabD = tabH * kLean;
-  const struct { DashPage p; const char* id; const char* name; } tabs[5] = {
-      {DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}, {DashPage::Decaf, "page_decaf", "Decaf"},
-      {DashPage::Drift, "page_drift", "Drift"}};
+  const int nTabs = 4;
+  const double tabX = 456, tabY = 34, tabH = 42, tabW = 104, tabD = tabH * kLean;
+  const struct { DashPage p; const char* id; const char* name; } tabs[4] = {
+      {DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}, {DashPage::Decaf, "page_decaf", "Decaf"}};
   for (int i = 0; i < nTabs; ++i) {
     const double x = tabX + i * (tabW - tabD + 3);
-    const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos) ||
-                    (page == DashPage::Drift && nTabs == 4 && tabs[i].p == DashPage::Decaf);
+    // Macros are part of Combos, and stick drift is part of Decaf.
+    const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos) || (page == DashPage::Drift && tabs[i].p == DashPage::Decaf);
     if (on) slab(c, x, tabY, tabW, tabH, PAPER);
     else frame(c, x, tabY, tabW, tabH, PAPER, 0.45, 2);
     fxOver(c, x, tabY, tabW, tabH, tabs[i].id, true, on);
-    caps(c, x + tabW / 2, tabY + 27, nTabs == 5 ? 15 : 16, tabs[i].name, on ? INK : PAPER, 1, 1, 1.2, tabW - 2 * tabD);
+    caps(c, x + tabW / 2, tabY + 27, 16, tabs[i].name, on ? INK : PAPER, 1, 1, 1.2);
     btn.push_back({i == 0 ? x : x + tabD / 2, tabY, tabW - tabD / 2, tabH, tabs[i].id});
   }
   if (confirmClose) button(c, btn, R - 214, 30, 214, 46, "close", "Tap again to close", Danger);
@@ -527,7 +524,7 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   }
   if (live == LiveState::Live || live == LiveState::NextLaunch) {
     const bool on = live == LiveState::Live;
-    const double w = caps(c, right, 77, 15, nTabs == 5 ? (on ? "Live" : "Next launch") : on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
+    const double w = caps(c, right, 77, 15, on ? "Live in game" : "Applies next launch", PAPER, 1, 2);
     lamp(c, right - w - 24, 65, 12, on ? LIVE : SIGNAL);
   }
   hline(c, L, R, 98, PAPER, 0.9, 2);
@@ -785,6 +782,12 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
 }
 
 // ---------------------------------------------------------------- Decaffeinate page
+// The Decaf tab's two pages, steady hands and steady sticks, and the switch between them, top right.
+static void steadySwitch(cairo_t* c, std::vector<Button>& btn, double R, bool sticks) {
+  const double sw = label(c, R - 312, 136, 16, "Steady");
+  segments(c, btn, R - 312 + sw + 14, 110, 312 - sw - 14, 38, {{"decaf_part_hands", "Hands", !sticks, true}, {"decaf_part_sticks", "Sticks", sticks, true}}, 16);
+}
+
 const char* decafName(int level) {
   static const char* const names[kDecafSteps] = {"Off", "Tuned", "Strong", "Maximum"};
   return level >= 0 && level < kDecafSteps ? names[level] : "Off";
@@ -811,7 +814,8 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
   pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Decaf);
 
-  text(c, L, 138, 27, "Take the shake out of your aim", true, PAPER);
+  text(c, L, 138, 27, "Take the shake out of your aim", true, PAPER, 1, 0, m.sticksSwitch ? R - 330 - L : 0);
+  if (m.sticksSwitch) steadySwitch(c, btn, R, false);
   text(c, L, 164, 18, "Smooths the tiny trembles of a hand held still, and lets go the moment you move. Made for aiming down sights.", false, DIM, 1, 0, R - L);
 
   // The four steps, as tiles: what each feels like, and what it measured on a test hand (tests/test_decaf.cpp).
@@ -1069,7 +1073,7 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
   std::string title, sub, step;
   switch (m.step) {
     case 1: title = "Let go of both sticks"; sub = "Hold the controllers without touching the sticks, or put them down. Keep still."; step = "Step 1 of 3"; break;
-    case 2: title = "Roll each stick round its edge"; sub = "Push it all the way out and go slowly round, three times. Both at once is fine."; step = "Step 2 of 3"; break;
+    case 2: title = "Roll each stick round its edge"; sub = "Push it all the way out and go slowly all the way round. Both at once is fine."; step = "Step 2 of 3"; break;
     case 3: title = "Flick each stick and let it spring back"; sub = "All the way one way, then let go. Up, right, down and left, twice each."; step = "Step 3 of 3"; break;
     case 4: {
       const bool l = m.sticks[0].drifts, r = m.sticks[1].drifts;
@@ -1081,16 +1085,12 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
       title = "Stop a stick drifting";
       sub = any ? "The game sees the middle when you let go, however worn the stick." : "A worn stick doesn't come back to the middle when you let go. Check yours and UTMTFTM hides it from the game.";
   }
-  // In the Decaf tab (draft B), a switch between its two pages sits where the step count goes.
-  const bool inDecaf = g_driftDraft == 1;
-  const double titleR = inDecaf && !walking ? R - 330 : R - (step.empty() ? 0 : 150);
+  // The switch back to steady hands sits where the step count goes during a check.
+  const double titleR = !walking ? R - 330 : R - (step.empty() ? 0 : 150);
   text(c, L, 138, 27, title, true, PAPER, 1, 0, titleR - L);
   text(c, L, 164, 18, sub, false, DIM, 1, 0, R - L);
   if (!step.empty()) caps(c, R, 138, 17, step, DIM, 1, 2);
-  if (inDecaf && !walking) {
-    const double sw = label(c, R - 312, 136, 16, "Steady");
-    segments(c, btn, R - 312 + sw + 14, 110, 312 - sw - 14, 38, {{"decaf_part_hands", "Hands", false, true}, {"decaf_part_sticks", "Sticks", true, true}}, 16);
-  }
+  if (!walking) steadySwitch(c, btn, R, true);
 
   // The two sticks, side by side.
   const char* names[2] = {"Left stick", "Right stick"};
@@ -1119,12 +1119,16 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
       bool warn = false;
       if (m.step == 1) {
         if (s.hasTouch && s.touched) { now = "Thumb on the stick: let go"; warn = true; }
-        else now = m.countdown > 0 ? "Keep still..." : "Got it";
+        else now = s.countdown > 0 ? "Keep still..." : "Got it";
       } else if (m.step == 2) now = s.progress >= 1 ? "That's all the way round" : "Keep going round";
-      else now = s.progress >= 1 ? "That's enough" : std::to_string(s.landed.size()) + " of 8 let-gos";
+      else {
+        // Twice each way: let-gos past that from one way don't count, so it says which it's still after.
+        const int got = int(std::lround(std::max(0.f, s.progress) * 8));
+        now = s.progress >= 1 ? "That's enough" : s.landed.size() >= 8 ? "Now the other ways too" : std::to_string(got) + " of 8 let-gos";
+      }
       if (warn) lamp(c, tx, ty - 15, 14, ALERT);
       text(c, warn ? tx + 26 : tx, ty, 22, now, true, warn ? ALERT : PAPER, 1, 0, tw - (warn ? 26 : 0));
-      if (m.step == 1 && m.countdown > 0 && !(s.hasTouch && s.touched)) text(c, tx, ty + 90, 72, std::to_string(m.countdown), true, PAPER);
+      if (m.step == 1 && s.countdown > 0 && !(s.hasTouch && s.touched)) text(c, tx, ty + 90, 72, std::to_string(s.countdown), true, PAPER);
       if (s.progress >= 0) {
         const double by = py + 300;
         hline(c, tx, x + cw - 4, by, LINE, 1, 8);
@@ -1171,8 +1175,7 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
   } else {
     button(c, btn, L, ay, 260, ah, "drift_check", "Check again", Outline);
     const double sx = mid + 12, fw = label(c, sx, ay + 36, 16, "Fix drift");
-    segments(c, btn, sx + fw + 18, ay, R - 150 - (sx + fw + 18), ah, {{"drift_off", "Off", !m.fixOn, true}, {"drift_on", "On", m.fixOn, true}}, 21);
-    button(c, btn, R - 136, ay, 136, ah, "drift_advanced", "Advanced", Outline);
+    segments(c, btn, sx + fw + 18, ay, R - (sx + fw + 18), ah, {{"drift_off", "Off", !m.fixOn, true}, {"drift_on", "On", m.fixOn, true}}, 21);
   }
 
   hline(c, L, R, 700);

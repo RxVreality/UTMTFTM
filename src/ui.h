@@ -292,6 +292,7 @@ struct DecafModel {
   // This game weights your hands, or smooths aim, itself (input/hand_weights.json), in words. Empty: not that we know of.
   std::string weightNote;
   bool weightMaybe = false;  // only players say so: a yellow lamp, and it says "may"
+  bool sticksSwitch = false; // the Hands / Sticks switch to the stick drift page. Not on a Frame, whose sticks don't drift
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;
@@ -302,8 +303,8 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- stick drift page
 // A worn stick that doesn't come back to the middle when you let go (J4, 14 November). The page checks each stick in three
-// steps, then the driver hides the drift from the game in the button hook. DRAFTS for J4 to pick from: where it lives.
-extern int g_driftDraft;  // 0: its own Drift tab. 1: inside the Decaf tab, with a Hands / Sticks switch. -1: no drift page
+// steps, then the driver hides the drift from the game in the button hook. It's in the Decaf tab, behind a Hands / Sticks
+// switch: J4's pick of two drafts (the other was a tab of its own).
 struct DriftDot { float x, y; };  // a stick position, -1..1, y up
 struct DriftStick {
   bool present = true;            // this hand's controller has a stick
@@ -319,6 +320,7 @@ struct DriftStick {
   std::vector<DriftDot> landed;   // where it came to rest after each let-go
   std::vector<float> reach;       // while rolling round the edge: how far it got in each of 32 directions. 0: not yet
   float progress = -1;            // this step, 0..1. Negative: no bar
+  int countdown = 0;              // step 1: this stick's seconds still to go
   std::string verdict;            // "Drifts up and to the left"
   std::vector<std::string> lines; // what the check found, a line each
   bool verdictWarn = false;

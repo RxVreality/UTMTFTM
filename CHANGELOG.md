@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3 (not out yet)
+
+New:
+
+- Stick drift fix, on the Decaf tab under Sticks. A worn stick that doesn't come back to the middle when you let go (Quest controllers are known for it) gets checked in about half a minute: leave the sticks alone, roll them round the edge, then flick each one and let it spring back. UTMTFTM works out where each stick really rests, how far off it lands each time, and how far it still reaches, and from then on the game sees the middle when you let go while a full push still goes all the way. With your thumb off the stick it keeps learning where it rests, and the odd one-off spike from a worn stick is ignored. It's saved per controller, works in every game and in SteamVR's menus, and changes nothing until you run the check. The Frame's sticks use magnets and don't wear like this, so it doesn't show there.
+
 ## 0.6.2 (not out yet)
 
 Fixed:

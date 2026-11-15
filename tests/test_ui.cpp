@@ -603,7 +603,7 @@ int main(int argc, char** argv) {
     sc.savePNG(out + "/ghost.png");
   }
 
-  // ---- the stick drift page (J4, 14 November): DRAFTS, A its own tab and B inside the Decaf tab, and the check's steps.
+  // ---- the stick drift page (J4, 14 November), inside the Decaf tab (J4's pick of two drafts), and the check's steps.
   // Made-up sticks: the left one rests up and to the left and lands somewhere else each time, the right one's fine.
   {
     unsigned seed = 7;
@@ -629,7 +629,6 @@ int main(int argc, char** argv) {
       noOverlap(b, name);
       return b;
     };
-    const int was = g_driftDraft;
     DriftModel first;
     first.game = "Pavlov";
     first.live = LiveState::Live;
@@ -637,17 +636,19 @@ int main(int argc, char** argv) {
     first.sticks[0].trail = cloud(-0.10f, 0.12f, 0.05f, 40);
     first.sticks[1].raw = {0.004f, -0.006f};
     first.sticks[1].trail = cloud(0, 0, 0.02f, 40);
-    for (int d = 0; d <= 1; ++d) {
-      g_driftDraft = d;
-      const std::string tag = d ? "B" : "A";
-      shot(first, "drift_draft" + tag + "_first.png");
+    {
+      const std::vector<Button> b = shot(first, "drift_first.png");
+      bool hands = false, sticks = false, check = false;
+      for (const Button& x : b) { hands |= x.id == "decaf_part_hands"; sticks |= x.id == "decaf_part_sticks"; check |= x.id == "drift_check"; }
+      CHECK(hands && sticks && check);  // the way back to steady hands, and the one thing to do
     }
-    g_driftDraft = 0;
     // Step 1: leave them alone, with a thumb still on the right stick.
     DriftModel s1 = first;
     s1.step = 1;
     s1.countdown = 3;
     s1.sticks[0].progress = 0.4f;
+    s1.sticks[0].countdown = 3;
+    s1.sticks[1].countdown = 4;
     s1.sticks[1].progress = 0.1f;
     s1.sticks[1].touched = true;
     shot(s1, "drift_step1.png");
@@ -709,8 +710,7 @@ int main(int argc, char** argv) {
     push.sticks[0].touched = true;
     shot(push, "drift_after_push.png");
     CHECK(driftKey(push) != driftKey(after));
-    g_driftDraft = -1;
-    {  // as released: four tabs, and the Decaf tab the way it is
+    {  // the Decaf tab's own page, with the switch, and without it on a Frame
       Canvas cv(1200, 760);
       DecafModel dm;
       dm.game = "Pavlov";
@@ -720,9 +720,18 @@ int main(int argc, char** argv) {
       dm.hands[1] = {true, 0.27f, 0.035f};
       std::vector<Button> b;
       drawDecaf(cv, dm, b);
-      cv.savePNG(out + "/drift_today_decaf.png");
+      bool sw = false;
+      for (const Button& x : b) sw |= x.id == "decaf_part_sticks";
+      CHECK(!sw);
+      dm.sticksSwitch = true;
+      drawDecaf(cv, dm, b);
+      cv.savePNG(out + "/decaf_with_sticks_switch.png");
+      sw = false;
+      for (const Button& x : b) sw |= x.id == "decaf_part_sticks";
+      CHECK(sw);
+      noOverlap(b, "decaf_with_sticks_switch.png");
+      for (auto& x : b) CHECK(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h);
     }
-    g_driftDraft = was;
   }
   printf("%s (%d failures)\n", fails ? "FAILED" : "PASSED", fails);
   return fails ? 1 : 0;

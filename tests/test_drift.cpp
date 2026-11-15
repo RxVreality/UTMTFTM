@@ -14,11 +14,18 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "../src/drift.h"
+#include "../src/live.h"
+#include "../src/sticks.h"
+#include "../src/ui.h"
 
 namespace {
 
@@ -183,6 +190,204 @@ void drawLandings(const std::string& path, const std::vector<drift::Dot>& raw, c
   cairo_surface_write_to_png(s, path.c_str());
   cairo_destroy(c);
   cairo_surface_destroy(s);
+}
+
+// ---------------------------------------------------------------- the page's check, the way the app runs it
+// sticks::Drift, the app's own stick drift logic, run against a pretend driver: the same shared channel the real one fills,
+// with each report fixed the way the driver fixes it, from the settings the page sends. Two sticks: the left one worn, the
+// right one fine. The page's pictures are drawn from what it really found, into the folder, as drift_page_*.png.
+alignas(8) unsigned char g_channel[sizeof(fhlive::DriftChannel)];  // zeros, like a new live.shm
+
+struct PretendDriver {
+  fhlive::DriftChannel* dc = reinterpret_cast<fhlive::DriftChannel*>(g_channel);
+  drift::State st[2];
+  uint32_t seen = 1;
+  drift::Params p[2];
+  // One report of a hand's stick: fixed, and kept for the page while it's measuring. What the game gets.
+  drift::Dot report(int h, float x, float y, int touch, double t) {
+    if (dc->seq.load() != seen) {
+      seen = dc->seq.load();
+      for (int k = 0; k < 2; ++k) {
+        drift::Params q;
+        std::memcpy(&q, &dc->want[k], sizeof q);
+        p[k] = drift::sane(q);
+        st[k] = drift::State{};
+      }
+    }
+    float ox, oy;
+    drift::fix(p[h], st[h], x, y, touch, t, ox, oy);
+    if (dc->measure.load()) {
+      const uint32_t n = dc->write[h].fetch_add(1);
+      fhlive::DriftSample& e = dc->ring[h][n % fhlive::kDriftRing];
+      e.seq.store(0);
+      e.ms = uint32_t(t * 1000);
+      e.x = x; e.y = y; e.ox = ox; e.oy = oy;
+      e.touch = uint8_t(touch < 0 ? 2 : touch);
+      e.seq.store(n + 1);
+    }
+    return {ox, oy};
+  }
+};
+
+void pageCheck(const std::string& folder) {
+  std::printf("The page's stick check, run the way the app runs it\n");
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "utmtftm_test_drift";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  PretendDriver drv;
+  drv.dc->magic.store(fhlive::kDriftMagic);
+  drv.dc->found[0].store(3);
+  drv.dc->found[1].store(3);
+  WornStick sticksIn[2];
+  sticksIn[1].restX = 0.004f;
+  sticksIn[1].restY = -0.003f;
+  sticksIn[1].weak = 0.008f;
+  sticksIn[1].jitter = 0.004f;
+  sticksIn[1].leftMost = 1.f;
+  sticksIn[1].spikes = 0;
+  sticksIn[1].rng.seed(23);
+  const std::string serials[2] = {"WORN-LEFT", "FINE-RIGHT"};
+  const bool frames[2] = {false, false};
+  sticks::Drift page(dir.u8string());
+  double t = 0;
+  const auto frame = [&](bool showing) {  // 10 ms of SteamVR: each stick reports twice, then the app's loop
+    for (int k = 0; k < 2; ++k)
+      for (int h = 0; h < 2; ++h) {
+        float x, y;
+        int touch;
+        sticksIn[h].report(x, y, touch);
+        drv.report(h, x, y, touch, t + k * 0.005);
+      }
+    t += 0.01;
+    page.tick(drv.dc, serials, frames, showing, t);
+  };
+  const auto draw = [&](const std::string& name) {
+    if (folder.empty()) return;
+    fh::DriftModel m = page.model();
+    m.game = "Pavlov";
+    m.live = fh::LiveState::Live;
+    fh::Canvas cv(1200, 760);
+    std::vector<fh::Button> b;
+    fh::drawDrift(cv, m, b);
+    cv.savePNG(folder + "/" + name);
+  };
+  for (int i = 0; i < 20; ++i) frame(true);
+  check(page.ready() && page.step() == 0 && !page.model().sticks[0].checked, "the page is up, the driver can do it, nothing's been checked");
+  draw("drift_page_first.png");
+  check(page.click("drift_check", t) && page.step() == 1, "Check my sticks starts step 1");
+  // Step 1, with a thumb still on the right stick for the first second: that one waits for it.
+  for (WornStick& s : sticksIn) s.letGo();
+  sticksIn[1].thumb = true;
+  for (int i = 0; i < 100; ++i) frame(true);
+  const fh::DriftModel s1 = page.model();
+  check(s1.sticks[0].progress > 0.2f && s1.sticks[1].progress == 0.f && s1.countdown == 4, f2("a thumb on the right stick holds it back (left %.2f, right %.2f)", s1.sticks[0].progress, s1.sticks[1].progress));
+  draw("drift_page_step1.png");
+  sticksIn[1].thumb = false;
+  for (int i = 0; i < 500 && page.step() == 1; ++i) frame(true);
+  check(page.step() == 2, f2("both left alone four seconds: step 2 (after %.1f s)", t));
+  // Step 2: round the edge, slowly, both at once.
+  int n2 = 0;
+  for (; n2 < 2000 && page.step() == 2; ++n2) {
+    const float a = 2 * kPi * n2 / 250.f;
+    for (int h = 0; h < 2; ++h) sticksIn[h].push(std::cos(a + h), std::sin(a + h));
+    frame(true);
+    if (n2 == 150) draw("drift_page_step2.png");
+  }
+  check(page.step() == 3, f2("all the way round: step 3 (after %.1f s)", n2 * 0.01));
+  for (WornStick& s : sticksIn) s.letGo();
+  // Step 3: flick and let go, up, right, down, left, twice each, both sticks together.
+  for (int k = 0; k < 8 && page.step() == 3; ++k) {
+    const float a = kPi / 2 * (k % 4) + kPi / 2;
+    for (int i = 0; i < 10; ++i) { for (WornStick& s : sticksIn) s.push(std::cos(a) * i / 10.f, std::sin(a) * i / 10.f); frame(true); }
+    for (int i = 0; i < 5; ++i) { for (WornStick& s : sticksIn) s.push(std::cos(a), std::sin(a)); frame(true); }
+    for (WornStick& s : sticksIn) s.letGo();
+    for (int i = 0; i < 40; ++i) frame(true);
+    if (k == 4) draw("drift_page_step3.png");
+  }
+  check(page.step() == 4, "eight let-gos: it's worked out what it found");
+  const fh::DriftModel r = page.model();
+  draw("drift_page_result.png");
+  check(r.sticks[0].drifts && r.sticks[0].verdict == "Drifts up and to the left", "the left stick drifts, up and to the left: " + r.sticks[0].verdict);
+  check(!r.sticks[1].drifts && r.sticks[1].verdict == "No drift", "the right stick doesn't: " + r.sticks[1].verdict);
+  for (const std::string& l : r.sticks[0].lines) std::printf("        \"%s\"\n", l.c_str());
+  check(fs::exists(fs::u8path(page.file())), "it's saved, in drift.json");
+  drift::Params sent[2];
+  std::memcpy(sent, drv.dc->want, sizeof sent);
+  check(sent[0].on == 1 && std::fabs(sent[0].cx + 0.08f) < 0.04f && std::fabs(sent[0].cy - 0.11f) < 0.04f, f2("the driver's told to fix the left stick, resting at %.3f, %.3f", sent[0].cx, sent[0].cy));
+  check(sent[1].on == 0, "and to leave the right one alone");
+  // What the game gets now, from the pretend driver with those settings: 100 let-gos of the left stick, thumb off.
+  {
+    float worst = 0;
+    std::mt19937 rng(3);
+    for (int i = 0; i < 100; ++i) {
+      const float a = std::uniform_real_distribution<float>(0, 2 * kPi)(rng);
+      sticksIn[0].push(std::cos(a), std::sin(a));
+      for (int k = 0; k < 5; ++k) frame(true);
+      sticksIn[0].letGo();
+      for (int k = 0; k < 30; ++k) frame(true);
+      float x, y;
+      int touch;
+      sticksIn[0].report(x, y, touch);
+      const drift::Dot o = drv.report(0, x, y, touch, t);
+      worst = std::max(worst, drift::len(o.x, o.y));
+    }
+    check(worst == 0.f, f2("after the check, the game gets the middle every time the left stick's let go (worst %.4f)", worst));
+  }
+  check(page.click("drift_done", t) && page.step() == 0, "Done goes back to the page");
+  draw("drift_page_after.png");
+  // Off and on.
+  page.click("drift_off", t);
+  frame(true);
+  check(drv.dc->want[0].on == 0 && !page.fixOn(), "Fix drift off: the driver's told to leave both alone");
+  page.click("drift_on", t);
+  frame(true);
+  check(drv.dc->want[0].on == 1, "and on again");
+  // Started again: it remembers.
+  {
+    sticks::Drift again(dir.u8string());  // the app started again, with the driver still holding its last settings: cleared here
+    std::memset(&drv.dc->want, 0, sizeof drv.dc->want);
+    fhlive::seqWriteBegin(drv.dc->seq);
+    fhlive::seqWriteEnd(drv.dc->seq);
+    again.tick(drv.dc, serials, frames, false, t);
+    check(drv.dc->want[0].on == 1 && std::fabs(drv.dc->want[0].cx - sent[0].cx) < 1e-4f && std::fabs(drv.dc->want[0].dead - sent[0].dead) < 1e-4f && drv.dc->want[1].on == 0,
+          f2("after a restart it sends the same fix, from drift.json (middle x %.5f, was %.5f)", drv.dc->want[0].cx, sent[0].cx));
+    check(again.model().sticks[0].checked && again.model().sticks[0].verdict == r.sticks[0].verdict, "and the page still says what it found");
+    // Another controller in the right hand: not checked, nothing sent for it.
+    const std::string other[2] = {"WORN-LEFT", "SOMEONE-ELSES"};
+    again.tick(drv.dc, other, frames, false, t + 1);
+    check(!again.model().sticks[1].checked && drv.dc->want[1].on == 0 && drv.dc->want[0].on == 1, "a different controller in a hand isn't fixed with the old one's numbers");
+    // Only Frame controllers on: the switch to this page doesn't show.
+    const bool both[2] = {true, true};
+    again.tick(drv.dc, serials, both, false, t + 2);
+    check(again.hidden(), "with only a Frame's controllers on, the Sticks switch is hidden");
+    again.tick(drv.dc, serials, frames, false, t + 3);
+    check(!again.hidden(), "and with others on, it's there");
+  }
+  // Leaving part way through a check changes nothing.
+  {
+    const std::string before = [&] { std::ifstream f(fs::u8path(page.file())); std::stringstream b; b << f.rdbuf(); return b.str(); }();
+    page.click("drift_check", t);
+    for (int i = 0; i < 50; ++i) frame(true);
+    page.leave();
+    check(page.step() == 0, "leaving the page stops a check");
+    const std::string after = [&] { std::ifstream f(fs::u8path(page.file())); std::stringstream b; b << f.rdbuf(); return b.str(); }();
+    check(before == after, "and nothing saved changed");
+    page.click("drift_check", t);
+    page.click("drift_cancel", t);
+    check(page.step() == 0 && page.status == "Cancelled. Nothing changed.", "Cancel says nothing changed");
+  }
+  // An older driver: it can't, and the page says how to fix that.
+  {
+    drv.dc->magic.store(0);
+    frame(true);
+    check(!page.ready(), "an older driver: not ready");
+    page.click("drift_check", t);
+    check(page.step() == 0 && page.status.find("Restart SteamVR") != std::string::npos, "Check says to restart SteamVR once: " + page.status);
+    drv.dc->magic.store(fhlive::kDriftMagic);
+  }
+  fs::remove_all(dir, ec);
 }
 
 }  // namespace
@@ -384,6 +589,7 @@ int main(int argc, char** argv) {
     const double ns = nsPerFix();
     check(ns < 200, f2("costs %.0f ns a report", ns));
   }
+  pageCheck(folder);
   std::printf("%s (%d failures)\n", g_fail ? "FAILED" : "PASSED", g_fail);
   return g_fail ? 1 : 0;
 }

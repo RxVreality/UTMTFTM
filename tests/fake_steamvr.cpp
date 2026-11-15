@@ -9,6 +9,8 @@
 //   addon_off  the add-on is switched off in SteamVR, and the program has to leave without showing anything
 //   bindings   opens the bindings page, puts a game on another controller's layout, rewires a button and takes it all back,
 //              checking what it tells SteamVR at each step
+//   drift      Quest controllers this time, the left stick worn: runs the stick check on the Decaf tab's Sticks page and
+//              checks what the game gets from the real driver before and after
 // Results go to FAKE_STEAMVR_LOG, and pictures of what it really sent as Vulkan textures go to FAKE_STEAMVR_SHOTS.
 //
 // The interfaces are C++ classes with hundreds of methods between them and only a few matter here, so each is a vtable
@@ -168,7 +170,10 @@ bool sysBoolProp(void*, vr::TrackedDeviceIndex_t, vr::ETrackedDeviceProperty pro
 }
 uint32_t sysStringProp(void*, vr::TrackedDeviceIndex_t idx, vr::ETrackedDeviceProperty prop, char* out, uint32_t size, vr::ETrackedPropertyError* err) {
   std::string v;
-  if (prop == vr::Prop_ControllerType_String) v = "frame_controller";
+  // A Frame's controllers, except for stick drift, which is for controllers whose sticks wear: Quest ones, there.
+  const bool quest = g_scenarioName == "drift";
+  if (prop == vr::Prop_ControllerType_String) v = quest ? "oculus_touch" : "frame_controller";
+  else if (prop == vr::Prop_SerialNumber_String) v = idx == kLeft ? "SIM-LEFT-1" : idx == kRight ? "SIM-RIGHT-1" : "SIM-HMD";
   else if (prop == vr::Prop_RenderModelName_String) v = idx == kLeft ? "frame_controller_left" : "frame_controller_right";
   if (err) *err = vr::TrackedProp_Success;
   if (out && size) snprintf(out, size, "%s", v.c_str());
@@ -1423,6 +1428,168 @@ void scenarioCombos() {
   finish();
 }
 
+// Stick drift: the Decaf tab's Sticks page in the real program, the stick check run the way a person would, and what the game
+// gets from the real driver. Quest controllers, the left stick worn: it rests 14% up and to the left, lands a little short of
+// there on the side it came back from, and jitters. The right one's fine.
+void clickIn(const std::vector<fh::Button>& buttons, const std::string& id, const char* where) {
+  for (const fh::Button& b : buttons) {
+    if (b.id != id) continue;
+    const double x = b.x + b.w / 2, y = b.y + b.h / 2;
+    pushMouse(vr::VREvent_MouseMove, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonDown, x, y);
+    wait(60);
+    pushMouse(vr::VREvent_MouseButtonUp, x, y);
+    say("clicked %s at %.0f, %.0f", id.c_str(), x, y);
+    return;
+  }
+  check(false, ("there's no button called " + id + " on " + where).c_str());
+}
+void clickDrift(const std::string& id, int step, bool checked) {
+  fh::Canvas cv(1200, 760);
+  std::vector<fh::Button> buttons;
+  fh::DriftModel m;
+  m.game = "Simulated Game";
+  m.live = fh::LiveState::Live;
+  m.step = step;
+  m.sticks[0].checked = m.sticks[1].checked = checked;
+  fh::drawDrift(cv, m, buttons);
+  clickIn(buttons, id, "the Sticks page");
+}
+
+struct SimStick {
+  float restX, restY, weak, jitter;
+  std::mt19937 rng;
+  float x = 0, y = 0, angle = 0;
+  bool thumb = false;
+  SimStick(float rx, float ry, float w, float j, unsigned seed) : restX(rx), restY(ry), weak(w), jitter(j), rng(seed) { letGo(); }
+  void push(float dx, float dy) {
+    thumb = true;
+    if (std::sqrt(dx * dx + dy * dy) > 0.2f) angle = std::atan2(dy, dx);
+    x = restX + dx;
+    y = restY + dy;
+    const float e = std::sqrt(x * x + y * y);
+    if (e > 1) { x /= e; y /= e; }
+  }
+  void letGo() {
+    thumb = false;
+    const float s = std::uniform_real_distribution<float>(0.3f, 1.f)(rng);
+    x = restX + std::cos(angle) * weak * s;
+    y = restY + std::sin(angle) * weak * s;
+  }
+  void report(int hand) {
+    std::normal_distribution<float> n(0.f, jitter / 2.5f);
+    fakeserver::reportButton(hand, "/input/thumbstick/touch", thumb ? 1.f : 0.f);
+    fakeserver::reportButton(hand, "/input/thumbstick/x", x + n(rng));
+    fakeserver::reportButton(hand, "/input/thumbstick/y", y + n(rng));
+  }
+};
+
+void scenarioDrift() {
+  const size_t logStart = logText().size();
+  startServer(true);
+  setScene(kGamePid);
+  SimStick sticks[2] = {{-0.08f, 0.11f, 0.05f, 0.012f, 7}, {0.004f, -0.003f, 0.008f, 0.004f, 9}};
+  // Both sticks report every 4 ms, the way a controller does, for as long as asked.
+  const auto run = [&](int ms) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+      for (int h = 0; h < 2; ++h) sticks[h].report(h);
+      wait(4);
+    }
+  };
+  const auto lastHeard = [](const std::string& who) {
+    float v = -9;
+    for (const auto& b : fakeserver::heardButtons()) if (b.first == who) v = b.second;
+    return v;
+  };
+  run(3500);
+  fakeserver::clearHeardButtons();
+  run(300);
+  check(std::fabs(lastHeard("L/input/thumbstick/x") + 0.08f) < 0.03f && std::fabs(lastHeard("L/input/thumbstick/y") - 0.11f) < 0.03f,
+        "before any check, the game gets the worn stick's drift as it is (y)", lastHeard("L/input/thumbstick/y"));
+
+  setPointing(kRight);
+  click("page_decaf");
+  run(400);
+  {
+    fh::Canvas cv(1200, 760);
+    std::vector<fh::Button> buttons;
+    fh::DecafModel m;
+    m.game = "Simulated Game";
+    m.live = fh::LiveState::Live;
+    m.sticksSwitch = true;
+    fh::drawDecaf(cv, m, buttons);
+    clickIn(buttons, "decaf_part_sticks", "the Decaf page");
+  }
+  run(600);
+  clickDrift("drift_check", 0, false);
+  run(300);
+  check(logHasSince(logStart, "stick drift: step 1"), "Check my sticks starts the check");
+  // 1: left alone.
+  for (int i = 0; i < 30 && !logHasSince(logStart, "stick drift: step 2"); ++i) run(250);
+  check(logHasSince(logStart, "stick drift: step 2"), "left alone, it moves on to rolling round the edge");
+  // 2: round the edge, slowly, both together, until it's seen all of it.
+  {
+    const auto start = std::chrono::steady_clock::now();
+    while (!logHasSince(logStart, "stick drift: step 3") && std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+      const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      const float a = float(s * 2 * 3.14159265 / 2.5);
+      for (int h = 0; h < 2; ++h) sticks[h].push(std::cos(a + h), std::sin(a + h));
+      for (int h = 0; h < 2; ++h) sticks[h].report(h);
+      wait(4);
+    }
+  }
+  for (SimStick& s : sticks) s.letGo();
+  check(logHasSince(logStart, "stick drift: step 3"), "all the way round, it moves on to flicking");
+  // 3: flick and let go, up, right, down and left, twice each, both together.
+  for (int k = 0; k < 8 && !logHasSince(logStart, "stick drift: step 4"); ++k) {
+    const float a = float(3.14159265 / 2 * (k % 4) + 3.14159265 / 2);
+    for (int i = 1; i <= 10; ++i) {
+      for (SimStick& s : sticks) s.push(std::cos(a) * i / 10.f, std::sin(a) * i / 10.f);
+      run(8);
+    }
+    run(60);
+    for (SimStick& s : sticks) s.letGo();
+    run(500);
+  }
+  run(500);
+  check(logHasSince(logStart, "stick drift: step 4"), "eight let-gos, and it says what it found");
+
+  // What the game gets now: the left stick let go of, again and again, from every way.
+  float worst = 0;
+  std::mt19937 rng(4);
+  for (int i = 0; i < 12; ++i) {
+    const float a = std::uniform_real_distribution<float>(0, 6.2831853f)(rng);
+    sticks[0].push(std::cos(a), std::sin(a));
+    run(80);
+    sticks[0].letGo();
+    run(250);
+    worst = std::max(worst, std::sqrt(lastHeard("L/input/thumbstick/x") * lastHeard("L/input/thumbstick/x") + lastHeard("L/input/thumbstick/y") * lastHeard("L/input/thumbstick/y")));
+  }
+  check(worst < 1e-6f, "after the check, the game gets the middle each time the worn stick's let go", worst);
+  sticks[0].push(0, 1);
+  run(300);
+  check(lastHeard("L/input/thumbstick/y") > 0.99f, "and a full push up is still all the way up", lastHeard("L/input/thumbstick/y"));
+  sticks[1].push(0.5f, 0);
+  run(200);
+  check(std::fabs(lastHeard("R/input/thumbstick/x") - 0.504f) < 0.03f, "the right stick, which doesn't drift, is left as it is", lastHeard("R/input/thumbstick/x"));
+  for (SimStick& s : sticks) s.letGo();
+  run(300);
+
+  clickDrift("drift_done", 4, true);
+  run(400);
+  clickDrift("drift_off", 0, true);
+  run(500);
+  check(std::fabs(lastHeard("L/input/thumbstick/y") - sticks[0].y) < 0.03f && lastHeard("L/input/thumbstick/y") > 0.05f,
+        "Fix drift off: the game gets the drift again", lastHeard("L/input/thumbstick/y"));
+  clickDrift("drift_on", 0, true);
+  run(500);
+  check(lastHeard("L/input/thumbstick/x") == 0.f && lastHeard("L/input/thumbstick/y") == 0.f, "and on: the middle again");
+  check(g_rawUploads == 0, "nothing fell back to SetOverlayRaw", g_rawUploads);
+  finish();
+}
+
 void scenarioBypass() {
   startServer(false);
   setScene(kGamePid);
@@ -1448,6 +1615,7 @@ class ClientCore {
     if (type == vr::VRApplication_Overlay && g_scenarioName == "combos") g_scenario = std::thread(scenarioCombos);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "recorded") g_scenario = std::thread(scenarioRecorded);
     if (type == vr::VRApplication_Overlay && g_scenarioName == "decaf") g_scenario = std::thread(scenarioDecaf);
+    if (type == vr::VRApplication_Overlay && g_scenarioName == "drift") g_scenario = std::thread(scenarioDrift);
     return vr::VRInitError_None;
   }
   virtual void Cleanup() {
