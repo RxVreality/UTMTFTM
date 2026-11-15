@@ -3,7 +3,7 @@
 // through curl, which Windows 10 and later and SteamOS both have. The overlay never waits on it.
 //
 // What it sends: one request to GitHub's public API for the latest release, with no account and nothing about you, at
-// start and then every few hours. UTMTFTM_NO_UPDATE_CHECK=1 turns it off.
+// start and then every few hours. A check that couldn't get through tries again sooner. UTMTFTM_NO_UPDATE_CHECK=1 turns it off.
 //
 // A release can say older versions may not work properly any more, for when a SteamVR update breaks something and the
 // fix is out. It goes in the release notes, where nobody reading them sees it:
@@ -69,12 +69,14 @@ class Updater {
   explicit Updater(std::string dataDir);
   ~Updater();
   // Looks for a newer version, unless it looked within the last few hours or one's already being fetched. now in ms.
+  // After a check that couldn't reach GitHub it looks again in a minute, then 2, 5, 15 and every 30 minutes until one does.
   void tick(uint64_t nowMs);
   void checkNow();
   // Fetches the new version, checks it's exactly what GitHub lists, and starts its installer. On Windows that puts the new
   // files in next to the running ones, and SteamVR uses them from its next start. On the Frame the same.
   void install();
   Status status() const;
+  bool busy() const { return busy_; }  // a check or an install is still running on its thread
 
   // For the tests: where to ask, and how to fetch a URL into a file. Real ones by default.
   std::string apiUrl;
@@ -92,6 +94,7 @@ class Updater {
   std::atomic<bool> busy_{false};
   uint64_t lastCheck_ = 0;
   bool checked_ = false;
+  std::atomic<int> failures_{0};  // checks in a row that couldn't reach GitHub
 };
 
 }  // namespace update

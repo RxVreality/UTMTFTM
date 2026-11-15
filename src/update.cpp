@@ -172,6 +172,13 @@ static std::string readAll(const std::string& file) {
 }
 
 constexpr uint64_t kEveryMs = 6ull * 60 * 60 * 1000;  // a long session still hears about a fix the same day
+// After a check that couldn't reach GitHub. A Steam Frame starts UTMTFTM as it boots, before its Wi-Fi is back: on J4's
+// Frame, 14 November, 0.6.1's first check failed 15 s after the headset came up, and the next would have been six hours
+// later, so the Update button might hardly ever show there. A failed check never reached GitHub, so these cost it nothing.
+uint64_t retryMs(int failures) {
+  static const uint64_t steps[] = {60000, 120000, 300000, 900000, 1800000};
+  return steps[std::min(std::max(failures, 1), 5) - 1];
+}
 
 Updater::Updater(std::string dataDir) : dir_(std::move(dataDir)) {
 #ifdef _WIN32
@@ -217,7 +224,8 @@ Status Updater::status() const {
 
 void Updater::tick(uint64_t nowMs) {
   if (status().state == State::Off || busy_) return;
-  if (checked_ && nowMs - lastCheck_ < kEveryMs) return;
+  const int failed = failures_.load();
+  if (checked_ && nowMs - lastCheck_ < (failed > 0 ? retryMs(failed) : kEveryMs)) return;
   checked_ = true;
   lastCheck_ = nowMs;
   checkNow();
@@ -246,6 +254,8 @@ void Updater::checkNow() {
       s.needed = !r.minOk.empty() && compareVersions(thisVersion(), r.minOk) < 0;
       s.state = compareVersions(thisVersion(), r.version) < 0 ? State::Available : State::UpToDate;
     });
+    if (got) failures_ = 0;
+    else ++failures_;
     busy_ = false;
   });
 }

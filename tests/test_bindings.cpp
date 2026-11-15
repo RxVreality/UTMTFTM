@@ -2771,8 +2771,28 @@ static void testGuide(const std::string& work, const std::string& out) {
   page.recordedClick("macro_cancel");
 }
 
+// The README's pictures of the Bindings and Combos tabs, from the pictures above, so they always show what the program draws.
+// J4, 14 November: the README still had the Frame's D-pad left and right the wrong way round, long after 0.6.1 fixed it.
+// They show the Frame's controllers, and the Frame's version isn't a beta, so they're drawn without the Windows BETA tag.
+// test_bindings <pictures> docs   writes them into docs\ (then look at them, and commit them with the code they show).
+static void writeDocsPictures(const std::string& out, const std::string& docs) {
+  const struct { const char* from; const char* to; } pics[] = {
+      {"game_nms_guide_2.png", "guided-bindings.png"},       // Picking a new job for A in No Man's Sky on a Steam Frame
+      {"game_nms_guide_combo_2.png", "guided-combos.png"},   // Making thumb on A and B show the HUD in No Man's Sky
+      {"game_pavlov_layout_hover.png", "bindings.png"},      // Steam Frame controllers on the Quest layout in Pavlov, laser on X
+      {"game_nms.png", "bindings-names.png"},                // Steam Frame controllers under Quest 3 in No Man's Sky, every button named
+  };
+  std::error_code ec;
+  for (const auto& p : pics) {
+    fs::copy_file(fs::u8path(out) / p.from, fs::u8path(docs) / p.to, fs::copy_options::overwrite_existing, ec);
+    check(!ec, std::string("the README picture ") + p.to + " is written: " + ec.message());
+  }
+}
+
 int main(int argc, char** argv) {
   const std::string out = argc > 1 ? argv[1] : ".";
+  const std::string docs = argc > 2 ? argv[2] : "";
+  if (!docs.empty()) g_betaTag = false;
   std::error_code ec;
   const fs::path tmp = fs::temp_directory_path(ec) / "utmtftm-test-bindings";
   fs::remove_all(tmp, ec);
@@ -2789,6 +2809,7 @@ int main(int argc, char** argv) {
   testPartsReal();
   testLive(tmp.generic_u8string());
   testGuide(tmp.generic_u8string(), out);
+  if (!docs.empty()) writeDocsPictures(out, docs);
   fs::remove_all(tmp, ec);
   printf("test_bindings: %d checks, %d failures\n", checks, fails);
   return fails ? 1 : 0;
