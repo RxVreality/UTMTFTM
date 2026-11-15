@@ -356,7 +356,11 @@ struct App {
     else logf("no GPU path (%s): falling back to SetOverlayRaw", gpu.c_str());
     refreshControllers();
     auto O = vr::VROverlay();
+#ifdef _WIN32
+    O->CreateDashboardOverlay("utmtftm.dashboard", "UTMTFTM beta", &dash, &thumb);  // the Windows version is a beta (ui.h, g_betaTag)
+#else
     O->CreateDashboardOverlay("utmtftm.dashboard", "UTMTFTM", &dash, &thumb);
+#endif
     O->SetOverlayWidthInMeters(dash, 2.5f);
     O->SetOverlayInputMethod(dash, vr::VROverlayInputMethod_Mouse);
     vr::HmdVector2_t sc{float(dashCv.w), float(dashCv.h)};

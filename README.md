@@ -14,9 +14,11 @@ It's free, and I'm sharing it in case it's useful to someone else.
 
 ## Install
 
-### Windows
+### Windows (beta)
 
 Use this one if you play PC VR, including when you stream to a Steam Frame.
+
+The Windows version is a beta. UTMTFTM started on the Frame, where it runs natively on the headset, and that's where most of my testing happens. On a PC there's more in between: streaming apps like Virtual Desktop, Quest Link and Steam Link, lots of different headsets and controllers, and Windows deciding which program runs when. 0.6.1 fixed a lag that only showed up there, in heavy games like Pavlov. Expect a few rough edges, and if something feels off, please [open an issue](../../issues/new) and attach your logs.
 
 1. Close SteamVR.
 2. Download `UTMTFTM-Setup` from the [latest release](../../releases/latest) and run it. It doesn't need admin rights. It isn't code-signed, so Windows may show a blue warning: click **More info**, then **Run anyway**.
@@ -136,7 +138,7 @@ You can also change one part of a control, which [MMeNDtal](https://github.com/M
 - Those are the default controls, so a setting, a left-handed mode or a game update can change them. If you spot a wrong one, please tell me.
 - You'll see some blanks on purpose. Games can give each controller its own layout, so a button only gets a label if the game's own bindings prove it's the same action.
 - It only knows a game's bindings once you've played it on that machine, unless the game ships them with its files.
-- Most changes should work mid-game. The add-on compares the bindings the game started with against the ones it would start with now, and makes up the difference by sending your presses and stick pushes as the ones the game is listening for, until the next launch. A job that wasn't on any button when the game started has to wait, because there's no press for it to send, and so does changing what a stick push already did. SteamVR's own binding screen can reload a game's bindings, but it uses a locked internal API that I've left alone. The page always says whether you got it now or have to restart the game. I've tried swaps and stick directions on my Frame, but not a layout or a combo with a stick push mid-game, so if one doesn't take, restart the game.
+- Most changes should work mid-game. The add-on compares the bindings the game started with against the ones it would start with now, and makes up the difference by sending your presses and stick pushes as the ones the game is listening for, until the next launch. A job that wasn't on any button when the game started has to wait, because there's no press for it to send, and so does changing what a stick push already did. SteamVR's own binding screen can reload a game's bindings, but that's behind a password SteamVR only gives its own screens ([more on that](#why-some-changes-still-need-a-game-restart)). The page always says whether you got it now or have to restart the game. I've tried swaps and stick directions on my Frame, but not a layout or a combo with a stick push mid-game, so if one doesn't take, restart the game.
 - A layout is an ordinary SteamVR binding, so it stays in place if you switch the add-on off in Manage Add-ons. Removing the add-on puts everything back.
 - I've used the page on my Frame, and what it writes matches SteamVR's own translation, but I haven't played a game on a translated layout yet. If one misbehaves, tap **Developer's**, restart the game and please tell me.
 
@@ -206,6 +208,12 @@ Anything else, like PSVR2, depends on SteamVR mapping one of these bindings acro
 - Hand tracking isn't supported.
 - Offsets pause while the dashboard is open and when no game is running, so your laser pointer comes from where the controller really is. On a Frame that includes streaming from a PC, so if you stream, set your offsets on the PC.
 - The add-on hooks into a part of SteamVR that Valve doesn't officially offer for this, so a SteamVR update could break it. If that happens, switch it off in Manage Add-ons and SteamVR goes back to normal, and look out for an update on the page.
+
+### Why some changes still need a game restart
+
+SteamVR has a way to tell a running game "your buttons changed, load them again", and its own controller binding screen uses it. But it's behind a password: a secret key SteamVR hands only to its own screens, and it turns away anything else that asks. Valve doesn't offer other programs a way to get that key. The only ways I know of mean digging it out of SteamVR's private memory, which any SteamVR update could break, and it's a lock Valve put there on purpose, so I've left it alone.
+
+So the add-on works around it. When you move a job to another button, it sends that button's presses as the ones the game is already listening for, until the game's next launch. That covers most changes. What it can't cover is a job that wasn't on any button when the game started, because there's no press for it to send, so for those the page tells you to restart the game. This is the same on Windows and on the Frame. If Valve ever opens a public way in, UTMTFTM will use it.
 
 ## Problems
 

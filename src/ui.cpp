@@ -22,6 +22,12 @@
 
 namespace fh {
 
+#ifdef _WIN32
+bool g_betaTag = true;
+#else
+bool g_betaTag = false;
+#endif
+
 // ---------------------------------------------------------------- canvas
 Canvas::Canvas(int W, int H) : w(W), h(H) {
   s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
@@ -475,7 +481,12 @@ static bool updateLine(cairo_t* c, std::vector<Button>& btn, double L, double R,
 static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const std::string& game, LiveState live, bool confirmClose, DashPage page) {
   const double L = 44, R = width - 44;
   markTile(c, L, 20, 80, 64);
-  caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
+  const double titleW = caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
+  if (g_betaTag) {
+    const double x = L + 94 + titleW + 16, y = 30, w = 76, h = 26;
+    frame(c, x, y, w, h, SIGNAL, 1, 2);
+    caps(c, x + w / 2 - 2, y + 19, 15, "Beta", SIGNAL, 1, 1, 2.0);
+  }
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
   const int nTabs = 4;
   const double tabX = 456, tabY = 34, tabH = 42, tabW = 104, tabD = tabH * kLean;

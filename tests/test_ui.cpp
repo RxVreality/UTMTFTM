@@ -79,6 +79,43 @@ int main(int argc, char** argv) {
     CHECK(dashKey(m) != dashKey(m2));
   }
 
+  // The Windows beta tag (J4, 14 November, picked draft A of two): a BETA tag after the name on every page's header on
+  // Windows, none on the Frame. Checked by looking for its yellow after the name, none under it, and that it stays clear of
+  // the tabs (they start at x 456).
+  {
+#ifdef _WIN32
+    CHECK(g_betaTag);
+#else
+    CHECK(!g_betaTag);
+#endif
+    const bool was = g_betaTag;
+    for (int d = 0; d <= 1; ++d) {
+      g_betaTag = d == 1;
+      Canvas cv(1200, 760);
+      DashModel m;
+      m.game = "Pavlov VR";
+      m.live = LiveState::Live;
+      std::vector<Button> b;
+      drawDashboard(cv, m, b);
+      cv.savePNG(out + (d ? "/beta_tag_on.png" : "/beta_tag_off.png"));
+      const auto& px = cv.toRGBA();
+      const auto yellow = [&](int x0, int y0, int x1, int y1) {
+        int n = 0;
+        for (int y = y0; y < y1; ++y)
+          for (int x = x0; x < x1; ++x) {
+            const uint8_t* q = &px[(size_t(y) * cv.w + x) * 4];
+            if (q[0] > 200 && q[1] > 150 && q[2] < 80) ++n;
+          }
+        return n;
+      };
+      const int tag = yellow(345, 24, 445, 62), under = yellow(139, 66, 445, 90), tabGap = yellow(445, 24, 456, 62);
+      CHECK((tag > 50) == (d == 1));
+      CHECK(under == 0);
+      CHECK(tabGap == 0);
+    }
+    g_betaTag = was;
+  }
+
   // Decaffeinate: its own tab, with the shake meter.
   {
     auto inBounds = [](const std::vector<Button>& b, const Canvas& cv) {

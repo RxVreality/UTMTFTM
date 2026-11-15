@@ -15,7 +15,9 @@ Fixed:
 - After making a macro with the guided steps, a macro recorded on the advanced Macros page sent you to the Combos page instead of back to choose its button.
 - On the Decaf tab it looked like only one hand was being steadied. That's on purpose: the hand pointing at the menu isn't, so the laser stays sharp. Its side of the page now says so.
 
-Still the same: a few changes only reach a game the next time it starts, like giving a button a job no button had when the game started. Making those live too would mean going through a part of SteamVR that's locked on purpose, so for now the page keeps saying when a restart is needed.
+Still the same: a few changes only reach a game the next time it starts, like giving a button a job no button had when the game started. Making those live too would mean going through a part of SteamVR that's locked on purpose, behind a password SteamVR only gives its own screens, so for now the page keeps saying when a restart is needed. The README's Limitations section has more on why.
+
+The Windows version is now called a beta: in the installer, in Windows' list of apps and at the top of every page. There's more between your hands and the game on a PC (streaming apps, lots of headsets, Windows itself), and it's had less testing than the Frame version, which runs natively on the headset.
 
 **Strength** on the Decaf tab, also MMeNDtal's idea: a slider that makes the step you picked lighter or heavier, from 25% to 150%. If Tuned pushes back on small aiming corrections, try 50%. In the tests, slow moves trail half as far behind there and most of the shake still goes.
 

@@ -11,12 +11,12 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\UTMTFTM"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
-BrandingText "UTMTFTM ${VERSION}"
+BrandingText "UTMTFTM ${VERSION}, beta for Windows"
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
-!define MUI_FINISHPAGE_TITLE "UTMTFTM is installed"
-!define MUI_FINISHPAGE_TEXT "Start SteamVR and open the dashboard. UTMTFTM is the yellow hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them."
+!define MUI_FINISHPAGE_TITLE "UTMTFTM beta is installed"
+!define MUI_FINISHPAGE_TEXT "Start SteamVR and open the dashboard. UTMTFTM is the yellow hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them.$\r$\n$\r$\nThe Windows version is a beta. If something feels off, please open an issue on GitHub and attach the logs from %LOCALAPPDATA%\UTMTFTM."
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -89,7 +89,7 @@ Section
   File /r /x install.cmd /x uninstall.cmd "${STAGE}\*.*"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  WriteRegStr HKCU "${ARP}" "DisplayName" "UTMTFTM"
+  WriteRegStr HKCU "${ARP}" "DisplayName" "UTMTFTM (Windows beta)"
   WriteRegStr HKCU "${ARP}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${ARP}" "Publisher" "The UTMTFTM contributors"
   WriteRegStr HKCU "${ARP}" "InstallLocation" "$INSTDIR"

@@ -69,6 +69,11 @@ struct DashModel {
 // The pages share the dashboard panel. This says which one's showing.
 enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf, Update };
 
+// The Windows version is a beta, the Frame's isn't (J4, 14 November: the Windows build "is still a work in progress ...
+// relative to the native ARM64 Linux one that goes on the Steam Frame"). Every page's header then has a BETA tag after the
+// name: J4 picked that over a line under the name. On by itself on Windows; tests switch it.
+extern bool g_betaTag;
+
 // ---------------------------------------------------------------- a newer version (src/update.h)
 // Every page's header says when there's one, and tapping it ("update_open") opens the Update page (J4, 14 November).
 struct UpdateNote {
