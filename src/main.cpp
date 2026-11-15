@@ -1157,7 +1157,12 @@ struct App {
       if (id == "decaf_part_hands" || id == "decaf_part_sticks" || (page == DashPage::Drift && id.rfind("drift_", 0) == 0)) {
         if (id == "decaf_part_hands") { stickDrift.leave(); page = DashPage::Decaf; statusUntil = {}; }
         else if (id == "decaf_part_sticks") { page = DashPage::Drift; statusUntil = {}; }
-        else stickDrift.click(id, secondsSinceStart());
+        else {
+          // A tap can move the check on too (Check, Skip, Cancel), and the loop only logs the steps it moves itself.
+          const int was = stickDrift.step();
+          stickDrift.click(id, secondsSinceStart());
+          if (stickDrift.step() != was) logf("stick drift: step %d", stickDrift.step());
+        }
         syncDriftStatus();
         confirmUntil = {};
         dashForce = true;
