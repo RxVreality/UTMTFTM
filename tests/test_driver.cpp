@@ -1436,6 +1436,147 @@ int main() {
       printf("at 60000 reports/s, a guess at a ceiling, that's %.4f%% of one CPU core\n", (hooked - bare) * 60000 / 1e9 * 100);
       CHECK(hooked - bare < 500, "the button hook has become expensive");
     }
+
+    // Stick drift (J4, 14 November): a worn left stick that rests up and to the left, 14% out. The driver fixes every report of
+    // it with the numbers the overlay sends (drift.h), so the game gets the middle when it's let go and all of a full push.
+    {
+      fhlive::DriftChannel& dc = shm->drift;
+      CHECK(dc.magic.load() == fhlive::kDriftMagic, "the overlay can see this driver fixes stick drift");
+      CHECK(dc.found[0].load() == 3 && dc.found[1].load() == 3, "it found both hands' sticks, and that they feel a thumb (%u %u)", dc.found[0].load(), dc.found[1].load());
+      const auto setDrift = [&](int hand, const fhlive::DriftSettings& w) {
+        fhlive::seqWriteBegin(dc.seq);
+        dc.want[hand] = w;
+        fhlive::seqWriteEnd(dc.seq);
+      };
+      const auto stick = [&](const char* hand, float x, float y) {
+        inputApi->UpdateScalarComponent(H[std::string(hand) + "/input/thumbstick/x"], x, 0);
+        inputApi->UpdateScalarComponent(H[std::string(hand) + "/input/thumbstick/y"], y, 0);
+      };
+      const auto settle = [&] {  // past the 6 ms a jump out from the middle waits, and a frame of SteamVR's
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        tick();
+      };
+      inputApi->UpdateBooleanComponent(H["L/input/thumbstick/touch"], true, 0);
+      // Off: every report goes through exactly as it came.
+      clearHeard();
+      stick("L", -0.08f, 0.11f);
+      CHECK(lastSaid("L/input/thumbstick/x") == -0.08f && lastSaid("L/input/thumbstick/y") == 0.11f, "off, the game gets the stick exactly as it is");
+
+      fhlive::DriftSettings w{};
+      w.on = 1;
+      w.cx = -0.08f;
+      w.cy = 0.11f;
+      w.dead = 0.08f;
+      w.gate = 0.25f;
+      w.learnPerSec = 0.5f;
+      w.learnMax = 0.2f;
+      setDrift(0, w);
+      clearHeard();
+      stick("L", -0.09f, 0.12f);
+      CHECK(lastSaid("L/input/thumbstick/x") == 0.f && lastSaid("L/input/thumbstick/y") == 0.f, "on, resting with a thumb on it, the game gets the middle (%.3f %.3f)",
+            lastSaid("L/input/thumbstick/x"), lastSaid("L/input/thumbstick/y"));
+      stick("L", -0.05f, 0.08f);
+      CHECK(lastSaid("L/input/thumbstick/x") == 0.f && lastSaid("L/input/thumbstick/y") == 0.f, "and wobbling about where it rests, still the middle");
+      // A full push up.
+      stick("L", -0.08f, 1.0f);
+      settle();
+      stick("L", -0.08f, 1.0f);
+      CHECK(lastSaid("L/input/thumbstick/y") > 0.99f && std::fabs(lastSaid("L/input/thumbstick/x")) < 0.01f, "a full push up is all the way up (%.3f, %.3f)",
+            lastSaid("L/input/thumbstick/x"), lastSaid("L/input/thumbstick/y"));
+      // Half way up, measured from where it rests.
+      stick("L", -0.08f, 0.11f + 0.5f);
+      const float half = lastSaid("L/input/thumbstick/y");
+      CHECK(half > 0.35f && half < 0.6f, "half way up reads about half (%.3f)", half);
+      // A controller that only reports a change: pushed out in one go and held there. The jump waits 6 ms in case it's a spike,
+      // and with no report after that, SteamVR's next frame sends it.
+      stick("L", -0.08f, 0.11f);
+      clearHeard();
+      inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.9f, 0);
+      CHECK(lastSaid("L/input/thumbstick/y") == 0.f, "a jump out from the middle waits a moment, in case it's a spike");
+      settle();
+      CHECK(lastSaid("L/input/thumbstick/y") > 0.8f, "and with no more reports, the next frame sends it anyway (%.3f)", lastSaid("L/input/thumbstick/y"));
+      // A one-report spike, back the next report: the game never sees it.
+      stick("L", -0.08f, 0.11f);
+      settle();
+      clearHeard();
+      inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], -0.08f + 0.2f, 0);
+      inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], -0.08f, 0);
+      settle();
+      bool spiked = false;
+      for (const auto& e : heardNow()) spiked = spiked || ((e.h == H["L/input/thumbstick/x"] || e.h == H["L/input/thumbstick/y"]) && e.v != 0.f);
+      CHECK(!spiked, "a spike from a worn track that's gone the next report never reaches the game");
+      CHECK(dc.spikes[0].load() >= 1, "and it's counted (%u)", dc.spikes[0].load());
+      // Only y reports, x stays still: x's answer changes with y's, and goes again by itself. Pushed right a little, then up.
+      stick("L", -0.08f + 0.3f, 0.11f);
+      settle();
+      stick("L", -0.08f + 0.3f, 0.11f);
+      const float xBefore = lastSaid("L/input/thumbstick/x");
+      std::this_thread::sleep_for(std::chrono::milliseconds(30));
+      inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.11f + 0.6f, 0);
+      settle();
+      inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.11f + 0.6f, 0);
+      const float xAfter = lastSaid("L/input/thumbstick/x");
+      CHECK(xBefore > 0.1f && xAfter > xBefore + 0.01f, "x is sent again when y's push changes its answer, without x reporting (%.3f then %.3f)", xBefore, xAfter);
+      // Thumb off: near where it rests is the middle, even past the dead zone (the gate), and the middle slowly follows it.
+      inputApi->UpdateBooleanComponent(H["L/input/thumbstick/touch"], false, 0);
+      clearHeard();
+      for (int i = 0; i < 100; ++i) {
+        stick("L", -0.08f - 0.1f, 0.11f + 0.08f);  // it's wandered 13% further out
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      CHECK(lastSaid("L/input/thumbstick/x") == 0.f && lastSaid("L/input/thumbstick/y") == 0.f, "thumb off, it's wandered past the dead zone and the game still gets the middle");
+      float learned[2];
+      memcpy(learned, (const void*)dc.learned[0], sizeof learned);
+      CHECK(learned[0] < -0.1f && learned[1] > 0.13f, "and the middle's following it there (%.3f %.3f)", learned[0], learned[1]);
+      inputApi->UpdateBooleanComponent(H["L/input/thumbstick/touch"], true, 0);
+      // The other hand, the other controls: untouched.
+      clearHeard();
+      stick("R", 0.0123f, -0.0456f);
+      inputApi->UpdateScalarComponent(H["L/input/trigger/value"], 0.37f, 0);
+      inputApi->UpdateBooleanComponent(H["L/input/a/click"], true, 0);
+      CHECK(lastSaid("R/input/thumbstick/x") == 0.0123f && lastSaid("R/input/thumbstick/y") == -0.0456f, "the right stick, with no fix of its own, is untouched");
+      CHECK(lastSaid("L/input/trigger/value") == 0.37f && lastSaid("L/input/a/click") == 1.f, "and the left trigger and A are untouched");
+      inputApi->UpdateBooleanComponent(H["L/input/a/click"], false, 0);
+      inputApi->UpdateScalarComponent(H["L/input/trigger/value"], 0.f, 0);
+      CHECK(dc.fixed[0].load() > 0 && dc.fixed[1].load() == 0, "it counts the reports it changed, on the left only");
+      // While the page is open, the overlay gets every report, as said and as sent.
+      dc.measure.store(1);
+      const uint32_t w0 = dc.write[0].load();
+      stick("L", -0.08f, 0.11f + 0.5f);
+      const uint32_t w1 = dc.write[0].load();
+      CHECK(w1 - w0 == 2, "two reports, two samples for the page (%u)", w1 - w0);
+      settle();
+      stick("L", -0.08f, 0.11f + 0.5f);
+      const uint32_t w2 = dc.write[0].load();
+      const fhlive::DriftSample& sm = dc.ring[0][(w2 - 1) % fhlive::kDriftRing];
+      CHECK(sm.seq.load() == w2 && sm.x == -0.08f && std::fabs(sm.y - 0.61f) < 1e-6f && sm.oy > 0.3f && sm.touch == 1, "a sample says what the stick said, what the game got, and the thumb");
+      dc.measure.store(0);
+      // What it costs, fixing every report.
+      {
+        using C = std::chrono::steady_clock;
+        const int N = 2000000;
+        const vr::VRInputComponentHandle_t h = H["L/input/thumbstick/x"];
+        clearHeard();
+        auto t0 = C::now();
+        for (int i = 0; i < N; ++i) fakeInput.FakeInput::UpdateScalarComponent(h, 0.5f, 0);
+        auto t1 = C::now();
+        clearHeard();
+        auto t2 = C::now();
+        for (int i = 0; i < N; ++i) inputApi->UpdateScalarComponent(h, (i & 1) ? 0.5f : 0.52f, 0);
+        auto t3 = C::now();
+        clearHeard();
+        const double bare = std::chrono::duration<double, std::nano>(t1 - t0).count() / N, hooked = std::chrono::duration<double, std::nano>(t3 - t2).count() / N;
+        printf("stick drift on: %.1f ns added to each stick report\n", hooked - bare);
+        CHECK(hooked - bare < 500, "fixing drift has become expensive");
+      }
+      // Off again: exactly as it comes.
+      setDrift(0, fhlive::DriftSettings{});
+      clearHeard();
+      stick("L", -0.0811f, 0.1122f);
+      CHECK(lastSaid("L/input/thumbstick/x") == -0.0811f && lastSaid("L/input/thumbstick/y") == 0.1122f, "switched off, the stick is untouched again");
+      stick("L", 0.f, 0.f);
+      inputApi->UpdateBooleanComponent(H["L/input/thumbstick/touch"], false, 0);
+    }
     {
       std::lock_guard<std::mutex> lock(fakeInput.m);
       fakeInput.heard.clear();
@@ -1449,6 +1590,7 @@ int main() {
   provider->Cleanup();
   CHECK(vtable[1] == originalSlot, "the hook must come out on Cleanup");
   CHECK(shm->decaf.magic.load() == 0, "and the overlay can see smoothing has gone with it");
+  CHECK(shm->drift.magic.load() == 0, "and stick drift fixing");
   for (int i = 0; i < 4; ++i) CHECK(inputVtable[i] == originalInputSlots[i], "button call %d must come out on Cleanup", i);
   p = randPose();
   api->TrackedDevicePoseUpdated(3, p, sizeof p);

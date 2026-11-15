@@ -12,6 +12,8 @@ dist\test_macro.exe || exit /b 1
 dist\test_update.exe || exit /b 1
 if not exist build\decaf mkdir build\decaf
 dist\test_decaf.exe build\decaf || exit /b 1
+if not exist build\drift mkdir build\drift
+dist\test_drift.exe build\drift || exit /b 1
 dist\test_session.exe || exit /b 1
 dist\test_driver.exe || exit /b 1
 dist\test_controllers.exe || exit /b 1
