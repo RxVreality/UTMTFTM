@@ -155,6 +155,49 @@ int main() {
     check(s.state == State::Failed && !s.error.empty(), "no connection says so: " + s.error);
   }
 
+  {
+    // A check that couldn't reach GitHub tries again soon, because a Frame starts UTMTFTM before its Wi-Fi is back (J4's,
+    // 14 November), then every six hours again once one gets through. Each tick waits for the check it started to finish.
+    Updater u(work.u8string());
+    int asked = 0;
+    bool online = false;
+    u.fetch = [&](const std::string&, const std::string& file) {
+      ++asked;
+      if (!online) return false;
+      writeAll(fs::u8path(file), fakeRelease(thisVersion(), std::string(64, '0'), std::string(64, '0'), "Same."));
+      return true;
+    };
+    const auto tickAt = [&](uint64_t ms) {
+      u.tick(ms);
+      for (int i = 0; i < 400 && u.busy(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      return u.status();
+    };
+    const uint64_t t0 = 1000, minute = 60000;
+    Status s = tickAt(t0);
+    check(s.state == State::Failed && asked == 1, "the first check, with no network yet, fails");
+    tickAt(t0 + 30000);
+    check(asked == 1, "it doesn't ask again within half a minute");
+    s = tickAt(t0 + minute + 1);
+    check(asked == 2 && s.state == State::Failed, "it asks again a minute later");
+    tickAt(t0 + minute + 1 + 100000);
+    check(asked == 2, "after two failures it waits two minutes");
+    online = true;
+    const uint64_t t1 = t0 + minute + 1 + 2 * minute + 1;
+    s = tickAt(t1);
+    check(asked == 3 && s.state == State::UpToDate, "and gets through once the network's up");
+    for (uint64_t m = 1; m <= 60; ++m) tickAt(t1 + m * minute);
+    check(asked == 3, "after that it doesn't retry every minute");
+    tickAt(t1 + 6ull * 60 * minute + 1);
+    check(asked == 4, "but checks again six hours later");
+    // Offline for good from here: a minute, 2, 5, 15, then every 30 minutes. Over three hours of ticks a minute apart that's
+    // asks at 0, 1, 3, 8, 23, 53, 83, 113, 143 and 173 minutes.
+    online = false;
+    const uint64_t t2 = t1 + 12ull * 60 * minute + 2;
+    const int before = asked;
+    for (uint64_t m = 0; m <= 180; ++m) tickAt(t2 + m * minute);
+    check(asked - before == 10, "offline for three hours it asks 10 times, never more often than every half hour after the first few: " + std::to_string(asked - before));
+  }
+
   // ---- the real thing, when asked
   const char* net = std::getenv("UTMTFTM_TEST_NET");
   if (net && net[0] == '1') {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 (not out yet)
+
+Fixed:
+
+- On a Steam Frame, UTMTFTM starts as the headset boots, before its Wi-Fi is back, so its first look for a new version failed and the next one was six hours later. A look that fails now tries again a minute later, then after 2, 5, 15 and every 30 minutes until it gets through.
+
 ## 0.6.1
 
 Mostly fixes, from [MMeNDtal](https://github.com/MMeNDtal)'s testing of 0.6.0 on PC VR ([issue #2](https://github.com/RxVreality/UTMTFTM/issues/2)). Thank you.
