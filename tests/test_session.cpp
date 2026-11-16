@@ -348,7 +348,9 @@ int main() {
 
     // Games that weight your hands themselves start lighter (J4, 14 November), from the real list.
     Store w;
-    w.handWeights = Store::loadHandWeights(std::string(UTMTFTM_SOURCE_DIR) + "/input/hand_weights.json");
+    // Read from beside this test, the way the program reads it from beside itself, so the Frame test kit (which has no
+    // source folder) finds it too. Before 0.6.2 this was the build machine's source path: 7 false failures on the headset.
+    w.handWeights = Store::loadHandWeights(platform::exeDir() + "/input/hand_weights.json");
     CHECK(w.handWeight("steam.app.629730") == "weighted" && w.handWeight("steam.app.2981220") == "smooths" && w.handWeight("steam.app.555160").empty(),
           "the list: Blade & Sorcery weights hands, Forefront smooths, Pavlov neither");
     CHECK(w.decafPct("steam.app.629730") == 50 && w.decafLightStart("steam.app.629730") && w.decafPct("steam.app.555160") == 100, "a weighted game starts at 50%%, others as tested");
