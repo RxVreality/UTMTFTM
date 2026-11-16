@@ -2,7 +2,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <psapi.h>
+#include <winhttp.h>
 
 #include <json/json.h>
 
@@ -200,66 +202,70 @@ bool setDriverRegistered(bool on, const std::string& driverDir) {
 }  // namespace platform
 
 // ---------------------------------------------------------------- for the updater (update.h)
+// Asking GitHub goes through WinHTTP, Windows' own web library, inside this program, and a new version only ever reaches
+// the web browser as a link. No other program is started for either, and no installer is fetched or run from here
+// (J4, 15 November, after MMeNDtal's Trojan warning on 0.6.1, whose updater started a hidden curl.exe).
 namespace update {
 
-// One argument as CommandLineToArgvW reads it back: quoted, with quotes and the backslashes before them escaped.
-static std::wstring argQuoted(const std::wstring& a) {
-  std::wstring out = L"\"";
-  size_t slashes = 0;
-  for (wchar_t ch : a) {
-    if (ch == L'\\') { ++slashes; continue; }
-    if (ch == L'"') out.append(slashes * 2 + 1, L'\\');
-    else out.append(slashes, L'\\');
-    slashes = 0;
-    out += ch;
+namespace {
+struct Handle {
+  HINTERNET h = nullptr;
+  ~Handle() { if (h) WinHttpCloseHandle(h); }
+};
+}  // namespace
+
+bool fetchUrl(const std::string& url, const std::string& file) {
+  const std::wstring w = platform::wide(url);
+  URL_COMPONENTS u{};
+  u.dwStructSize = sizeof u;
+  wchar_t host[256], path[2048];
+  u.lpszHostName = host;
+  u.dwHostNameLength = 256;
+  u.lpszUrlPath = path;
+  u.dwUrlPathLength = 2048;
+  if (!WinHttpCrackUrl(w.c_str(), 0, 0, &u) || u.nScheme != INTERNET_SCHEME_HTTPS) return false;
+  const std::wstring agent = platform::wide(std::string("UTMTFTM/") + UTMTFTM_VERSION);
+  Handle session{WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
+  if (!session.h) session.h = WinHttpOpen(agent.c_str(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);  // before 8.1
+  if (!session.h) return false;
+  WinHttpSetTimeouts(session.h, 15000, 15000, 30000, 60000);
+  Handle connect{WinHttpConnect(session.h, host, u.nPort, 0)};
+  if (!connect.h) return false;
+  Handle request{WinHttpOpenRequest(connect.h, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)};
+  if (!request.h) return false;
+  const wchar_t* accept = L"Accept: application/vnd.github+json";
+  if (!WinHttpSendRequest(request.h, accept, DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(request.h, nullptr)) return false;
+  DWORD code = 0, size = sizeof code;
+  if (!WinHttpQueryHeaders(request.h, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size, WINHTTP_NO_HEADER_INDEX) ||
+      code != 200)
+    return false;
+  std::string body;
+  for (;;) {
+    DWORD ready = 0;
+    if (!WinHttpQueryDataAvailable(request.h, &ready)) return false;
+    if (ready == 0) break;
+    if (body.size() + ready > (64u << 20)) return false;  // nothing it asks for is anywhere near this
+    const size_t at = body.size();
+    body.resize(at + ready);
+    DWORD got = 0;
+    if (!WinHttpReadData(request.h, body.data() + at, ready, &got)) return false;
+    body.resize(at + got);
   }
-  out.append(slashes * 2, L'\\');
-  return out + L"\"";
-}
-
-static bool launch(const std::vector<std::string>& args, DWORD flags, PROCESS_INFORMATION& pi) {
-  if (args.empty()) return false;
-  std::wstring exe = platform::wide(args[0]);
-  std::replace(exe.begin(), exe.end(), L'/', L'\\');
-  std::wstring cmd;
-  for (size_t i = 0; i < args.size(); ++i) {
-    std::wstring a = i == 0 ? exe : platform::wide(args[i]);
-    if (i) cmd += L" ";
-    cmd += argQuoted(a);
-  }
-  STARTUPINFOW si{};
-  si.cb = sizeof si;
-  pi = PROCESS_INFORMATION{};
-  return CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &si, &pi) != 0;
-}
-
-int runHidden(const std::vector<std::string>& args, int timeoutMs) {
-  PROCESS_INFORMATION pi;
-  if (!launch(args, CREATE_NO_WINDOW, pi)) return -1;
-  DWORD code = DWORD(-1);
-  if (WaitForSingleObject(pi.hProcess, DWORD(timeoutMs)) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
-  else TerminateProcess(pi.hProcess, 1);
-  CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
-  return int(code);
-}
-
-bool startDetached(const std::vector<std::string>& args) {
-  PROCESS_INFORMATION pi;
-  if (!launch(args, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, pi)) return false;
-  CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
-  return true;
-}
-
-// Windows 10 and 11 have had it since 2018.
-std::string curlPath() {
-  wchar_t sys[MAX_PATH];
-  const UINT n = GetSystemDirectoryW(sys, MAX_PATH);
-  if (!n || n >= MAX_PATH) return "";
-  const std::string path = platform::utf8(sys) + "\\curl.exe";
   std::error_code ec;
-  return fs::exists(fs::u8path(path), ec) ? path : "";
+  fs::remove(fs::u8path(file), ec);
+  std::ofstream out(fs::u8path(file), std::ios::binary);
+  out << body;
+  return bool(out);
+}
+
+bool openInBrowser(const std::string& url) {
+  if (!ourLink(url)) return false;
+  // The shell may hand this to an extension, so this thread needs COM, as ShellExecute's documentation asks.
+  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  const std::wstring w = platform::wide(url);
+  const bool ok = INT_PTR(ShellExecuteW(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+  if (SUCCEEDED(com)) CoUninitialize();
+  return ok;
 }
 
 }  // namespace update

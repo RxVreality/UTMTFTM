@@ -187,20 +187,17 @@ Updater::Updater(std::string dataDir) : dir_(std::move(dataDir)) {
   windows = false;
 #endif
   apiUrl = std::string("https://api.github.com/repos/") + kRepo + "/releases/latest";
-  fetch = [](const std::string& url, const std::string& file) {
-    const std::string curl = curlPath();
-    if (curl.empty()) return false;
-    std::error_code ec;
-    fs::remove(fs::u8path(file), ec);
-    const std::string agent = std::string("UTMTFTM/") + thisVersion();
-    return runHidden({curl, "-fsSL", "--max-time", "120", "--retry", "2", "-A", agent, "-H", "Accept: application/vnd.github+json", "-o", file, url}, 150000) == 0;
-  };
-  start = [](const std::string& file, bool win) {
-    // Windows: the installer puts the new files in beside the running ones (/UPDATE leaves SteamVR alone). The Frame: its
-    // install script fetches and checks the build itself, then puts it in the same way (--update).
-    if (win) return runHidden({file, "/S", "/UPDATE"}, 180000) == 0;
+  fetch = [](const std::string& url, const std::string& file) { return fetchUrl(url, file); };
+#ifdef _WIN32
+  start = [](const std::string&, bool) { return false; };  // Windows never starts an installer
+  open = [](const std::string& url) { return openInBrowser(url); };
+#else
+  start = [](const std::string& file, bool) {
+    // The Frame: its install script fetches and checks the build itself, then puts it in next to the running one (--update).
     return runHidden({"/bin/sh", file, "--update"}, 300000) == 0;
   };
+  open = [](const std::string&) { return false; };
+#endif
   const char* off = std::getenv("UTMTFTM_NO_UPDATE_CHECK");
   if (off && off[0] && off[0] != '0') s_.state = State::Off;
 }
@@ -236,7 +233,8 @@ void Updater::checkNow() {
   const State now = status().state;
   if (now == State::Off || now == State::Installed || busy_.exchange(true)) return;
   join();
-  set([](Status& s) { s.state = State::Checking; s.error.clear(); });
+  // Opened (Windows): the page keeps saying what to do on the desktop while it looks.
+  if (now != State::Opened) set([](Status& s) { s.state = State::Checking; s.error.clear(); });
   worker_ = std::thread([this] {
     std::error_code ec;
     fs::create_directories(fs::u8path(dir_) / "update", ec);
@@ -245,6 +243,7 @@ void Updater::checkNow() {
     const bool got = fetch(apiUrl, file) && parseRelease(readAll(file), r);
     set([&](Status& s) {
       if (s.state == State::Installed) return;  // already done; a later check doesn't take that back
+      if (s.state == State::Opened && (!got || r.version == s.latest.version)) return;  // still the one the browser was given
       if (!got) {
         s.state = State::Failed;
         s.error = "Couldn't reach GitHub to check for a newer version.";
@@ -262,16 +261,38 @@ void Updater::checkNow() {
 
 void Updater::install() {
   const Status now = status();
-  if (now.state != State::Available || busy_.exchange(true)) return;
+  const bool again = windows && now.state == State::Opened;
+  if ((now.state != State::Available && !again) || busy_.exchange(true)) return;
   join();
+  if (windows) {
+    // Only GitHub's link goes anywhere: to the web browser, which downloads it as it would any download. You open the
+    // installer yourself. Nothing is fetched or started here.
+    worker_ = std::thread([this, now] {
+      const Asset* a = assetFor(now.latest, true);
+      std::string url = openPage || !a ? now.latest.page : a->url;
+      if (!ourLink(url)) url = std::string("https://github.com/") + kRepo + "/releases/latest";
+      const bool ok = open(url);
+      set([&](Status& s) {
+        if (ok) {
+          s.state = State::Opened;
+          s.opened = url;
+          s.error.clear();
+        } else {
+          s.error = std::string("Couldn't open your web browser. Get it from github.com/") + kRepo + ", under Releases.";
+        }
+      });
+      busy_ = false;
+    });
+    return;
+  }
   set([](Status& s) { s.state = State::Downloading; s.error.clear(); });
   worker_ = std::thread([this, now] {
     const auto fail = [&](const std::string& why) {
       set([&](Status& s) { s.state = State::Available; s.error = why; });
       busy_ = false;
     };
-    const Asset* a = assetFor(now.latest, windows);
-    if (!a) return fail("This release has no " + std::string(windows ? "Windows installer" : "Steam Frame build") + " yet. Try again in a few minutes.");
+    const Asset* a = assetFor(now.latest, false);
+    if (!a) return fail("This release has no Steam Frame build yet. Try again in a few minutes.");
     std::error_code ec;
     fs::create_directories(fs::u8path(dir_) / "update", ec);
     const std::string file = (fs::u8path(dir_) / "update" / a->name).u8string();
@@ -287,7 +308,7 @@ void Updater::install() {
       return fail("The download didn't match what GitHub lists, so it wasn't installed. Try again.");
     }
     set([](Status& s) { s.state = State::Installing; });
-    if (!start(file, windows)) return fail("The installer stopped before it finished. Try again, or get it from the GitHub page.");
+    if (!start(file, false)) return fail("The installer stopped before it finished. Try again, or get it from the GitHub page.");
     set([](Status& s) { s.state = State::Installed; });
     busy_ = false;
   });

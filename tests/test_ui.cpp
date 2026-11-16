@@ -198,15 +198,53 @@ int main(int argc, char** argv) {
         need.why = "SteamVR's last update changed how bindings reload. Live changes need 0.6.2.";
         drawUpdate(cv, need, ub);
         cv.savePNG(out + "/update_page_needed.png");
-        UpdateModel busy = u;
+        // Windows only asks; the web browser fetches and you open the installer (J4, 15 November, after MMeNDtal's Trojan
+        // warning on 0.6.1). Both drafts, before and after the button, and the Frame's own one-tap update.
+        const auto apart = [](const std::vector<Button>& b) {
+          for (size_t i = 0; i < b.size(); ++i)
+            for (size_t j = i + 1; j < b.size(); ++j) {
+              const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x),
+                           down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+              if (across > 24 && down > 2) return false;
+            }
+          return true;
+        };
+        for (int draft : {0, 1}) {
+          g_updateDraft = draft;
+          const std::string tag = draft ? "B_page" : "A_download";
+          drawUpdate(cv, u, ub);
+          cv.savePNG(out + "/update_win_" + tag + "_ready.png");
+          CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
+          drawUpdate(cv, need, ub);
+          cv.savePNG(out + "/update_win_" + tag + "_needed.png");
+          CHECK(inBounds(ub, cv) && apart(ub));
+          UpdateModel opened = u;
+          opened.step = UpdateModel::Opened;
+          drawUpdate(cv, opened, ub);
+          cv.savePNG(out + "/update_win_" + tag + "_opened.png");
+          CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
+          CHECK(updateKey(opened) != updateKey(u));
+          UpdateModel noBrowser = opened;
+          noBrowser.error = "Couldn't open your web browser. Get it from github.com/RxVreality/UTMTFTM, under Releases.";
+          drawUpdate(cv, noBrowser, ub);
+          cv.savePNG(out + "/update_win_" + tag + "_no_browser.png");
+          CHECK(inBounds(ub, cv) && apart(ub));
+        }
+        g_updateDraft = 0;
+        UpdateModel frame = u;
+        frame.windows = false;
+        drawUpdate(cv, frame, ub);
+        cv.savePNG(out + "/update_frame_ready.png");
+        CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go"));
+        UpdateModel busy = frame;
         busy.step = UpdateModel::Downloading;
         drawUpdate(cv, busy, ub);
         cv.savePNG(out + "/update_page_downloading.png");
-        UpdateModel failed = u;
+        UpdateModel failed = frame;
         failed.error = "The download didn't match what GitHub lists, so it wasn't installed. Try again.";
         drawUpdate(cv, failed, ub);
         cv.savePNG(out + "/update_page_failed.png");
-        UpdateModel done = u;
+        UpdateModel done = frame;
         done.step = UpdateModel::Installed;
         setUpdateNote({UpdateNote::Installed, "0.6.2"});
         drawUpdate(cv, done, ub);

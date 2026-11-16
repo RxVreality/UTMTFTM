@@ -351,6 +351,7 @@ struct App {
     in.init();
     std::string gpu;
     logf("%s", platform::raisePriority().c_str());
+    updater.openPage = g_updateDraft == 1;
     loopMin.start();
     if (uploader.init(&gpu)) logf("overlay images via the GPU: %s", gpu.c_str());
     else logf("no GPU path (%s): falling back to SetOverlayRaw", gpu.c_str());
@@ -414,7 +415,8 @@ struct App {
     UpdateNote n;
     n.version = s.latest.version;
     switch (s.state) {
-      case update::State::Available: n.kind = s.needed ? UpdateNote::Needed : UpdateNote::Ready; break;
+      case update::State::Available:
+      case update::State::Opened: n.kind = s.needed ? UpdateNote::Needed : UpdateNote::Ready; break;  // not in until you've run it
       case update::State::Downloading:
       case update::State::Installing: n.kind = UpdateNote::Busy; break;
       case update::State::Installed: n.kind = UpdateNote::Installed; break;
@@ -423,7 +425,8 @@ struct App {
     setUpdateNote(n);
     logf("update: %s, this is %s, the newest is %s%s%s", s.state == update::State::Available ? "one's ready" : s.state == update::State::UpToDate ? "up to date"
          : s.state == update::State::Checking ? "checking" : s.state == update::State::Downloading ? "downloading" : s.state == update::State::Installing ? "installing"
-         : s.state == update::State::Installed ? "installed" : s.state == update::State::Off ? "off" : "couldn't check",
+         : s.state == update::State::Installed ? "installed" : s.state == update::State::Opened ? ("handed " + s.opened + " to the web browser").c_str()
+         : s.state == update::State::Off ? "off" : "couldn't check",
          update::thisVersion(), s.latest.version.empty() ? "unknown" : s.latest.version.c_str(), s.needed ? ", and this one may not work properly any more" : "",
          s.error.empty() ? "" : (" (" + s.error + ")").c_str());
     dashForce = true;
@@ -442,7 +445,7 @@ struct App {
     m.why = s.latest.why;
     m.error = s.error;
     m.step = s.state == update::State::Downloading ? UpdateModel::Downloading : s.state == update::State::Installing ? UpdateModel::Installing
-           : s.state == update::State::Installed ? UpdateModel::Installed : UpdateModel::Ready;
+           : s.state == update::State::Installed ? UpdateModel::Installed : s.state == update::State::Opened ? UpdateModel::Opened : UpdateModel::Ready;
 #ifndef _WIN32
     m.windows = false;
 #endif

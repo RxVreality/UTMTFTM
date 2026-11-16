@@ -4,6 +4,7 @@
 
 Fixed:
 
+- On Windows, 0.6.1's Update button downloaded the new version and ran its installer out of sight, and every check for a new version started a hidden copy of curl. That's how a Trojan downloader behaves, and [MMeNDtal](https://github.com/MMeNDtal) got a Trojan warning on 0.6.1. UTMTFTM now only asks GitHub which version is newest, through Windows' own web library, without starting any other program. The Update page hands the download to your web browser and you open the installer yourself, as you did the first time. The installer now updates in place when SteamVR is open, so you don't have to quit it. Nothing changes on the Frame.
 - On a Steam Frame, UTMTFTM starts as the headset boots, before its Wi-Fi is back, so its first look for a new version failed and the next one was six hours later. A look that fails now tries again a minute later, then after 2, 5, 15 and every 30 minutes until it gets through.
 
 ## 0.6.1

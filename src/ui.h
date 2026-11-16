@@ -91,11 +91,18 @@ struct UpdateModel {
   std::string summary;          // the release notes' first paragraph
   bool needed = false;          // the release says this version may not work properly any more
   std::string why;              // and why, in its words
-  enum Step { Ready, Downloading, Installing, Installed } step = Ready;
+  // Opened: Windows only. UTMTFTM handed the download to your web browser, and you open the installer yourself.
+  enum Step { Ready, Downloading, Installing, Installed, Opened } step = Ready;
   std::string error;            // the last try failed, in words
+  // On Windows UTMTFTM only asks GitHub what's newest. Getting it is your web browser's job, and you open the installer
+  // yourself, as the first time (J4, 15 November): a program that fetches an installer and runs it out of sight is what
+  // antivirus programs warn about, and MMeNDtal got a Trojan warning on 0.6.1. The Frame still updates itself.
   bool windows = true;
   std::string hover, down;
 };
+// Drafts for J4 (15 November), until one is picked: 0 the button downloads the installer through the web browser,
+// 1 it opens the release's page on GitHub.
+extern int g_updateDraft;
 std::string updateKey(const UpdateModel& m);
 void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& buttons);
 

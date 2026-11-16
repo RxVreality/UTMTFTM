@@ -16,14 +16,23 @@ BrandingText "UTMTFTM ${VERSION}, beta for Windows"
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
 !define MUI_FINISHPAGE_TITLE "UTMTFTM beta is installed"
-!define MUI_FINISHPAGE_TEXT "Start SteamVR and open the dashboard. UTMTFTM is the yellow hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them.$\r$\n$\r$\nThe Windows version is a beta. If something feels off, please open an issue on GitHub and attach the logs from %LOCALAPPDATA%\UTMTFTM."
+; What to do next: start SteamVR, or after an update in place, restart it (.onInit says which).
+Var Finish
+!define MUI_FINISHPAGE_TEXT "$Finish$\r$\n$\r$\nThe Windows version is a beta. If something feels off, please open an issue on GitHub and attach the logs from %LOCALAPPDATA%\UTMTFTM."
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-; SteamVR keeps the driver file locked while it runs, so it has to be closed before any of this.
+; $0 is "0" when SteamVR's server is running.
+Function SteamVRRunning
+  nsExec::ExecToStack 'cmd /c tasklist /nh /fi "imagename eq vrserver.exe" | find /i "vrserver.exe"'
+  Pop $0
+  Pop $1
+FunctionEnd
+
+; SteamVR keeps the driver file locked while it runs, so a first install or an uninstall needs it closed.
 !macro WaitForSteamVR un
 Function ${un}WaitForSteamVR
   retry:
@@ -39,14 +48,18 @@ FunctionEnd
 !insertmacro WaitForSteamVR ""
 !insertmacro WaitForSteamVR "un."
 
-; /UPDATE: started by UTMTFTM's own Update button, with SteamVR running and the add-on loaded. Windows lets a file that's
-; in use be renamed, so the running ones move aside and the new ones go in where they were. SteamVR uses them from its next
-; start, and nothing is closed. /NOREGISTER leaves SteamVR's lists alone, for the tests.
+; Updating with SteamVR running and the add-on loaded: Windows lets a file that's in use be renamed, so the running ones
+; move aside and the new ones go in where they were. SteamVR uses them from its next start, and nothing is closed.
+; From 0.6.2 that's what happens when you open this yourself while SteamVR runs and UTMTFTM is already installed: UTMTFTM's
+; Update page only hands this file to the web browser, and you open it, SteamVR open or not (J4, 15 November).
+; /UPDATE: 0.6.1's Update button, which started this itself, out of sight. Kept so 0.6.1 can still update to this.
+; /NOREGISTER leaves SteamVR's lists alone, for the tests.
 Var Update
 Var NoRegister
 Function .onInit
   StrCpy $Update ""
   StrCpy $NoRegister ""
+  StrCpy $Finish "Start SteamVR and open the dashboard. UTMTFTM is the yellow hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them."
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "/UPDATE" $R1
@@ -56,8 +69,18 @@ Function .onInit
   ${GetOptions} $R0 "/NOREGISTER" $R1
   IfErrors +2
     StrCpy $NoRegister "1"
-  StrCmp $Update "1" +2
+  StrCmp $Update "1" inplace
+  Call SteamVRRunning
+  StrCmp $0 "0" 0 done
+  IfFileExists "$INSTDIR\utmtftm.exe" 0 wait
+    StrCpy $Update "1"
+    Goto inplace
+  wait:
     Call WaitForSteamVR
+    Goto done
+  inplace:
+    StrCpy $Finish "UTMTFTM ${VERSION} is in, next to the one SteamVR is using now. Restart SteamVR when you're ready, and ${VERSION} starts with it.$\r$\n$\r$\nYour settings, layouts and macros stay as they are."
+  done:
 FunctionEnd
 
 ; Moves a file that may be in use out of the way, under a name no earlier update used, after clearing earlier ones that

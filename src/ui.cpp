@@ -2019,9 +2019,12 @@ void drawIcon(Canvas& cv) {
 }
 
 // ---------------------------------------------------------------- the Update page
+int g_updateDraft = 0;
+
 std::string updateKey(const UpdateModel& m) {
   return m.game + "|" + std::to_string(int(m.live)) + std::to_string(m.confirmClose) + "|" + m.current + "|" + m.latest + "|" +
-         std::to_string(m.needed) + m.why + "|" + std::to_string(int(m.step)) + "|" + m.error + "|fx:" + m.hover + "," + m.down;
+         std::to_string(m.needed) + m.why + "|" + std::to_string(int(m.step)) + std::to_string(m.windows) + std::to_string(g_updateDraft) + "|" + m.error +
+         "|fx:" + m.hover + "," + m.down;
 }
 
 // Words broken into lines that fit, at most a few of them, the last one cut short if there's more.
@@ -2051,9 +2054,46 @@ void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
   pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Update);
 
   const bool done = m.step == UpdateModel::Installed;
+  const bool page = g_updateDraft == 1;
+  const std::string setup = "UTMTFTM-Setup-" + m.latest + ".exe";
+
+  // Windows, after the button: what to do on the desktop, in place of what's new.
+  if (m.windows && m.step == UpdateModel::Opened) {
+    text(c, L, 138, 27, "Sent to your web browser", true, PAPER);
+    text(c, L, 164, 18, "Look on the desktop. SteamVR's dashboard can show it too.", false, DIM, 1, 0, R - L);
+    hline(c, L, R, 208);
+    const std::string steps[3] = {
+        page ? "Your web browser shows the " + m.latest + " page on GitHub." : "Your web browser downloads " + setup + ".",
+        page ? "Under Assets, click " + setup + ", then open it. SteamVR can stay open." : "Open it and click through. SteamVR can stay open.",
+        "Restart SteamVR when you're ready, and " + m.latest + " starts with it."};
+    for (int i = 0; i < 3; ++i) {
+      const double sy = 262 + i * 76.0;
+      frame(c, L, sy - 34, 48, 48, SIGNAL, 1, 2);
+      caps(c, L + 24, sy, 24, std::to_string(i + 1), SIGNAL, 1, 1, 0);
+      text(c, L + 72, sy - 2, 22, steps[i], i == 1, PAPER, 1, 0, R - L - 72);
+    }
+    const double by = 572, bh = 64;
+    hline(c, L, R, by - 16);
+    button(c, btn, L, by, 300, bh, "update_close", "Done", Primary);
+    button(c, btn, L + 320, by, 300, bh, "update_go", "Open it again", Outline);
+    text(c, L + 650, by + 26, 17, "Nothing came up? It's on GitHub:", false, DIM, 1, 0, R - L - 650);
+    text(c, L + 650, by + 50, 17, "github.com/RxVreality/UTMTFTM, Releases.", false, DIM, 1, 0, R - L - 650);
+    hline(c, L, R, 700);
+    const double baseY = 734;
+    if (!m.error.empty()) {
+      lamp(c, L, baseY - 14, 14, ALERT);
+      text(c, L + 28, baseY, 20, m.error, true, PAPER, 1, 0, R - L - 28);
+    } else {
+      text(c, L, baseY, 19, "UTMTFTM never downloads or starts the installer itself. That's yours to do, like the first time.", false, DIM, 1, 0, R - L);
+    }
+    g_hover = g_down = nullptr;
+    return;
+  }
+
   text(c, L, 138, 27, done ? "UTMTFTM " + m.latest + " is installed" : m.needed ? "Update UTMTFTM to keep it working" : "UTMTFTM " + m.latest + " is ready", true, PAPER);
   text(c, L, 164, 18, done ? "It starts the next time SteamVR does. Your settings, layouts and macros stay as they are."
-                           : "You have " + m.current + ". It takes about a minute, and your settings, layouts and macros stay as they are.",
+                      : m.windows ? "You have " + m.current + ". Your settings, layouts and macros stay as they are."
+                                  : "You have " + m.current + ". It takes about a minute, and your settings, layouts and macros stay as they are.",
        false, DIM, 1, 0, R - L);
 
   double y = 200;
@@ -2075,13 +2115,19 @@ void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
     lamp(c, L, by + 22, 16, LIVE);
     text(c, L + 32, by + 38, 22, "Restart SteamVR when you're ready, and " + m.latest + " starts with it.", true, PAPER, 1, 0, R - L - 290);
     button(c, btn, R - 240, by, 240, bh, "update_close", "Done", Outline);
+  } else if (m.windows) {
+    button(c, btn, L, by, 380, bh, "update_go", !m.error.empty() ? "Try again" : page ? "Open the page" : "Download", m.needed ? Danger : Primary);
+    button(c, btn, L + 400, by, 220, bh, "update_close", "Not now", Outline);
+    text(c, L + 650, by + 26, 17, page ? "Opens " + m.latest + "'s page on GitHub in your web browser." : "Your web browser downloads the installer.", false, DIM, 1, 0,
+         R - L - 650);
+    text(c, L + 650, by + 50, 17, page ? "Download the installer there and open it." : "Open it on the desktop. SteamVR can stay open.", false, DIM, 1, 0,
+         R - L - 650);
   } else {
     const bool busy = m.step == UpdateModel::Downloading || m.step == UpdateModel::Installing;
     const std::string go = m.step == UpdateModel::Downloading ? "Downloading..." : m.step == UpdateModel::Installing ? "Installing..." : !m.error.empty() ? "Try again" : "Update now";
     button(c, btn, L, by, 380, bh, "update_go", go, m.needed ? Danger : Primary, !busy);
     button(c, btn, L + 400, by, 220, bh, "update_close", "Not now", Outline, !busy);
-    const std::string after = m.windows ? "SteamVR keeps running. The new version starts the next time you start SteamVR."
-                                        : "SteamVR keeps running. Restart SteamVR or the headset to start the new version.";
+    const std::string after = "SteamVR keeps running. Restart SteamVR or the headset to start the new version.";
     text(c, L + 650, by + 26, 17, after.substr(0, after.find('.') + 1), false, DIM, 1, 0, R - L - 650);
     text(c, L + 650, by + 50, 17, after.substr(after.find('.') + 2), false, DIM, 1, 0, R - L - 650);
   }

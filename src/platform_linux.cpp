@@ -241,6 +241,15 @@ static pid_t spawn(const std::vector<std::string>& args) {
   _exit(127);
 }
 
+bool fetchUrl(const std::string& url, const std::string& file) {
+  const std::string curl = curlPath();
+  if (curl.empty()) return false;
+  std::error_code ec;
+  fs::remove(fs::u8path(file), ec);
+  const std::string agent = std::string("UTMTFTM/") + thisVersion();
+  return runHidden({curl, "-fsSL", "--max-time", "120", "--retry", "2", "-A", agent, "-H", "Accept: application/vnd.github+json", "-o", file, url}, 150000) == 0;
+}
+
 int runHidden(const std::vector<std::string>& args, int timeoutMs) {
   const pid_t pid = spawn(args);
   if (pid < 0) return -1;

@@ -51,11 +51,17 @@ It installs into your home folder and doesn't need sudo. At the end it restarts 
 
 ### Updates
 
-From 0.6.1 on, UTMTFTM checks for a newer version by itself. When there is one, the line along the bottom of the page says so, with an **Update** button. That button downloads the new version, checks it's exactly the file on the release page, and installs it while you play. Nothing closes, and the new version starts the next time you start SteamVR. Your offsets, layouts, combos and macros stay as they are.
+UTMTFTM checks for a newer version by itself. When there is one, the line along the bottom of the page says so, with an **Update** button.
+
+On Windows, the Update page hands the download to your web browser, and you open the installer yourself, the same as the first time. SteamVR can stay open while you do: the new version goes in next to the one SteamVR is using and starts the next time you start SteamVR. UTMTFTM itself never downloads or runs an installer. 0.6.1 did both out of sight, which is exactly what a Trojan does, and an antivirus said so.
+
+On the Steam Frame, the button downloads the new version, checks it's exactly the file on the release page, and installs it while you play. Restart SteamVR or the headset to start using it.
+
+Either way your offsets, layouts, combos and macros stay as they are.
 
 If a SteamVR update ever breaks something and a fixed version is out, the line turns red and says this version may not work properly any more.
 
-To check, it asks GitHub which release is newest when it starts and every six hours after that, the same way a browser would open the releases page. There's no account and nothing else goes with it. To turn it off, set the environment variable `UTMTFTM_NO_UPDATE_CHECK=1`.
+To check, it asks GitHub which release is newest when it starts and every six hours after that, the same way a browser would open the releases page. On Windows it asks through Windows' own web library, without starting any other program. There's no account and nothing else goes with it. To turn it off, set the environment variable `UTMTFTM_NO_UPDATE_CHECK=1`.
 
 You'll need to install 0.6.1 itself by hand, the way you did the first time.
 

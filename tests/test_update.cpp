@@ -1,5 +1,7 @@
-// The updater, with no network: versions, GitHub's real answer for v0.6.0, the checksum, and a whole check and install
-// against a pretend GitHub. UTMTFTM_TEST_NET=1 also asks the real GitHub, with the real curl.
+// The updater, with no network: versions, GitHub's real answer for v0.6.0, the checksum, and a whole check and update
+// against a pretend GitHub. On Windows that ends at the web browser; the Frame fetches and installs. Also that the Windows
+// program has nothing left of 0.6.1's hidden curl or silent install (J4, 15 November, after MMeNDtal's Trojan warning).
+// UTMTFTM_TEST_NET=1 also asks the real GitHub, and on Windows proves the check starts no other program.
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -8,6 +10,12 @@
 #include <thread>
 
 #include "update.h"
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 using namespace fh::update;
@@ -42,16 +50,18 @@ static Status waitFor(Updater& u, State not1, State not2 = State::Off) {
 }
 
 // A release answer with one Windows installer and one Frame script, whose contents and checksums are given.
-static std::string fakeRelease(const std::string& version, const std::string& exeSha, const std::string& shSha, const std::string& notes) {
+static std::string fakeRelease(const std::string& version, const std::string& exeSha, const std::string& shSha, const std::string& notes,
+                               const std::string& dlBase = "") {
+  const std::string dl = dlBase.empty() ? "https://github.com/RxVreality/UTMTFTM/releases/download/v" + version + "/" : dlBase;
   std::string body = notes;
   for (size_t at = body.find('"'); at != std::string::npos; at = body.find('"', at + 2)) body.insert(at, "\\");
   return "{\"tag_name\": \"v" + version + "\", \"name\": \"UTMTFTM v" + version + "\", \"draft\": false, \"prerelease\": false, " +
          "\"html_url\": \"https://github.com/RxVreality/UTMTFTM/releases/tag/v" + version + "\", \"body\": \"" + body + "\", \"assets\": [" +
-         "{\"name\": \"UTMTFTM-Setup-" + version + ".exe\", \"size\": 5, \"digest\": \"sha256:" + exeSha + "\", \"browser_download_url\": \"https://example.invalid/setup.exe\"}," +
-         "{\"name\": \"install-frame.sh\", \"size\": 5, \"digest\": \"sha256:" + shSha + "\", \"browser_download_url\": \"https://example.invalid/install-frame.sh\"}]}";
+         "{\"name\": \"UTMTFTM-Setup-" + version + ".exe\", \"size\": 5, \"digest\": \"sha256:" + exeSha + "\", \"browser_download_url\": \"" + dl + "UTMTFTM-Setup-" + version + ".exe\"}," +
+         "{\"name\": \"install-frame.sh\", \"size\": 5, \"digest\": \"sha256:" + shSha + "\", \"browser_download_url\": \"" + dl + "install-frame.sh\"}]}";
 }
 
-int main() {
+int main(int, char** argv) {
   // ---- versions
   check(compareVersions("0.6.0", "0.6.1") < 0 && compareVersions("v0.6.1", "0.6.1") == 0 && compareVersions("0.10.0", "0.9.9") > 0, "versions compare by number, v or not");
   check(compareVersions("0.6.1-test", "0.6.1") < 0 && compareVersions("0.6.1-test", "0.6.0") > 0, "a test build comes after the last release and before its own");
@@ -93,16 +103,19 @@ int main() {
   int asked = 0;
   std::string started;
   {
+    // Windows: the check finds it, and the button only hands the installer's link to the web browser. Nothing is fetched
+    // but GitHub's answer, and nothing is started.
     Updater u(work.u8string());
+    std::vector<std::string> opened;
+    bool browser = true;
     u.fetch = [&](const std::string& url, const std::string& file) {
       ++asked;
-      if (url == u.apiUrl) writeAll(fs::u8path(file), answer);
-      else if (url.find("setup.exe") != std::string::npos) writeAll(fs::u8path(file), exe);
-      else if (url.find("install-frame.sh") != std::string::npos) writeAll(fs::u8path(file), sh);
-      else return false;
+      if (url != u.apiUrl) return false;
+      writeAll(fs::u8path(file), answer);
       return true;
     };
     u.start = [&](const std::string& file, bool) { started = file; return true; };
+    u.open = [&](const std::string& url) { opened.push_back(url); return browser; };
     u.windows = true;
     u.tick(1000);
     Status s = waitFor(u, State::Idle, State::Checking);
@@ -111,9 +124,83 @@ int main() {
     u.tick(2000);
     check(asked == 1, "and it doesn't ask again straight away");
     u.install();
-    s = waitFor(u, State::Available, State::Downloading);
+    s = waitFor(u, State::Available);
+    check(s.state == State::Opened && opened.size() == 1 && opened[0] == "https://github.com/RxVreality/UTMTFTM/releases/download/v9.0.0/UTMTFTM-Setup-9.0.0.exe" &&
+              s.opened == opened[0],
+          "MMeNDtal, 0.6.1 (Trojan warning): Windows hands the installer's link to the web browser: " + (opened.empty() ? std::string("nothing") : opened[0]));
+    check(asked == 1 && started.empty(), "and fetches nothing more and starts nothing itself");
+    u.tick(1000 + 7ull * 60 * 60 * 1000);
+    for (int i = 0; i < 400 && (u.busy() || asked < 2); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    s = u.status();
+    check(s.state == State::Opened && asked == 2, "a later check of the same version leaves the page saying what to do on the desktop");
+    u.install();
+    for (int i = 0; i < 400 && (u.busy() || opened.size() < 2); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    check(opened.size() == 2 && u.status().state == State::Opened, "Open it again hands it over again");
+    browser = false;
+    u.install();
+    for (int i = 0; i < 400 && (u.busy() || u.status().error.empty()); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    s = u.status();
+    check(s.error.find("Couldn't open your web browser") != std::string::npos && s.error.find("github.com/RxVreality/UTMTFTM") != std::string::npos,
+          "no web browser says so, and where to get it: " + s.error);
+  }
+  {
+    // Draft B: the release's page. And a link that isn't this project's on GitHub never reaches the browser.
+    Updater u(work.u8string());
+    std::vector<std::string> opened;
+    u.fetch = [&](const std::string& url, const std::string& file) {
+      writeAll(fs::u8path(file), answer);
+      return url == u.apiUrl;
+    };
+    u.open = [&](const std::string& url) { opened.push_back(url); return true; };
+    u.windows = true;
+    u.openPage = true;
+    u.checkNow();
+    waitFor(u, State::Idle, State::Checking);
+    u.install();
+    waitFor(u, State::Available);
+    check(opened.size() == 1 && opened[0] == "https://github.com/RxVreality/UTMTFTM/releases/tag/v9.0.0",
+          "draft B opens the release's page: " + (opened.empty() ? std::string() : opened[0]));
+    Updater v(work.u8string());
+    std::vector<std::string> opened2;
+    const std::string odd = fakeRelease("9.0.0", std::string(64, '0'), std::string(64, '0'), "Odd.", "https://example.invalid/");
+    v.fetch = [&](const std::string& url, const std::string& file) {
+      writeAll(fs::u8path(file), odd);
+      return url == v.apiUrl;
+    };
+    v.open = [&](const std::string& url) { opened2.push_back(url); return true; };
+    v.windows = true;
+    v.checkNow();
+    waitFor(v, State::Idle, State::Checking);
+    v.install();
+    waitFor(v, State::Available);
+    check(opened2.size() == 1 && opened2[0] == "https://github.com/RxVreality/UTMTFTM/releases/latest",
+          "a link somewhere else is swapped for the releases page: " + (opened2.empty() ? std::string() : opened2[0]));
+    check(ourLink("https://github.com/RxVreality/UTMTFTM/releases/tag/v0.6.2") && !ourLink("https://github.com/RxVreality/UTMTFTMx/releases") &&
+              !ourLink("https://github.com.evil.example/RxVreality/UTMTFTM/") && !ourLink("https://github.com/RxVreality/UTMTFTM/a b") &&
+              !ourLink("https://github.com/RxVreality/UTMTFTM/\"&calc") && !ourLink("C:\\Windows\\notepad.exe") && !ourLink("file:///C:/x.exe"),
+          "only this project's own GitHub pages count as ours");
+  }
+  {
+    // The Frame: fetches its install script, checks it and starts it, as 0.6.1 did.
+    Updater u(work.u8string());
+    started.clear();
+    u.fetch = [&](const std::string& url, const std::string& file) {
+      if (url == u.apiUrl) writeAll(fs::u8path(file), answer);
+      else if (url.find("install-frame.sh") != std::string::npos) writeAll(fs::u8path(file), sh);
+      else return false;
+      return true;
+    };
+    u.start = [&](const std::string& file, bool) { started = file; return true; };
+    bool browsed = false;
+    u.open = [&](const std::string&) { browsed = true; return false; };
+    u.windows = false;
+    u.checkNow();
+    waitFor(u, State::Idle, State::Checking);
+    u.install();
+    Status s = waitFor(u, State::Available, State::Downloading);
     s = waitFor(u, State::Installing);
-    check(s.state == State::Installed && fs::path(fs::u8path(started)).filename() == "UTMTFTM-Setup-9.0.0.exe", "it fetches the installer, checks it and starts it: " + started);
+    check(s.state == State::Installed && fs::path(fs::u8path(started)).filename() == "install-frame.sh" && !browsed,
+          "the Frame fetches its script, checks it and starts it: " + started);
     u.tick(1000 + 7ull * 60 * 60 * 1000);
     s = waitFor(u, State::Checking);
     check(s.state == State::Installed, "a later check doesn't take back that it's installed");
@@ -198,24 +285,54 @@ int main() {
     check(asked - before == 10, "offline for three hours it asks 10 times, never more often than every half hour after the first few: " + std::to_string(asked - before));
   }
 
+#ifdef _WIN32
+  // ---- the Windows program itself: nothing left of 0.6.1's hidden curl or silent install (MMeNDtal, 0.6.1: a Trojan
+  // warning). The words a downloader needs to start curl or run an installer quietly aren't in it at all.
+  {
+    const fs::path exe = fs::absolute(fs::u8path(argv[0])).parent_path() / "utmtftm.exe";
+    const std::string bin = readAll(exe);
+    check(bin.size() > 100000, "the built program is there to look at: " + exe.u8string());
+    const auto has = [&](const std::string& word) {
+      std::string wide;
+      for (char ch : word) wide += std::string{ch, '\0'};
+      return bin.find(word) != std::string::npos || bin.find(wide) != std::string::npos;
+    };
+    for (const char* word : {"curl", "-fsSL", "/UPDATE", "--update"}) check(!has(word), std::string("MMeNDtal, 0.6.1 (Trojan warning): utmtftm.exe has no \"") + word + "\" in it");
+    check(has("WinHttpOpen") && has("ShellExecuteW"), "it asks through WinHTTP and hands links on with ShellExecute");
+  }
+#endif
+
   // ---- the real thing, when asked
   const char* net = std::getenv("UTMTFTM_TEST_NET");
   if (net && net[0] == '1') {
+#ifdef _WIN32
+    // Inside a job, so Windows counts every program this one starts. The real check must start none.
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    check(job && AssignProcessToJobObject(job, GetCurrentProcess()), "the test runs inside a job");
+#else
     check(!curlPath().empty(), "this machine has curl: " + curlPath());
+#endif
     Updater u(work.u8string());
+    u.open = [&](const std::string&) { return false; };  // never a real browser from a test
     u.checkNow();
     Status s = waitFor(u, State::Idle, State::Checking);
     std::printf("real GitHub: state %d, latest %s, %s\n", int(s.state), s.latest.version.c_str(), s.error.c_str());
     check(s.state == State::Available || s.state == State::UpToDate, "the real GitHub answers");
     check(assetFor(s.latest, true) && assetFor(s.latest, false), "and its latest release has both installers");
-    // The real installer, fetched by the real curl, checked by this checksum against what GitHub lists for it.
-    if (const Asset* a = assetFor(s.latest, true)) {
+#ifdef _WIN32
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION acct{};
+    check(QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &acct, sizeof acct, nullptr) && acct.TotalProcesses == 1,
+          "MMeNDtal, 0.6.1 (Trojan warning): the real check started no other program: " + std::to_string(acct.TotalProcesses) + " in the job, this one included");
+    if (const Asset* a = assetFor(s.latest, true)) check(ourLink(a->url) && ourLink(s.latest.page), "the real installer's link and page are ours: " + a->url);
+#else
+    // The Frame's script, fetched by the real curl, checked by this checksum against what GitHub lists for it.
+    if (const Asset* a = assetFor(s.latest, false)) {
       const std::string file = (work / a->name).u8string();
-      check(u.fetch(a->url, file), "the real Windows installer downloads");
+      check(u.fetch(a->url, file), "the real Frame script downloads");
       const std::string got = sha256Hex(readAll(fs::u8path(file)));
-      std::printf("real installer: %zu bytes, sha256 %s, GitHub says %s\n", readAll(fs::u8path(file)).size(), got.c_str(), a->sha256.c_str());
       check(got == a->sha256 && readAll(fs::u8path(file)).size() == a->size, "and it's exactly what GitHub lists");
     }
+#endif
   }
 
   fs::remove_all(work, ec);
