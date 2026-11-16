@@ -144,22 +144,24 @@ int main(int, char** argv) {
           "no web browser says so, and where to get it: " + s.error);
   }
   {
-    // Draft B: the release's page. And a link that isn't this project's on GitHub never reaches the browser.
+    // A release with no Windows installer yet opens its page instead. And a link that isn't this project's on GitHub never
+    // reaches the browser.
     Updater u(work.u8string());
     std::vector<std::string> opened;
+    std::string noInstaller = answer;
+    noInstaller.replace(noInstaller.find("UTMTFTM-Setup-9.0.0.exe\""), 23, "UTMTFTM-9.0.0-notes.txt");
     u.fetch = [&](const std::string& url, const std::string& file) {
-      writeAll(fs::u8path(file), answer);
+      writeAll(fs::u8path(file), noInstaller);
       return url == u.apiUrl;
     };
     u.open = [&](const std::string& url) { opened.push_back(url); return true; };
     u.windows = true;
-    u.openPage = true;
     u.checkNow();
     waitFor(u, State::Idle, State::Checking);
     u.install();
     waitFor(u, State::Available);
     check(opened.size() == 1 && opened[0] == "https://github.com/RxVreality/UTMTFTM/releases/tag/v9.0.0",
-          "draft B opens the release's page: " + (opened.empty() ? std::string() : opened[0]));
+          "no Windows installer yet opens the release's page: " + (opened.empty() ? std::string() : opened[0]));
     Updater v(work.u8string());
     std::vector<std::string> opened2;
     const std::string odd = fakeRelease("9.0.0", std::string(64, '0'), std::string(64, '0'), "Odd.", "https://example.invalid/");

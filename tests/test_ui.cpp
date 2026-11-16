@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
         drawUpdate(cv, need, ub);
         cv.savePNG(out + "/update_page_needed.png");
         // Windows only asks; the web browser fetches and you open the installer (J4, 15 November, after MMeNDtal's Trojan
-        // warning on 0.6.1). Both drafts, before and after the button, and the Frame's own one-tap update.
+        // warning on 0.6.1). J4 picked Download of two drafts. Before and after the button, and the Frame's own one-tap update.
         const auto apart = [](const std::vector<Button>& b) {
           for (size_t i = 0; i < b.size(); ++i)
             for (size_t j = i + 1; j < b.size(); ++j) {
@@ -209,28 +209,28 @@ int main(int argc, char** argv) {
             }
           return true;
         };
-        for (int draft : {0, 1}) {
-          g_updateDraft = draft;
-          const std::string tag = draft ? "B_page" : "A_download";
-          drawUpdate(cv, u, ub);
-          cv.savePNG(out + "/update_win_" + tag + "_ready.png");
-          CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
-          drawUpdate(cv, need, ub);
-          cv.savePNG(out + "/update_win_" + tag + "_needed.png");
-          CHECK(inBounds(ub, cv) && apart(ub));
-          UpdateModel opened = u;
-          opened.step = UpdateModel::Opened;
-          drawUpdate(cv, opened, ub);
-          cv.savePNG(out + "/update_win_" + tag + "_opened.png");
-          CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
-          CHECK(updateKey(opened) != updateKey(u));
-          UpdateModel noBrowser = opened;
-          noBrowser.error = "Couldn't open your web browser. Get it from github.com/RxVreality/UTMTFTM, under Releases.";
-          drawUpdate(cv, noBrowser, ub);
-          cv.savePNG(out + "/update_win_" + tag + "_no_browser.png");
-          CHECK(inBounds(ub, cv) && apart(ub));
-        }
-        g_updateDraft = 0;
+        drawUpdate(cv, u, ub);
+        cv.savePNG(out + "/update_win_ready.png");
+        CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
+        drawUpdate(cv, need, ub);
+        cv.savePNG(out + "/update_win_needed.png");
+        CHECK(inBounds(ub, cv) && apart(ub));
+        UpdateModel opened = u;
+        opened.step = UpdateModel::Opened;
+        drawUpdate(cv, opened, ub);
+        cv.savePNG(out + "/update_win_opened.png");
+        CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go") && has(ub, "update_close"));
+        CHECK(updateKey(opened) != updateKey(u));
+        UpdateModel noBrowser = opened;
+        noBrowser.error = "Couldn't open your web browser. Get it from github.com/RxVreality/UTMTFTM, under Releases.";
+        drawUpdate(cv, noBrowser, ub);
+        cv.savePNG(out + "/update_win_no_browser_again.png");
+        CHECK(inBounds(ub, cv) && apart(ub));
+        UpdateModel firstTap = u;
+        firstTap.error = noBrowser.error;
+        drawUpdate(cv, firstTap, ub);
+        cv.savePNG(out + "/update_win_no_browser.png");
+        CHECK(inBounds(ub, cv) && apart(ub) && has(ub, "update_go"));
         UpdateModel frame = u;
         frame.windows = false;
         drawUpdate(cv, frame, ub);

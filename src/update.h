@@ -93,7 +93,7 @@ class Updater {
   // After a check that couldn't reach GitHub it looks again in a minute, then 2, 5, 15 and every 30 minutes until one does.
   void tick(uint64_t nowMs);
   void checkNow();
-  // Windows: hands the installer's link (or with openPage, the release's page) to the web browser, and nothing more.
+  // Windows: hands the installer's link to the web browser, and nothing more (the release's page if it has no installer).
   // The Frame: fetches the new version, checks it's exactly what GitHub lists, and starts its install script, which puts
   // the new files in next to the running ones. SteamVR uses them from its next start.
   void install();
@@ -107,7 +107,6 @@ class Updater {
   std::function<bool(const std::string& file, bool windows)> start;
   std::function<bool(const std::string& url)> open;
   bool windows;
-  bool openPage = false;  // J4's draft B (15 November): the release page rather than the installer itself
 
  private:
   void set(const std::function<void(Status&)>& change);

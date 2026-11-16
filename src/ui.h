@@ -100,9 +100,6 @@ struct UpdateModel {
   bool windows = true;
   std::string hover, down;
 };
-// Drafts for J4 (15 November), until one is picked: 0 the button downloads the installer through the web browser,
-// 1 it opens the release's page on GitHub.
-extern int g_updateDraft;
 std::string updateKey(const UpdateModel& m);
 void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& buttons);
 

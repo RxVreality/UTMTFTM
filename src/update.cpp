@@ -269,7 +269,7 @@ void Updater::install() {
     // installer yourself. Nothing is fetched or started here.
     worker_ = std::thread([this, now] {
       const Asset* a = assetFor(now.latest, true);
-      std::string url = openPage || !a ? now.latest.page : a->url;
+      std::string url = a ? a->url : now.latest.page;
       if (!ourLink(url)) url = std::string("https://github.com/") + kRepo + "/releases/latest";
       const bool ok = open(url);
       set([&](Status& s) {

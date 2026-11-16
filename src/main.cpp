@@ -351,7 +351,6 @@ struct App {
     in.init();
     std::string gpu;
     logf("%s", platform::raisePriority().c_str());
-    updater.openPage = g_updateDraft == 1;
     loopMin.start();
     if (uploader.init(&gpu)) logf("overlay images via the GPU: %s", gpu.c_str());
     else logf("no GPU path (%s): falling back to SetOverlayRaw", gpu.c_str());

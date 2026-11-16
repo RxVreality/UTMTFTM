@@ -2019,12 +2019,9 @@ void drawIcon(Canvas& cv) {
 }
 
 // ---------------------------------------------------------------- the Update page
-int g_updateDraft = 0;
-
 std::string updateKey(const UpdateModel& m) {
   return m.game + "|" + std::to_string(int(m.live)) + std::to_string(m.confirmClose) + "|" + m.current + "|" + m.latest + "|" +
-         std::to_string(m.needed) + m.why + "|" + std::to_string(int(m.step)) + std::to_string(m.windows) + std::to_string(g_updateDraft) + "|" + m.error +
-         "|fx:" + m.hover + "," + m.down;
+         std::to_string(m.needed) + m.why + "|" + std::to_string(int(m.step)) + std::to_string(m.windows) + "|" + m.error + "|fx:" + m.hover + "," + m.down;
 }
 
 // Words broken into lines that fit, at most a few of them, the last one cut short if there's more.
@@ -2054,18 +2051,16 @@ void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
   pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Update);
 
   const bool done = m.step == UpdateModel::Installed;
-  const bool page = g_updateDraft == 1;
   const std::string setup = "UTMTFTM-Setup-" + m.latest + ".exe";
 
-  // Windows, after the button: what to do on the desktop, in place of what's new.
+  // Windows, after the button: what to do on the desktop, in place of what's new. J4 picked this of two drafts
+  // (15 November): Download hands the installer itself to the web browser, rather than the release's page.
   if (m.windows && m.step == UpdateModel::Opened) {
-    text(c, L, 138, 27, "Sent to your web browser", true, PAPER);
+    text(c, L, 138, 27, m.error.empty() ? "Sent to your web browser" : "Your web browser didn't open this time", true, PAPER);
     text(c, L, 164, 18, "Look on the desktop. SteamVR's dashboard can show it too.", false, DIM, 1, 0, R - L);
     hline(c, L, R, 208);
-    const std::string steps[3] = {
-        page ? "Your web browser shows the " + m.latest + " page on GitHub." : "Your web browser downloads " + setup + ".",
-        page ? "Under Assets, click " + setup + ", then open it. SteamVR can stay open." : "Open it and click through. SteamVR can stay open.",
-        "Restart SteamVR when you're ready, and " + m.latest + " starts with it."};
+    const std::string steps[3] = {"Your web browser downloads " + setup + ".", "Open it and click through. SteamVR can stay open.",
+                                  "Restart SteamVR when you're ready, and " + m.latest + " starts with it."};
     for (int i = 0; i < 3; ++i) {
       const double sy = 262 + i * 76.0;
       frame(c, L, sy - 34, 48, 48, SIGNAL, 1, 2);
@@ -2116,12 +2111,10 @@ void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
     text(c, L + 32, by + 38, 22, "Restart SteamVR when you're ready, and " + m.latest + " starts with it.", true, PAPER, 1, 0, R - L - 290);
     button(c, btn, R - 240, by, 240, bh, "update_close", "Done", Outline);
   } else if (m.windows) {
-    button(c, btn, L, by, 380, bh, "update_go", !m.error.empty() ? "Try again" : page ? "Open the page" : "Download", m.needed ? Danger : Primary);
+    button(c, btn, L, by, 380, bh, "update_go", !m.error.empty() ? "Try again" : "Download", m.needed ? Danger : Primary);
     button(c, btn, L + 400, by, 220, bh, "update_close", "Not now", Outline);
-    text(c, L + 650, by + 26, 17, page ? "Opens " + m.latest + "'s page on GitHub in your web browser." : "Your web browser downloads the installer.", false, DIM, 1, 0,
-         R - L - 650);
-    text(c, L + 650, by + 50, 17, page ? "Download the installer there and open it." : "Open it on the desktop. SteamVR can stay open.", false, DIM, 1, 0,
-         R - L - 650);
+    text(c, L + 650, by + 26, 17, "Your web browser downloads the installer.", false, DIM, 1, 0, R - L - 650);
+    text(c, L + 650, by + 50, 17, "Open it on the desktop. SteamVR can stay open.", false, DIM, 1, 0, R - L - 650);
   } else {
     const bool busy = m.step == UpdateModel::Downloading || m.step == UpdateModel::Installing;
     const std::string go = m.step == UpdateModel::Downloading ? "Downloading..." : m.step == UpdateModel::Installing ? "Installing..." : !m.error.empty() ? "Try again" : "Update now";
