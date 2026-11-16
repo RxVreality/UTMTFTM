@@ -246,7 +246,7 @@ bool fetchUrl(const std::string& url, const std::string& file) {
   if (curl.empty()) return false;
   std::error_code ec;
   fs::remove(fs::u8path(file), ec);
-  const std::string agent = std::string("UTMTFTM/") + thisVersion();
+  const std::string agent = std::string("UTMTFTM/") + UTMTFTM_VERSION;  // this file goes into programs without update.cpp
   return runHidden({curl, "-fsSL", "--max-time", "120", "--retry", "2", "-A", agent, "-H", "Accept: application/vnd.github+json", "-o", file, url}, 150000) == 0;
 }
 
