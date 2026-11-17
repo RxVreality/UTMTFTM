@@ -182,6 +182,45 @@ struct DragChannel {
 };
 constexpr size_t kDragAt = kDecafAt + 256;
 
+// ---------------------------------------------------------------- stick drift
+// A worn stick that doesn't come back to the middle. The driver fixes each stick report on its way to SteamVR, in the button
+// hook, with the numbers the overlay worked out from the stick check (the maths is drift.h). While the overlay asks, it also
+// keeps the last reports of each stick, so the page can show the stick live and run the check from them.
+constexpr uint32_t kDriftMagic = 0x31465244;  // "DRF1": the driver that's loaded can do this
+constexpr uint32_t kDriftRing = 512, kDriftDirs = 8;
+
+struct DriftSettings {  // one stick, the same layout as drift::Params. All zeros: off
+  uint32_t on;
+  float cx, cy, dead, gate, learnPerSec, learnMax;
+  float reach[kDriftDirs];
+};
+struct DriftSample {
+  std::atomic<uint32_t> seq;  // the write number it's filled in for, set last
+  uint32_t ms;                // the driver's clock
+  float x, y;                 // what the stick said
+  float ox, oy;               // what went on to SteamVR
+  uint8_t touch;              // 0 no thumb on it, 1 a thumb, 2 this stick can't tell
+  uint8_t reserved[3];
+};
+struct DriftChannel {
+  std::atomic<uint32_t> magic;    // the driver writes this
+  std::atomic<uint32_t> seq;      // the overlay writes want. Seqlock
+  DriftSettings want[2];          // left, right
+  std::atomic<uint32_t> measure;  // the overlay: while the page that shows them is open, keep the reports in ring
+  // The driver writes the rest.
+  std::atomic<uint32_t> found[2];     // 1: this hand has a stick. 2 as well: it can feel a thumb on it
+  std::atomic<uint32_t> touchBad[2];  // its touch sensor missed a real push, so touch isn't used until the settings change
+  std::atomic<uint32_t> learnSeq[2];  // seqlock for learned
+  float learned[2][2];                // where the middle has got to by learning while you play, as x, y
+  std::atomic<uint32_t> spikes[2];    // one-report spikes held back
+  uint32_t reserved;
+  std::atomic<uint64_t> fixed[2];     // reports changed: a moving count means it's working on this controller
+  std::atomic<uint32_t> write[2];     // the next sample to fill, per hand
+  DriftSample ring[2][kDriftRing];
+};
+// Its own fixed place, past the drag channel with room to spare, for the same reasons as Decaffeinate's.
+constexpr size_t kDriftAt = kDragAt + 256;
+
 struct Shared {
   DriverChannel driver;
   // After driver, so an older driver that's still loaded never sees it. Its magic says whether this one is really there.
@@ -190,6 +229,8 @@ struct Shared {
   DecafChannel decaf;
   unsigned char room2[kDragAt - kDecafAt - sizeof(DecafChannel)];  // for Decaffeinate to grow into
   DragChannel drag;
+  unsigned char room3[kDriftAt - kDragAt - sizeof(DragChannel)];  // for placing to grow into
+  DriftChannel drift;
 };
 
 // Two programs read this file, and a torn or misaligned atomic faults on ARM rather than just misbehaving.
@@ -200,6 +241,8 @@ static_assert(sizeof(DecafSettings) == 20 && offsetof(DecafChannel, measure) == 
               offsetof(Shared, input) == sizeof(DriverChannel) && offsetof(Shared, decaf) == kDecafAt, "the file layout changed");
 static_assert(offsetof(DragChannel, start) == 20 && offsetof(DragChannel, moved) == 48 && sizeof(DragChannel) == 56 && offsetof(Shared, drag) == kDragAt,
               "the file layout changed");
+static_assert(sizeof(DriftSettings) == 60 && sizeof(DriftSample) == 28 && offsetof(DriftChannel, measure) == 128 && offsetof(DriftChannel, fixed) == 184 &&
+              offsetof(DriftChannel, ring) == 208 && offsetof(Shared, drift) == kDriftAt, "the file layout changed");
 static_assert(sizeof(WireLink) == 56 && offsetof(InputTable, link) == 16 + sizeof(WireMacro) * kMaxMacros + sizeof(WireRoute) * kMaxRoutes + sizeof(WireChord) * kMaxChords, "links go after everything that was there before");
 static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "features sits where a plain number was");
 

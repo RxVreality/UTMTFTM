@@ -83,7 +83,7 @@ if(NOT WIN32)
   target_link_options(driver_utmtftm PRIVATE -Wl,-z,defs -Wl,--exclude-libs,ALL)
 endif()
 
-add_executable(utmtftm src/main.cpp src/store.cpp src/bindings.cpp src/update.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
+add_executable(utmtftm src/main.cpp src/store.cpp src/sticks.cpp src/bindings.cpp src/update.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
 target_link_libraries(utmtftm PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS} ${THREAD_LIBS})
 add_custom_command(TARGET utmtftm POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/input ${CMAKE_SOURCE_DIR}/dist/input
@@ -121,6 +121,10 @@ target_link_libraries(test_update PRIVATE ${JSON_LIBS} ${THREAD_LIBS})
 # Decaffeinate's filter on made-up hands: how much shake it takes out and how late it makes a moving hand.
 add_executable(test_decaf tests/test_decaf.cpp)
 target_link_libraries(test_decaf PRIVATE ${CAIRO_LIBS})
+# Stick drift: the maths on made-up worn sticks, and the page's whole check run the way the app runs it.
+add_executable(test_drift tests/test_drift.cpp src/sticks.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+target_link_libraries(test_drift PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
+add_dependencies(test_drift utmtftm)
 
 add_executable(test_ui tests/test_ui.cpp src/ui.cpp ${PLATFORM_SRC} src/glove.cpp)
 target_link_libraries(test_ui PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})

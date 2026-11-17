@@ -523,7 +523,8 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
       {DashPage::Hands, "page_hands", "Hands"}, {DashPage::Bindings, "page_bindings", "Bindings"}, {DashPage::Combos, "page_combos", "Combos"}, {DashPage::Decaf, "page_decaf", "Decaf"}};
   for (int i = 0; i < nTabs; ++i) {
     const double x = tabX + i * (tabW - tabD + 3);
-    const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos);
+    // Macros are part of Combos, and stick drift is part of Decaf.
+    const bool on = tabs[i].p == page || (page == DashPage::Recorded && tabs[i].p == DashPage::Combos) || (page == DashPage::Drift && tabs[i].p == DashPage::Decaf);
     if (on) slab(c, x, tabY, tabW, tabH, PAPER);
     else frame(c, x, tabY, tabW, tabH, PAPER, 0.45, 2);
     fxOver(c, x, tabY, tabW, tabH, tabs[i].id, true, on);
@@ -810,6 +811,12 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
 }
 
 // ---------------------------------------------------------------- Decaffeinate page
+// The Decaf tab's two pages, steady hands and steady sticks, and the switch between them, top right.
+static void steadySwitch(cairo_t* c, std::vector<Button>& btn, double R, bool sticks) {
+  const double sw = label(c, R - 312, 136, 16, "Steady");
+  segments(c, btn, R - 312 + sw + 14, 110, 312 - sw - 14, 38, {{"decaf_part_hands", "Hands", !sticks, true}, {"decaf_part_sticks", "Sticks", sticks, true}}, 16);
+}
+
 const char* decafName(int level) {
   static const char* const names[kDecafSteps] = {"Off", "Tuned", "Strong", "Maximum"};
   return level >= 0 && level < kDecafSteps ? names[level] : "Off";
@@ -836,7 +843,8 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
   const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
   pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Decaf);
 
-  text(c, L, 138, 27, "Take the shake out of your aim", true, PAPER);
+  text(c, L, 138, 27, "Take the shake out of your aim", true, PAPER, 1, 0, m.sticksSwitch ? R - 330 - L : 0);
+  if (m.sticksSwitch) steadySwitch(c, btn, R, false);
   text(c, L, 164, 18, "Smooths the tiny trembles of a hand held still, and lets go the moment you move. Made for aiming down sights.", false, DIM, 1, 0, R - L);
 
   // The four steps, as tiles: what each feels like, and what it measured on a test hand (tests/test_decaf.cpp).
@@ -962,6 +970,254 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
     const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
                      : m.live == LiveState::NoGame ? "It only works with a game running, so SteamVR's own pointers stay as they are."
                                                    : "Changes reach your in-game hands straight away. No restart.";
+    text(c, L, baseY, 19, st, false, m.ready ? DIM : PAPER, 1, 0, R - L);
+  }
+  g_hover = g_down = nullptr;
+}
+
+// ---------------------------------------------------------------- stick drift page
+std::string driftKey(const DriftModel& m) {
+  char b[96];
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + "," + std::to_string(m.countdown) + std::to_string(m.fixOn) +
+                  std::to_string(m.ready) + std::to_string(m.confirmClose) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood);
+  for (const DriftStick& s : m.sticks) {
+    // To the hundredth: the dots move, but not so finely the page redraws on every report.
+    snprintf(b, sizeof b, "|%d%d%d%d%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", s.present, s.checked, s.drifts, s.hasTouch, s.touched, s.raw.x, s.raw.y, s.out.x, s.out.y,
+             s.rest.x, s.rest.y, s.dead, s.progress);
+    k += b;
+    k += "|" + std::to_string(s.trail.size()) + "," + std::to_string(s.landed.size()) + "," + s.verdict;
+    for (float r : s.reach) k += r > 0 ? '1' : '0';
+    for (const std::string& l : s.lines) k += "|" + l;
+  }
+  return k + "|fx:" + m.hover + "," + m.down;
+}
+
+// A stick seen from above: the ring is pushed all the way, the cross is the middle. Faint dots are where it's been, the
+// hollow ring is where the controller says it is, the yellow dot is what the game gets.
+// bigMiddle: drift is a few percent of the stick's travel, too small to see drawn to scale, so the middle is drawn bigger: a
+// point is drawn at the square root of how far out it is, so 4% sits a fifth of the way out and a full push still on the ring.
+static void stickPlot(cairo_t* c, double cx, double cy, double r, const DriftStick& s, int step, bool fixing, bool bigMiddle) {
+  const double pi = 3.14159265358979;
+  const auto at = [&](DriftDot d, double& x, double& y) {
+    double dx = d.x, dy = d.y;
+    const double len = std::sqrt(dx * dx + dy * dy);
+    if (len > 1) { dx /= len; dy /= len; }
+    else if (bigMiddle && len > 1e-6) { const double k = std::sqrt(len) / len; dx *= k; dy *= k; }
+    x = cx + dx * r;
+    y = cy - dy * r;
+  };
+  cairo_new_sub_path(c);
+  cairo_arc(c, cx, cy, r, 0, 2 * pi);
+  set(c, RAISED);
+  cairo_fill(c);
+  hline(c, cx - r, cx + r, cy, LINE, 1);
+  box(c, cx, cy - r, 1, 2 * r, LINE);
+  cairo_new_sub_path(c);
+  cairo_arc(c, cx, cy, r * (bigMiddle ? std::sqrt(0.5) : 0.5), 0, 2 * pi);  // half way out
+  set(c, LINE);
+  cairo_set_line_width(c, 1);
+  cairo_stroke(c);
+  // How far it got round the edge, in 32 slices: each one it's reached is drawn in.
+  if (!s.reach.empty()) {
+    const size_t n = s.reach.size();
+    cairo_set_line_cap(c, CAIRO_LINE_CAP_BUTT);
+    for (size_t i = 0; i < n; ++i) {
+      const double a0 = 2 * pi * double(i) / n, a1 = 2 * pi * double(i + 1) / n;
+      cairo_new_sub_path(c);
+      cairo_arc_negative(c, cx, cy, r + 9, -a0, -a1);
+      set(c, s.reach[i] > 0 ? SIGNAL : LINE, s.reach[i] > 0 ? 1 : 0.8);
+      cairo_set_line_width(c, 8);
+      cairo_stroke(c);
+    }
+  }
+  cairo_new_sub_path(c);
+  cairo_arc(c, cx, cy, r, 0, 2 * pi);
+  set(c, PAPER, 0.55);
+  cairo_set_line_width(c, 2);
+  cairo_stroke(c);
+  for (const DriftDot& d : s.trail) {
+    double x, y;
+    at(d, x, y);
+    cairo_new_sub_path(c);
+    cairo_arc(c, x, y, 2.6, 0, 2 * pi);
+    set(c, DIM, 0.55);
+    cairo_fill(c);
+  }
+  // What reads as the middle: dashed, round where it rests.
+  if (s.dead > 0) {
+    for (int i = 0; i <= 64; ++i) {
+      const double a = 2 * pi * i / 64;
+      double x, y;
+      at({float(s.rest.x + s.dead * std::cos(a)), float(s.rest.y + s.dead * std::sin(a))}, x, y);
+      if (i == 0) cairo_move_to(c, x, y);
+      else cairo_line_to(c, x, y);
+    }
+    cairo_close_path(c);
+    set(c, PAPER, 0.10);
+    cairo_fill_preserve(c);
+    const double dash[2] = {7, 5};
+    cairo_set_dash(c, dash, 2, 0);
+    set(c, PAPER, 0.9);
+    cairo_set_line_width(c, 2);
+    cairo_stroke(c);
+    cairo_set_dash(c, nullptr, 0, 0);
+  }
+  for (const DriftDot& d : s.landed) {
+    if (step != 3 && !s.drifts) break;  // after the check, only where a drifting stick landed is worth showing
+    double x, y;
+    at(d, x, y);
+    set(c, PAPER);
+    cairo_set_line_width(c, 2.2);
+    cairo_move_to(c, x - 5, y - 5); cairo_line_to(c, x + 5, y + 5);
+    cairo_move_to(c, x - 5, y + 5); cairo_line_to(c, x + 5, y - 5);
+    cairo_stroke(c);
+  }
+  double x, y;
+  at(s.raw, x, y);
+  cairo_new_sub_path(c);
+  cairo_arc(c, x, y, 10, 0, 2 * pi);
+  set(c, PAPER);
+  cairo_set_line_width(c, 2.5);
+  cairo_stroke(c);
+  if (fixing || step == 4) {
+    at(s.out, x, y);
+    cairo_new_sub_path(c);
+    cairo_arc(c, x, y, 7, 0, 2 * pi);
+    set(c, SIGNAL);
+    cairo_fill(c);
+  }
+}
+
+void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
+  btn.clear();
+  g_hover = &m.hover;
+  g_down = &m.down;
+  cairo_t* c = cv.c;
+  set(c, INK); cairo_paint(c);
+  const double L = 44, R = cv.w - 44, mid = cv.w / 2.0;
+  pageHeader(c, btn, cv.w, m.game, m.live, m.confirmClose, DashPage::Drift);
+
+  const bool walking = m.step >= 1 && m.step <= 3;
+  const bool any = m.sticks[0].checked || m.sticks[1].checked;
+  std::string title, sub, step;
+  switch (m.step) {
+    case 1: title = "Let go of both sticks"; sub = "Hold the controllers without touching the sticks, or put them down. Keep still."; step = "Step 1 of 3"; break;
+    case 2: title = "Roll each stick round its edge"; sub = "Push it all the way out and go slowly all the way round. Both at once is fine."; step = "Step 2 of 3"; break;
+    case 3: title = "Flick each stick and let it spring back"; sub = "All the way one way, then let go. Up, right, down and left, twice each."; step = "Step 3 of 3"; break;
+    case 4: {
+      const bool l = m.sticks[0].drifts, r = m.sticks[1].drifts;
+      title = l && r ? "Both sticks drift. They're fixed now." : l ? "Your left stick drifts. It's fixed now." : r ? "Your right stick drifts. It's fixed now." : "No drift found";
+      sub = l || r ? "When you let go the game sees the middle, and a full push still reaches the edge." : "Both sticks come back to the middle. Nothing to fix.";
+      break;
+    }
+    default:
+      title = "Stop a stick drifting";
+      sub = any ? "The game sees the middle when you let go, however worn the stick." : "A worn stick doesn't come back to the middle when you let go. Check yours and UTMTFTM hides it from the game.";
+  }
+  // The switch back to steady hands sits where the step count goes during a check.
+  const double titleR = !walking ? R - 330 : R - (step.empty() ? 0 : 150);
+  text(c, L, 138, 27, title, true, PAPER, 1, 0, titleR - L);
+  text(c, L, 164, 18, sub, false, DIM, 1, 0, R - L);
+  if (!step.empty()) caps(c, R, 138, 17, step, DIM, 1, 2);
+  if (!walking) steadySwitch(c, btn, R, true);
+
+  // The two sticks, side by side.
+  const char* names[2] = {"Left stick", "Right stick"};
+  const double cw = mid - 12 - L, py = 188;
+  for (int h = 0; h < 2; ++h) {
+    const double x = h ? mid + 12 : L;
+    const DriftStick& s = m.sticks[h];
+    slab(c, x, py, cw, 40, RAISED);
+    caps(c, x + 20, py + 29, 24, names[h], PAPER, 1, 0, 2);
+    std::string tag = !s.present ? "No stick" : walking ? (s.progress >= 1 ? "Done" : "") : !s.checked ? "Not checked" : !s.drifts ? "No drift" : m.fixOn ? "Fixed" : "Not fixed";
+    if (!tag.empty()) label(c, x + cw - 18, py + 27, 15, tag, tag == "Fixed" || tag == "Done" ? PAPER : DIM, 2);
+    if (!s.present) {
+      text(c, x, py + 90, 20, "This controller has no stick.", false, DIM, 1, 0, cw);
+      continue;
+    }
+    const double pr = 118, pcx = x + 6 + pr + 12, pcy = py + 40 + 26 + pr;
+    const bool big = m.step != 2;
+    stickPlot(c, pcx, pcy, pr, s, m.step, m.fixOn && s.drifts, big);
+    if (big) label(c, pcx, pcy + pr + 24, 13, "The middle drawn bigger", DIM, 1);
+
+    // What it found, or what to do now, to the right of the stick.
+    const double tx = x + 2 * pr + 54, tw = x + cw - tx;
+    double ty = py + 92;
+    if (walking) {
+      std::string now;
+      bool warn = false;
+      if (m.step == 1) {
+        if (s.hasTouch && s.touched) { now = "Thumb on the stick: let go"; warn = true; }
+        else now = s.countdown > 0 ? "Keep still..." : "Got it";
+      } else if (m.step == 2) now = s.progress >= 1 ? "That's all the way round" : "Keep going round";
+      else {
+        // Twice each way: let-gos past that from one way don't count, so it says which it's still after.
+        const int got = int(std::lround(std::max(0.f, s.progress) * 8));
+        now = s.progress >= 1 ? "That's enough" : s.landed.size() >= 8 ? "Now the other ways too" : std::to_string(got) + " of 8 let-gos";
+      }
+      if (warn) lamp(c, tx, ty - 15, 14, ALERT);
+      text(c, warn ? tx + 26 : tx, ty, 22, now, true, warn ? ALERT : PAPER, 1, 0, tw - (warn ? 26 : 0));
+      if (m.step == 1 && s.countdown > 0 && !(s.hasTouch && s.touched)) text(c, tx, ty + 90, 72, std::to_string(s.countdown), true, PAPER);
+      if (s.progress >= 0) {
+        const double by = py + 300;
+        hline(c, tx, x + cw - 4, by, LINE, 1, 8);
+        hline(c, tx, tx + (x + cw - 4 - tx) * std::min(1.0f, s.progress), by, s.progress >= 1 ? LIVE : SIGNAL, 1, 8);
+      }
+    } else {
+      const std::string v = !s.checked ? "Not checked yet" : s.verdict;
+      if (s.verdictWarn) lamp(c, tx, ty - 15, 14, SIGNAL);
+      text(c, s.verdictWarn ? tx + 26 : tx, ty, 22, v, true, PAPER, 1, 0, tw - (s.verdictWarn ? 26 : 0));
+      ty += 32;
+      std::vector<std::string> lines = s.lines;
+      if (!s.checked) lines = {"Let go of it and watch the ring.", "If it doesn't sit on the cross,", "it drifts."};
+      for (const std::string& l : lines) { text(c, tx, ty, 17, l, false, DIM, 1, 0, tw); ty += 25; }
+    }
+    // The key to the picture.
+    const double ky = py + 352;
+    cairo_new_sub_path(c);
+    cairo_arc(c, tx + 8, ky - 6, 7, 0, 2 * 3.14159265);
+    set(c, PAPER);
+    cairo_set_line_width(c, 2);
+    cairo_stroke(c);
+    text(c, tx + 24, ky, 15, "Your stick", false, DIM);
+    if ((m.fixOn && s.drifts) || m.step == 4) {
+      cairo_new_sub_path(c);
+      cairo_arc(c, tx + 128, ky - 6, 6, 0, 2 * 3.14159265);
+      set(c, SIGNAL);
+      cairo_fill(c);
+      text(c, tx + 142, ky, 15, "The game", false, DIM);
+    }
+  }
+  hline(c, L, R, 558);
+
+  // Along the bottom: the step's buttons, or the check and the switch.
+  const double ay = 586, ah = 56;
+  if (walking) {
+    button(c, btn, R - 170, ay, 170, ah, "drift_cancel", "Cancel", Outline);
+    if (m.step == 3 || m.step == 2) button(c, btn, R - 170 - 12 - 200, ay, 200, ah, "drift_skip", "Skip this step", Outline);
+  } else if (m.step == 4) {
+    button(c, btn, R - 200, ay, 200, ah, "drift_done", "Done", Primary);
+    button(c, btn, R - 200 - 12 - 220, ay, 220, ah, "drift_again", "Check again", Outline);
+  } else if (!any) {
+    button(c, btn, L, ay, 330, ah, "drift_check", "Check my sticks", Primary);
+    text(c, L + 354, ay + 36, 18, "Takes about half a minute.", false, DIM);
+  } else {
+    button(c, btn, L, ay, 260, ah, "drift_check", "Check again", Outline);
+    const double sx = mid + 12, fw = label(c, sx, ay + 36, 16, "Fix drift");
+    segments(c, btn, sx + fw + 18, ay, R - (sx + fw + 18), ah, {{"drift_off", "Off", !m.fixOn, true}, {"drift_on", "On", m.fixOn, true}}, 21);
+  }
+
+  hline(c, L, R, 700);
+  const double baseY = 734;
+  if (!m.status.empty()) {
+    lamp(c, L, baseY - 14, 14, m.statusWarn ? ALERT : m.statusGood ? LIVE : SIGNAL);
+    text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
+  } else if (m.ready && !walking && updateLine(c, btn, L, R, baseY)) {
+  } else {
+    const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
+                     : walking ? "The game still gets your sticks while you do this."
+                     : any ? "While your thumb's off a stick, UTMTFTM keeps learning where it rests. Saved for these controllers."
+                           : "Works in every game and in SteamVR's own menus. Nothing changes until you check.";
     text(c, L, baseY, 19, st, false, m.ready ? DIM : PAPER, 1, 0, R - L);
   }
   g_hover = g_down = nullptr;

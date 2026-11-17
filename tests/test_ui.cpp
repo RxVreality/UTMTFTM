@@ -733,6 +733,137 @@ int main(int argc, char** argv) {
     setAccent(was);
     g_betaTag = betaWas;
   }
+
+  // ---- the stick drift page (J4, 14 November), inside the Decaf tab (J4's pick of two drafts), and the check's steps.
+  // Made-up sticks: the left one rests up and to the left and lands somewhere else each time, the right one's fine.
+  {
+    unsigned seed = 7;
+    const auto rnd = [&] { seed = seed * 1103515245u + 12345u; return float((seed >> 8) & 0xFFFF) / 65535.f - 0.5f; };
+    const auto cloud = [&](float cx, float cy, float spread, int n) {
+      std::vector<DriftDot> v;
+      for (int i = 0; i < n; ++i) v.push_back({cx + rnd() * spread, cy + rnd() * spread});
+      return v;
+    };
+    const auto noOverlap = [&](const std::vector<Button>& b, const std::string& what) {
+      for (size_t i = 0; i < b.size(); ++i)
+        for (size_t j = i + 1; j < b.size(); ++j) {
+          const double across = std::min(b[i].x + b[i].w, b[j].x + b[j].w) - std::max(b[i].x, b[j].x), down = std::min(b[i].y + b[i].h, b[j].y + b[j].h) - std::max(b[i].y, b[j].y);
+          if (!(across <= 24 || down <= 2)) { ++fails; printf("FAIL %s: %s and %s are on top of each other\n", what.c_str(), b[i].id.c_str(), b[j].id.c_str()); }
+        }
+    };
+    const auto shot = [&](const DriftModel& m, const std::string& name) {
+      Canvas cv(1200, 760);
+      std::vector<Button> b;
+      drawDrift(cv, m, b);
+      cv.savePNG(out + "/" + name);
+      for (auto& x : b) CHECK(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h);
+      noOverlap(b, name);
+      return b;
+    };
+    DriftModel first;
+    first.game = "Pavlov";
+    first.live = LiveState::Live;
+    first.sticks[0].raw = {-0.10f, 0.12f};
+    first.sticks[0].trail = cloud(-0.10f, 0.12f, 0.05f, 40);
+    first.sticks[1].raw = {0.004f, -0.006f};
+    first.sticks[1].trail = cloud(0, 0, 0.02f, 40);
+    {
+      const std::vector<Button> b = shot(first, "drift_first.png");
+      bool hands = false, sticks = false, check = false;
+      for (const Button& x : b) { hands |= x.id == "decaf_part_hands"; sticks |= x.id == "decaf_part_sticks"; check |= x.id == "drift_check"; }
+      CHECK(hands && sticks && check);  // the way back to steady hands, and the one thing to do
+    }
+    // Step 1: leave them alone, with a thumb still on the right stick.
+    DriftModel s1 = first;
+    s1.step = 1;
+    s1.countdown = 3;
+    s1.sticks[0].progress = 0.4f;
+    s1.sticks[0].countdown = 3;
+    s1.sticks[1].countdown = 4;
+    s1.sticks[1].progress = 0.1f;
+    s1.sticks[1].touched = true;
+    shot(s1, "drift_step1.png");
+    // Step 2: round the edge, most of the way on the left.
+    DriftModel s2 = first;
+    s2.step = 2;
+    s2.sticks[0].reach.assign(32, 0.f);
+    s2.sticks[1].reach.assign(32, 0.f);
+    for (int i = 0; i < 26; ++i) s2.sticks[0].reach[i] = 0.95f;
+    for (int i = 0; i < 32; ++i) s2.sticks[1].reach[i] = 1.f;
+    s2.sticks[0].raw = {std::cos(2 * 3.14159f * 26 / 32) * 0.96f, std::sin(2 * 3.14159f * 26 / 32) * 0.96f};
+    s2.sticks[1].raw = {0, 0};
+    s2.sticks[0].trail.clear();
+    s2.sticks[1].trail.clear();
+    s2.sticks[0].progress = 26 / 32.f;
+    s2.sticks[1].progress = 1;
+    shot(s2, "drift_step2.png");
+    // Step 3: flick and let go. Where the left one lands depends on which way it came back from.
+    DriftModel s3 = first;
+    s3.step = 3;
+    s3.sticks[0].landed = {{-0.04f, 0.20f}, {-0.16f, 0.06f}, {-0.07f, 0.02f}, {0.00f, 0.13f}, {-0.12f, 0.17f}};
+    s3.sticks[1].landed = {{0.01f, 0.0f}, {-0.01f, 0.01f}, {0.0f, -0.01f}, {0.01f, 0.01f}, {0.0f, 0.0f}, {-0.01f, 0.0f}, {0.01f, -0.01f}, {0.0f, 0.01f}};
+    s3.sticks[0].progress = 5 / 8.f;
+    s3.sticks[1].progress = 1;
+    s3.sticks[0].raw = s3.sticks[0].landed.back();
+    shot(s3, "drift_step3.png");
+    // What it found, and the page afterwards with the fix on.
+    DriftModel s4 = s3;
+    s4.step = 4;
+    s4.fixOn = true;
+    for (DriftStick& s : s4.sticks) { s.checked = true; s.progress = -1; s.trail.clear(); }
+    DriftStick& l = s4.sticks[0];
+    l.drifts = true;
+    l.verdict = "Drifts up and to the left";
+    l.verdictWarn = true;
+    l.lines = {"Rests 14% off the middle.", "Lands in a different spot each", "time you let go, up to 9% apart.", "Reaches the edge all round."};
+    l.rest = {-0.08f, 0.11f};
+    l.dead = 0.14f;
+    l.landed.push_back({-0.02f, 0.10f});
+    l.landed.push_back({-0.13f, 0.12f});
+    l.landed.push_back({-0.09f, 0.04f});
+    l.raw = {-0.10f, 0.12f};
+    l.out = {0, 0};
+    DriftStick& r = s4.sticks[1];
+    r.verdict = "No drift";
+    r.lines = {"Comes back to the middle", "every time. Left as it is."};
+    r.out = r.raw;
+    shot(s4, "drift_result.png");
+    DriftModel after = s4;
+    after.step = 0;
+    after.sticks[0].landed.clear();
+    after.sticks[1].landed.clear();
+    after.sticks[0].lines = {"Rests 14% off the middle.", "The game sees the middle", "when you let go."};
+    shot(after, "drift_after.png");
+    // Pushed half way up while fixed: the game gets it measured from where the stick rests.
+    DriftModel push = after;
+    push.sticks[0].raw = {-0.08f, 0.62f};
+    push.sticks[0].out = {0.0f, 0.42f};
+    push.sticks[0].touched = true;
+    shot(push, "drift_after_push.png");
+    CHECK(driftKey(push) != driftKey(after));
+    {  // the Decaf tab's own page, with the switch, and without it on a Frame
+      Canvas cv(1200, 760);
+      DecafModel dm;
+      dm.game = "Pavlov";
+      dm.live = LiveState::Live;
+      dm.level = 2;
+      dm.hands[0] = {true, 0.31f, 0.038f};
+      dm.hands[1] = {true, 0.27f, 0.035f};
+      std::vector<Button> b;
+      drawDecaf(cv, dm, b);
+      bool sw = false;
+      for (const Button& x : b) sw |= x.id == "decaf_part_sticks";
+      CHECK(!sw);
+      dm.sticksSwitch = true;
+      drawDecaf(cv, dm, b);
+      cv.savePNG(out + "/decaf_with_sticks_switch.png");
+      sw = false;
+      for (const Button& x : b) sw |= x.id == "decaf_part_sticks";
+      CHECK(sw);
+      noOverlap(b, "decaf_with_sticks_switch.png");
+      for (auto& x : b) CHECK(x.x >= 0 && x.y >= 0 && x.x + x.w <= cv.w && x.y + x.h <= cv.h);
+    }
+  }
   printf("%s (%d failures)\n", fails ? "FAILED" : "PASSED", fails);
   return fails ? 1 : 0;
 }

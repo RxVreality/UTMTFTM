@@ -21,6 +21,7 @@
 #include "overlay_upload.h"
 #include "placement.h"
 #include "platform.h"
+#include "sticks.h"
 #include "store.h"
 #include "ui.h"
 #include "update.h"
@@ -153,6 +154,12 @@ struct App {
   DashPage page = DashPage::Hands;
   bool fineAdjust = false, fineBig = false;  // the arrows on the Hands page, and how far they go
   bool decafMeter = false;  // the driver's measuring the shake for the Decaf page
+  // Stick drift (sticks.h): the Decaf tab's other page. Which controller's in each hand goes by its serial number.
+  sticks::Drift stickDrift{platform::dataDir()};
+  std::string handSerial[2];
+  bool handFrame[2] = {false, false};  // a Steam Frame's controller: magnetic sticks, which don't wear this way
+  uint32_t driftStatusSeen = 0;
+  Clock::time_point driftPokeAt{};
   bind::Page bindings{bindDirs(), bindSettings()};
   // A newer version from GitHub (J4, 14 November): checked at start and every few hours, installed from the Update page.
   update::Updater updater{platform::dataDir()};
@@ -678,6 +685,21 @@ struct App {
     auto S = vr::VRSystem();
     for (int h = 0; h < 2; ++h) {
       auto idx = S->GetTrackedDeviceIndexForControllerRole(h ? vr::TrackedControllerRole_RightHand : vr::TrackedControllerRole_LeftHand);
+      // Stick drift is saved per controller, so a different one in this hand gets its own check.
+      std::string serial, type;
+      if (idx != vr::k_unTrackedDeviceIndexInvalid) {
+        char b[256] = {0};
+        S->GetStringTrackedDeviceProperty(idx, vr::Prop_SerialNumber_String, b, sizeof b);
+        serial = b;
+        b[0] = 0;
+        S->GetStringTrackedDeviceProperty(idx, vr::Prop_ControllerType_String, b, sizeof b);
+        type = b;
+      }
+      if (serial != handSerial[h]) {
+        handSerial[h] = serial;
+        if (!serial.empty()) logf("%s hand: controller %s", h ? "right" : "left", serial.c_str());
+      }
+      handFrame[h] = type.find("frame") != std::string::npos;
       if (idx == vr::k_unTrackedDeviceIndexInvalid) continue;
       char model[256] = {0};
       S->GetStringTrackedDeviceProperty(idx, vr::Prop_RenderModelName_String, model, sizeof model);
@@ -900,8 +922,34 @@ struct App {
     return m;
   }
 
+  double secondsSinceStart() const { return std::chrono::duration<double>(Clock::now() - clockStart).count(); }
+  void syncDriftStatus() {
+    if (stickDrift.statusSerial == driftStatusSeen) return;
+    driftStatusSeen = stickDrift.statusSerial;
+    if (stickDrift.status.empty()) statusUntil = {};
+    else setStatus(stickDrift.status, stickDrift.statusKind == 1 ? Good : stickDrift.statusKind == 2 ? Warn : Info, 8);
+  }
+  // Every loop: the stick drift page's check moves on from what the driver heard, and what's saved reaches the driver.
+  void tickDrift() {
+    fhlive::Shared* shm = platform::mapLive();
+    const bool showing = page == DashPage::Drift && panelShowing();
+    const int stepWas = stickDrift.step();
+    stickDrift.tick(shm ? &shm->drift : nullptr, handSerial, handFrame, showing, secondsSinceStart());
+    // While it's showing, the sticks move live on it: looked at ten times a second, and redrawn when they've moved (the key
+    // says when), rather than the page's usual five.
+    if (showing && Clock::now() - driftPokeAt > std::chrono::milliseconds(100)) { driftPokeAt = Clock::now(); dashPoke = true; }
+    if (stickDrift.step() != stepWas) {
+      logf("stick drift: step %d", stickDrift.step());
+      dashForce = true;
+    }
+    syncDriftStatus();
+    // On a Frame, with only Frame controllers, the page isn't there to be on.
+    if (page == DashPage::Drift && stickDrift.hidden()) { stickDrift.leave(); page = DashPage::Decaf; dashForce = true; }
+  }
+
   DecafModel decafModel() {
     DecafModel m;
+    m.sticksSwitch = !stickDrift.hidden();
     m.game = sceneKey.empty() ? "" : sceneName;
     m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::Live;
     m.level = store.decafLevel(sceneKey);
@@ -1057,6 +1105,19 @@ struct App {
       drawUpdate(dashCv, m, buttons);
       drawn = true;
     }
+    else if (page == DashPage::Drift) {
+      DriftModel m = stickDrift.model();
+      m.game = sceneKey.empty() ? "" : sceneName;
+      m.live = sceneKey.empty() ? LiveState::NoGame : LiveState::Live;
+      m.confirmClose = Clock::now() < confirmUntil;
+      if (Clock::now() < statusUntil) { m.status = status; m.statusWarn = statusWarn; m.statusGood = statusGood; }
+      m.hover = fx.hover;
+      m.down = fx.down;
+      key = driftKey(m);
+      if (!dashForce && key == dashDrawn) return;
+      drawDrift(dashCv, m, buttons);
+      drawn = true;
+    }
     else if (page == DashPage::Decaf) {
       DecafModel m = decafModel();
       key = decafKey(m);
@@ -1111,7 +1172,23 @@ struct App {
         dashForce = true;
         return;
       }
-      if (page != DashPage::Hands && page != DashPage::Decaf && id != "close" && id.rfind("page_", 0) != 0) {
+      // The Decaf tab's two pages, and stick drift's own buttons.
+      if (id == "decaf_part_hands" || id == "decaf_part_sticks" || (page == DashPage::Drift && id.rfind("drift_", 0) == 0)) {
+        if (id == "decaf_part_hands") { stickDrift.leave(); page = DashPage::Decaf; statusUntil = {}; }
+        else if (id == "decaf_part_sticks") { page = DashPage::Drift; statusUntil = {}; }
+        else {
+          // A tap can move the check on too (Check, Skip, Cancel), and the loop only logs the steps it moves itself.
+          const int was = stickDrift.step();
+          stickDrift.click(id, secondsSinceStart());
+          if (stickDrift.step() != was) logf("stick drift: step %d", stickDrift.step());
+        }
+        syncDriftStatus();
+        confirmUntil = {};
+        dashForce = true;
+        return;
+      }
+      if (page == DashPage::Drift && id.rfind("page_", 0) == 0) stickDrift.leave();  // another tab: a check part way through stops
+      if (page != DashPage::Hands && page != DashPage::Decaf && page != DashPage::Drift && id != "close" && id.rfind("page_", 0) != 0) {
         const bool combos = page == DashPage::Combos, rec = page == DashPage::Recorded;
         const bool guide = (page == DashPage::Bindings || combos) && bindings.loaded() && bindings.guided(page);
         guarded([&] {
@@ -1754,6 +1831,7 @@ struct App {
         if (panelDrawn == "#message" && now < messageUntil) placePanel(nullptr);
         else { vr::VROverlay()->HideOverlay(hint); panelDrawn.clear(); }
       }
+      tickDrift();
       p0 = Clock::now();
       refreshDashboard();
       part[3] = std::chrono::duration<double, std::milli>(Clock::now() - p0).count();

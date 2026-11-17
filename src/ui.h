@@ -75,7 +75,7 @@ struct DashModel {
 };
 
 // The pages share the dashboard panel. This says which one's showing.
-enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf, Update };
+enum class DashPage { Hands, Bindings, Combos, Recorded, Decaf, Update, Drift };
 
 // The Windows version is a beta, the Frame's isn't (J4, 14 November: the Windows build "is still a work in progress ...
 // relative to the native ARM64 Linux one that goes on the Steam Frame"). Every page's header then has a BETA tag after the
@@ -304,6 +304,7 @@ struct DecafModel {
   // This game weights your hands, or smooths aim, itself (input/hand_weights.json), in words. Empty: not that we know of.
   std::string weightNote;
   bool weightMaybe = false;  // only players say so: a yellow lamp, and it says "may"
+  bool sticksSwitch = false; // the Hands / Sticks switch to the stick drift page. Not on a Frame, whose sticks don't drift
   std::string status;
   bool statusWarn = false, statusGood = false;
   bool confirmClose = false;
@@ -311,6 +312,46 @@ struct DecafModel {
 };
 std::string decafKey(const DecafModel& m);
 void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& buttons);
+
+// ---------------------------------------------------------------- stick drift page
+// A worn stick that doesn't come back to the middle when you let go (J4, 14 November). The page checks each stick in three
+// steps, then the driver hides the drift from the game in the button hook. It's in the Decaf tab, behind a Hands / Sticks
+// switch: J4's pick of two drafts (the other was a tab of its own).
+struct DriftDot { float x, y; };  // a stick position, -1..1, y up
+struct DriftStick {
+  bool present = true;            // this hand's controller has a stick
+  bool checked = false;           // it's been through the check
+  bool drifts = false;            // and the check found drift
+  bool hasTouch = true;           // the controller feels a thumb on the stick
+  bool touched = false;           // and there's one on it now
+  DriftDot raw{0, 0};             // where the controller says it is now
+  DriftDot out{0, 0};             // what the game gets
+  DriftDot rest{0, 0};            // where it rests, as measured
+  float dead = 0;                 // how far round that reads as the middle. 0: none drawn
+  std::vector<DriftDot> trail;    // where it's been lately, faint
+  std::vector<DriftDot> landed;   // where it came to rest after each let-go
+  std::vector<float> reach;       // while rolling round the edge: how far it got in each of 32 directions. 0: not yet
+  float progress = -1;            // this step, 0..1. Negative: no bar
+  int countdown = 0;              // step 1: this stick's seconds still to go
+  std::string verdict;            // "Drifts up and to the left"
+  std::vector<std::string> lines; // what the check found, a line each
+  bool verdictWarn = false;
+};
+struct DriftModel {
+  std::string game;
+  LiveState live = LiveState::NoGame;
+  int step = 0;          // 0 the page, 1 leave them alone, 2 roll round the edge, 3 flick and let go, 4 what it found
+  int countdown = 0;     // step 1's seconds left
+  bool fixOn = false;    // the Off / On switch, once there's been a check
+  bool ready = true;     // the driver that's loaded can do it. If not, SteamVR needs a restart
+  DriftStick sticks[2];
+  std::string status;
+  bool statusWarn = false, statusGood = false;
+  bool confirmClose = false;
+  std::string hover, down;
+};
+std::string driftKey(const DriftModel& m);
+void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& buttons);
 
 // ---------------------------------------------------------------- guided walkthroughs
 // The Bindings and Combos tabs open on these: one question a step, on a big picture of your own controllers, and only what
