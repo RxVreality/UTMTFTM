@@ -63,7 +63,7 @@ If a SteamVR update ever breaks something and a fixed version is out, the line t
 
 To check, it asks GitHub which release is newest when it starts and every six hours after that, the same way a browser would open the releases page. On Windows it asks through Windows' own web library, without starting any other program. There's no account and nothing else goes with it. To turn it off, set the environment variable `UTMTFTM_NO_UPDATE_CHECK=1`.
 
-You'll need to install 0.6.1 itself by hand, the way you did the first time.
+You'll need to install 0.6.1 itself by hand, the way you did the first time. On Windows, get 0.6.2 by hand too: 0.6.1's own Update button still does it the old way, out of sight.
 
 ## Using it
 

@@ -2,7 +2,7 @@
 
 ## 0.6.2
 
-The Steam Frame version came out first, on 16 November. The Windows version follows once I've tried it myself.
+The Steam Frame version came out first, on 16 November, and the Windows beta the same evening, once I'd tried it on my PC: a Quest 3 over Virtual Desktop, in Half-Life: Alyx.
 
 Fixed:
 
