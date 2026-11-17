@@ -373,7 +373,24 @@ struct App {
     O->SetOverlayWidthInMeters(hint, 0.36f);
     O->SetOverlaySortOrder(hint, 11);
     drawIcon(thumbCv);
+#ifdef _WIN32
+    // MMeNDtal and J4 (0.6.x on Windows): SteamVR's dashboard showed a "?" where the yellow hand goes. The icon went over as a
+    // GPU texture, the same way as the pages. Now it's the PNG the installer puts beside the program, the way most add-ons set
+    // theirs, and SteamVR keeps its own copy. The Frame's icon shows as a texture, so it stays as it is there.
+    {
+      const std::string png = fs::path(g_root + "/utmtftm.png").make_preferred().string();
+      vr::EVROverlayError te = fs::exists(png) ? O->SetOverlayFromFile(thumb, png.c_str()) : vr::VROverlayError_RequestFailed;
+      const char* how = "from utmtftm.png";
+      if (te != vr::VROverlayError_None) {
+        const auto& px = thumbCv.toRGBA();
+        te = O->SetOverlayRaw(thumb, (void*)px.data(), thumbCv.w, thumbCv.h, 4);
+        how = "drawn, as raw pixels";
+      }
+      logf("dashboard icon: %s, %s", how, O->GetOverlayErrorNameFromEnum(te));
+    }
+#else
     upload(thumb, thumbCv);
+#endif
     Store::inputEnabled(false);
     Store::stopRecording();
     return true;
