@@ -1,15 +1,15 @@
 # Changelog
 
-## 0.6.3 (not out yet)
+## 0.6.3
 
 New:
 
-- Stick drift fix, on the Decaf tab under Sticks. A worn stick that doesn't come back to the middle when you let go (Quest controllers are known for it) gets checked in about half a minute: leave the sticks alone, roll them round the edge, then flick each one and let it spring back. UTMTFTM works out where each stick really rests, how far off it lands each time, and how far it still reaches, and from then on the game sees the middle when you let go while a full push still goes all the way. With your thumb off the stick it keeps learning where it rests, and the odd one-off spike from a worn stick is ignored. It's saved per controller, works in every game and in SteamVR's menus, and changes nothing until you run the check. A stick that rests and lands in the middle is left alone. It's in the Windows version only: the Steam Frame's sticks use magnets and don't wear like this.
+- Stick drift fix, on the Decaf tab under Sticks. A worn stick that doesn't come back to the middle when you let go (Quest controllers are known for it) gets checked in about half a minute: leave the sticks alone, roll them round the edge, then flick each one and let it spring back. UTMTFTM works out where each stick really rests, how far off it lands each time, and how far it still reaches, and from then on the game sees the middle when you let go while a full push still goes all the way. With your thumb off the stick it keeps learning where it rests, and the odd one-off spike from a worn stick is ignored. It's saved per controller, works in every game and in SteamVR's menus, and changes nothing until you run the check. A stick that rests and lands in the middle is left alone. It's in the Windows version only: the Steam Frame's sticks use magnets and don't wear like this.
 - On Windows, UTMTFTM is now purple instead of yellow: its pages, its icon, and the hand you're placing while you hold it. The Steam Frame version stays yellow. If you have both and stream from your PC to a Frame, you can tell at a glance which one you're in. I tried that setup with both running: while the Frame streams, its own copy doesn't move your hands, so use the purple one there. One thing I haven't sorted yet: streaming from a Frame over Steam Link, the dashboard bar still showed a yellow hand for it.
 
 Fixed:
 
-- On Windows, SteamVR's dashboard showed a question mark where UTMTFTM's hand should be. Thanks to [MMeNDtal](https://github.com/MMeNDtal) for spotting it.
+- On Windows, SteamVR's dashboard showed a question mark where UTMTFTM's hand should be. Thanks to [MMeNDtal](https://github.com/MMeNDtal) for spotting it.
 
 ## 0.6.2
 
