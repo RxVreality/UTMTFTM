@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.6.2 (not out yet)
+## 0.6.2
+
+The Steam Frame version came out first, on 16 November. The Windows version follows once I've tried it myself.
 
 Fixed:
 
