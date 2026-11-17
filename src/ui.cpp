@@ -58,13 +58,36 @@ bool Canvas::savePNG(const std::string& path) {
 }
 
 // ---------------------------------------------------------------- theme + primitives
-// A calibration tool with some speed in it: graphite, printed-looking off-white, one hi-vis yellow for the action.
-// Shapes lean at one shared angle instead of being rounded, and ruled lines replace cards. Yellow only ever means "do this".
+// A calibration tool with some speed in it: graphite, printed-looking off-white, one hi-vis accent for the action.
+// Shapes lean at one shared angle instead of being rounded, and ruled lines replace cards. The accent only ever means "do this".
+// The accent is yellow on the Frame and electric purple on Windows (see Accent in ui.h).
 namespace {
 struct RGB { double r, g, b; };
 const RGB INK{0.082, 0.082, 0.078}, RAISED{0.145, 0.145, 0.138}, LINE{0.30, 0.30, 0.285};
 const RGB PAPER{0.925, 0.925, 0.905}, DIM{0.62, 0.62, 0.59}, FAINT{0.40, 0.40, 0.38};
-const RGB SIGNAL{1.0, 0.824, 0.0}, ALERT{1.0, 0.33, 0.20}, LIVE{0.36, 0.86, 0.38};
+const RGB ALERT{1.0, 0.33, 0.20}, LIVE{0.36, 0.86, 0.38};
+// SIGNAL fills shapes. SIGNAL_TEXT is the same colour for text and thin lines on the dark page: purple that dark is hard to
+// read small, so purple's is a brighter one. ON_SIGNAL is what goes on top of a SIGNAL fill. MARK_SHADE is the
+// shadow hand on the icon.
+RGB SIGNAL, SIGNAL_TEXT, ON_SIGNAL, MARK_SHADE;
+#ifdef _WIN32
+Accent g_accent = Accent::Purple;
+#else
+Accent g_accent = Accent::Yellow;
+#endif
+void applyAccent() {
+  if (g_accent == Accent::Yellow) {
+    SIGNAL = SIGNAL_TEXT = {1.0, 0.824, 0.0};
+    ON_SIGNAL = INK;
+    MARK_SHADE = {0.78, 0.62, 0.0};
+  } else {
+    SIGNAL = {0.749, 0.0, 1.0};          // #bf00ff
+    SIGNAL_TEXT = {0.839, 0.361, 1.0};   // #d65cff
+    ON_SIGNAL = {1.0, 1.0, 1.0};         // white on it: J4 picked it over black, 16 November
+    MARK_SHADE = {0.45, 0.0, 0.60};
+  }
+}
+const bool g_accentReady = (applyAccent(), true);
 
 const double kLean = 0.20;  // sideways shift per unit of height: every shape's sides stay parallel, whatever its size
 
@@ -193,15 +216,16 @@ const std::string* g_hover = nullptr;  // the laser and press states of the page
 const std::string* g_down = nullptr;
 
 // Static press states over any tappable shape: outlined under the laser, darker while held.
-// onFill: the shape is filled with a bright colour, so the marks have to be dark to show.
-void fxOver(cairo_t* c, double x, double y, double w, double h, const std::string& id, bool enabled = true, bool onFill = false) {
+// onFill: the shape is filled with a bright colour, so the marks are onInk: dark on yellow or off-white, white on purple.
+void fxOver(cairo_t* c, double x, double y, double w, double h, const std::string& id, bool enabled = true, bool onFill = false,
+            RGB onInk = INK) {
   if (!g_hover || !g_down) return;
   bool hov = *g_hover == id, dn = *g_down == id && enabled;
   if (!hov && !dn) return;
   if (dn) slab(c, x, y, w, h, {0, 0, 0}, 0.22);
   else if (enabled && !onFill) slab(c, x, y, w, h, PAPER, 0.10);
   double in = onFill ? 4 : 0;
-  frame(c, x + in, y + in, w - 2 * in, h - 2 * in, onFill ? INK : PAPER, enabled ? 1 : 0.35, onFill ? 2 : 3);
+  frame(c, x + in, y + in, w - 2 * in, h - 2 * in, onFill ? onInk : PAPER, enabled ? 1 : 0.35, onFill ? 2 : 3);
 }
 
 enum Style { Outline, Primary, Danger, Solid, OnSignal };
@@ -214,10 +238,11 @@ void button(cairo_t* c, std::vector<Button>& out, double x, double y, double w, 
   bool filled = enabled && (style == Primary || style == Danger || style == Solid);
   if (filled) slab(c, x, y, w, h, style == Primary ? SIGNAL : style == Danger ? ALERT : PAPER);
   else if (!enabled) frame(c, x, y, w, h, FAINT, 0.6, 2);
-  else frame(c, x, y, w, h, style == OnSignal ? INK : PAPER, style == OnSignal ? 1 : 0.7, 2);
-  fxOver(c, x, y, w, h, id, enabled, filled || style == OnSignal);
+  else frame(c, x, y, w, h, style == OnSignal ? ON_SIGNAL : PAPER, style == OnSignal ? 1 : 0.7, 2);
+  const bool onSignal = style == OnSignal || (filled && style == Primary);
+  fxOver(c, x, y, w, h, id, enabled, filled || style == OnSignal, onSignal ? ON_SIGNAL : INK);
   double size = std::min(h * 0.42, 23.0);
-  RGB ink = !enabled ? FAINT : (filled || style == OnSignal) ? INK : PAPER;
+  RGB ink = !enabled ? FAINT : onSignal ? ON_SIGNAL : filled ? INK : PAPER;
   caps(c, x + w / 2, y + h / 2 + size * 0.36, size, text, ink, 1, 1, 1.4, w - 20 - h * kLean);
 }
 
@@ -256,12 +281,12 @@ void handMark(cairo_t* c, double cx, double cy, double s, RGB k) {
   cairo_restore(c);
 }
 
-// The app's mark: a black hand on a yellow slab, with its own offset shadow behind it.
+// The app's mark: a hand on a slab of the accent, with its own offset shadow behind it.
 void markTile(cairo_t* c, double x, double y, double w, double h) {
   slab(c, x, y, w, h, SIGNAL);
   double s = h * 0.66, cx = x + w * 0.49, cy = y + h * 0.545;
-  handMark(c, cx - h * 0.085, cy - h * 0.050, s, {0.78, 0.62, 0.0});
-  handMark(c, cx + h * 0.030, cy + h * 0.025, s, INK);
+  handMark(c, cx - h * 0.085, cy - h * 0.050, s, MARK_SHADE);
+  handMark(c, cx + h * 0.030, cy + h * 0.025, s, ON_SIGNAL);
 }
 
 void check(cairo_t* c, double x, double y, double s, RGB k) {
@@ -272,6 +297,10 @@ void check(cairo_t* c, double x, double y, double s, RGB k) {
 
 std::string fmt(const char* f, double v) { char b[64]; snprintf(b, sizeof b, f, v); return b; }
 }  // namespace
+
+void setAccent(Accent a) { g_accent = a; applyAccent(); }
+Accent accent() { return g_accent; }
+void accentRGB(float rgb[3]) { rgb[0] = float(SIGNAL.r); rgb[1] = float(SIGNAL.g); rgb[2] = float(SIGNAL.b); }
 
 // ---------------------------------------------------------------- click feedback
 const Button* hitButton(const std::vector<Button>& b, double x, double y) {
@@ -484,8 +513,8 @@ static void pageHeader(cairo_t* c, std::vector<Button>& btn, int width, const st
   const double titleW = caps(c, L + 94, 58, 42, "UTMTFTM", PAPER, 1, 0, 3.5);
   if (g_betaTag) {
     const double x = L + 94 + titleW + 16, y = 30, w = 76, h = 26;
-    frame(c, x, y, w, h, SIGNAL, 1, 2);
-    caps(c, x + w / 2 - 2, y + 19, 15, "Beta", SIGNAL, 1, 1, 2.0);
+    frame(c, x, y, w, h, SIGNAL_TEXT, 1, 2);
+    caps(c, x + w / 2 - 2, y + 19, 15, "Beta", SIGNAL_TEXT, 1, 1, 2.0);
   }
   label(c, L + 95, 82, 15, "Use the medium to fix the medium");
   const int nTabs = 4;
@@ -630,8 +659,8 @@ void drawDashboard(Canvas& cv, const DashModel& m, std::vector<Button>& btn) {
   const double headY = 138, subY = 164;
   if (m.armed) {
     slab(c, L, 108, R - L, 60, SIGNAL);
-    text(c, L + 28, 134, 25, "Now close the dashboard", true, INK);
-    text(c, L + 22, 158, 18, "You can start grabbing as soon as it's shut.", false, INK, 1, 0, R - L - 220);
+    text(c, L + 28, 134, 25, "Now close the dashboard", true, ON_SIGNAL);
+    text(c, L + 22, 158, 18, "You can start grabbing as soon as it's shut.", false, ON_SIGNAL, 1, 0, R - L - 220);
     button(c, btn, R - 158, 116, 134, 44, "cancel_armed", "Cancel", OnSignal);
   } else if (m.fine) {
     text(c, L, headY, 27, m.live == LiveState::NoGame ? "Fine adjust the default for every game" : "Fine adjust your hands", true, PAPER);
@@ -1108,24 +1137,24 @@ static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& ar
       const bool lit = litRows.count(r.id) > 0, armed = armedId == r.id || targetId == r.id || r.mark == 2, touched = r.mark == 1;
       const double cx = a == 0 ? X0 : X0 + W - cellW, cy = top + i * rowH, mid = cy + rowH / 2;
       if (armed) slab(c, cx, cy + 1, cellW, rowH - 2, SIGNAL);
-      else if (touched) frame(c, cx, cy + 1, cellW, rowH - 2, SIGNAL, 1, 2);
+      else if (touched) frame(c, cx, cy + 1, cellW, rowH - 2, SIGNAL_TEXT, 1, 2);
       else if (lit) slab(c, cx, cy + 1, cellW, rowH - 2, PAPER, 0.14);
       if (r.x >= 0) {
         const double ex = px + r.x * S, ey = py + r.y * S, sx = a == 0 ? cx + cellW : cx;
         const bool yellow = armed || touched, strong = yellow || lit;
-        set(c, yellow ? SIGNAL : PAPER, strong ? 1 : 0.42);
+        set(c, yellow ? SIGNAL_TEXT : PAPER, strong ? 1 : 0.42);
         cairo_set_line_width(c, strong ? 2 : 1);
         cairo_move_to(c, sx, mid);
         cairo_line_to(c, ex, ey);
         cairo_stroke(c);
         const double dot = strong ? 5 : 3.5;
-        if (r.behind) frame(c, ex - dot, ey - dot, dot * 2.4, dot * 2, yellow ? SIGNAL : PAPER, strong ? 1 : 0.8, 1.2);
+        if (r.behind) frame(c, ex - dot, ey - dot, dot * 2.4, dot * 2, yellow ? SIGNAL_TEXT : PAPER, strong ? 1 : 0.8, 1.2);
         else slab(c, ex - dot, ey - dot, dot * 2.4, dot * 2, yellow ? SIGNAL : PAPER, strong ? 1 : 0.85);
       }
       const int align = a == 0 ? 2 : 0;
       const double tx = a == 0 ? cx + cellW - 10 : cx + 12, tw = cellW - 18;
       if (r.mark) {
-        caps(c, tx, mid + 6, 17, r.markText.empty() ? (r.mark == 2 ? "Press " : "Touch ") + r.name : r.markText, armed ? INK : SIGNAL, 1, align, 1.2, tw);
+        caps(c, tx, mid + 6, 17, r.markText.empty() ? (r.mark == 2 ? "Press " : "Touch ") + r.name : r.markText, armed ? ON_SIGNAL : SIGNAL_TEXT, 1, align, 1.2, tw);
       } else if (r.unused) {
         label(c, tx, cy + 14, 13, r.name, armed ? INK : DIM, align);
         text(c, tx, cy + 31, 17, "Not used", false, armed ? INK : FAINT, 1, align, tw);
@@ -1139,7 +1168,7 @@ static void bindHand(cairo_t* c, std::vector<Button>& btn, const std::string& ar
         if (both != std::string::npos && textW(c, says, 15, true) > tw) says = says.substr(0, both);
         text(c, tx, cy + 31, 18, says, true, armed ? INK : PAPER, 1, align, tw);
       }
-      fxOver(c, cx, cy + 1, cellW, rowH - 2, r.id, true, armed);
+      fxOver(c, cx, cy + 1, cellW, rowH - 2, r.id, true, armed, armed ? ON_SIGNAL : INK);
       btn.push_back({cx, cy, cellW, rowH, r.id, true});
     }
   }
@@ -1232,7 +1261,7 @@ void drawBindings(Canvas& cv, const BindModel& m, std::vector<Button>& btn) {
   if (!m.armed.empty()) {
     slab(c, L, ay, R - L, ah, SIGNAL);
     const std::string prompt = m.prompt.empty() ? "Now tap what your " + m.armedName + " should do, on the " + m.ref + " above" : m.prompt;
-    text(c, L + 26, ay + 35, 23, prompt, true, INK, 1, 0, R - L - (m.picking ? 180 : 320));
+    text(c, L + 26, ay + 35, 23, prompt, true, ON_SIGNAL, 1, 0, R - L - (m.picking ? 180 : 320));
     if (!m.picking) button(c, btn, R - 290, ay + 7, 130, 40, "bind_nothing", "Nothing", OnSignal);
     button(c, btn, R - 150, ay + 7, 130, 40, "bind_cancel", "Cancel", OnSignal);
   } else {
@@ -1349,7 +1378,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
     }
     if (!m.picked.empty()) {
       slab(c, L, belowY, R - L, barH, SIGNAL);
-      caps(c, L + 30, belowY + 41, 23, m.picked, INK, 1, 0, 1.4, R - L - 340);
+      caps(c, L + 30, belowY + 41, 23, m.picked, ON_SIGNAL, 1, 0, 1.4, R - L - 340);
       button(c, btn, R - 300, belowY + 10, 130, 44, "combo_cancel", "Cancel", OnSignal);
       button(c, btn, R - 160, belowY + 10, 134, 44, "combo_next", "Next", OnSignal);
     } else {
@@ -1369,7 +1398,7 @@ void drawCombos(Canvas& cv, const ComboModel& m, std::vector<Button>& btn) {
     }
   } else {
     text(c, L, headY, 27, "What should it do?", true, PAPER);
-    caps(c, L, subY, 17, m.picked, SIGNAL, 1, 0, 1.2, R - L - 120);
+    caps(c, L, subY, 17, m.picked, SIGNAL_TEXT, 1, 0, 1.2, R - L - 120);
     caps(c, R, headY, 19, "2 of 2", DIM, 1, 2);
     const double listY = 180;
     hline(c, L, R, listY, LINE);
@@ -1443,7 +1472,7 @@ static void recordedTile(cairo_t* c, std::vector<Button>& btn, const RecordedTil
   if (selected) slab(c, x, y, w, h, SIGNAL);
   else if (t.kind == macro::Press || t.kind == macro::Push) slab(c, x, y, w, h, RAISED);
   frame(c, x, y, w, h, selected ? INK : PAPER, selected ? 1 : touch ? 0.35 : 0.7, 2);
-  if (!t.id.empty()) fxOver(c, x, y, w, h, t.id, true, selected);
+  if (!t.id.empty()) fxOver(c, x, y, w, h, t.id, true, selected, selected ? ON_SIGNAL : INK);
   const RGB ink = selected ? INK : PAPER;
   const double d = h * kLean, size = std::min(h * 0.26, 17.0);
   if (!t.hand.empty()) label(c, x + d + 5, y + size * 0.95, size * 0.72, t.hand, selected ? INK : DIM);
@@ -1452,17 +1481,17 @@ static void recordedTile(cairo_t* c, std::vector<Button>& btn, const RecordedTil
   const double ay = y + h * 0.78, as = h * 0.085;
   if (t.kind == macro::Push) {
     const Glyph g = t.x > 0 ? Glyph::Right : t.x < 0 ? Glyph::Left : t.y > 0 ? Glyph::Up : Glyph::Down;
-    glyph(c, x + w / 2 - d * 0.1, ay, as, g, selected ? INK : SIGNAL);
+    glyph(c, x + w / 2 - d * 0.1, ay, as, g, selected ? ON_SIGNAL : SIGNAL_TEXT);
   } else if (t.kind == macro::Centre) {
     label(c, x + w / 2, ay + as, size * 0.7, "Back", selected ? INK : DIM, 1);
   } else if (t.both) {
     // One press: down and straight back up, with nothing between them.
     const double apart = as * 1.3;
-    glyph(c, x + w / 2 - d * 0.1 - apart, ay, as, Glyph::Down, selected ? INK : touch ? DIM : SIGNAL);
+    glyph(c, x + w / 2 - d * 0.1 - apart, ay, as, Glyph::Down, selected ? ON_SIGNAL : touch ? DIM : SIGNAL_TEXT);
     glyph(c, x + w / 2 - d * 0.1 + apart, ay, as, Glyph::Up, selected ? INK : touch ? DIM : PAPER);
     if (touch) label(c, x + w - d - 5, y + size * 0.95, size * 0.62, "Touch", selected ? INK : DIM, 2);
   } else {
-    glyph(c, x + w / 2 - d * 0.1, ay, as, down ? Glyph::Down : Glyph::Up, selected ? INK : touch ? DIM : down ? SIGNAL : PAPER);
+    glyph(c, x + w / 2 - d * 0.1, ay, as, down ? Glyph::Down : Glyph::Up, selected ? ON_SIGNAL : touch ? DIM : down ? SIGNAL_TEXT : PAPER);
     if (touch) label(c, x + w - d - 5, y + size * 0.95, size * 0.62, "Touch", selected ? INK : DIM, 2);
   }
   if (!t.id.empty()) btn.push_back({x, y, w, h, t.id});
@@ -1541,10 +1570,10 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     // This part happens with the dashboard shut. Steam Link keeps every button for the dashboard while it's open, and it's
     // easier in the game anyway.
     slab(c, L, 112, R - L, 150, SIGNAL);
-    text(c, L + 48, 174, 36, "Now close the dashboard", true, INK, 1, 0, R - L - 80);
+    text(c, L + 48, 174, 36, "Now close the dashboard", true, ON_SIGNAL, 1, 0, R - L - 80);
     text(c, L + 34, 222, 21, m.step == 1 ? "It records with the dashboard shut. A sign in front of you counts down, then do your sequence."
                                          : "It listens with the dashboard shut. Then press what should play this.",
-         false, INK, 1, 0, R - L - 80);
+         false, ON_SIGNAL, 1, 0, R - L - 80);
     const char* how[3] = {"Shut it the way you usually do.",
                           m.step == 1 ? "It stops 2 seconds after your last press, and this page opens again by itself." : "As soon as you let go of it, this page opens again by itself.",
                           m.step == 1 ? "Open the dashboard while it records and it stops there, keeping what you did." : "Open the dashboard before then and it stops without choosing."};
@@ -1553,9 +1582,9 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     button(c, btn, L, 640, 150, 48, "macro_leave", m.step == 4 ? "Back" : "Cancel", Outline);
   } else if (m.step == 1) {
     slab(c, L, 112, R - L, 150, SIGNAL);
-    text(c, L + 48, 174, 36, "Let go of everything", true, INK, 1, 0, R - L - 260);
-    text(c, L + 34, 222, 21, "Your buttons stop reaching SteamVR while it records, so don't worry about the laser.", false, INK, 1, 0, R - L - 260);
-    caps(c, R - 120, 214, 76, std::to_string(std::max(1, m.countdown)), INK, 1, 1, 0);
+    text(c, L + 48, 174, 36, "Let go of everything", true, ON_SIGNAL, 1, 0, R - L - 260);
+    text(c, L + 34, 222, 21, "Your buttons stop reaching SteamVR while it records, so don't worry about the laser.", false, ON_SIGNAL, 1, 0, R - L - 260);
+    caps(c, R - 120, 214, 76, std::to_string(std::max(1, m.countdown)), ON_SIGNAL, 1, 1, 0);
     button(c, btn, L, 640, 150, 48, "macro_cancel", "Cancel", Outline);
   } else if (m.step == 2) {
     slab(c, L, 112, R - L, 110, RAISED);
@@ -1609,8 +1638,8 @@ void drawRecorded(Canvas& cv, const RecordedModel& m, std::vector<Button>& btn) 
     button(c, btn, R - 230, 640, 230, 48, "macro_save", "Save", Primary, !m.plays.empty());
   } else if (m.step == 4) {
     slab(c, L, 112, R - L, 110, SIGNAL);
-    text(c, L + 44, 164, 34, m.touchesOn ? "Press or touch what should play this" : "Press what should play this", true, INK, 1, 0, R - L - 80);
-    text(c, L + 30, 202, 20, m.touchesOn ? "Any button, on either controller. Touch it without pressing if you'd like a thumb resting there to set it off." : "Any button, on either controller.", false, INK, 1, 0, R - L - 80);
+    text(c, L + 44, 164, 34, m.touchesOn ? "Press or touch what should play this" : "Press what should play this", true, ON_SIGNAL, 1, 0, R - L - 80);
+    text(c, L + 30, 202, 20, m.touchesOn ? "Any button, on either controller. Touch it without pressing if you'd like a thumb resting there to set it off." : "Any button, on either controller.", false, ON_SIGNAL, 1, 0, R - L - 80);
     recordedStrip(c, btn, m.tiles, -1, L, R, 244, 96, 86, 8, 0, 26);
     recordedFeeling(c, m, L, R);
   } else {
@@ -1708,7 +1737,7 @@ static double flash(double t) { return 0.5 - 0.5 * std::cos(2 * M_PI * t); }
 static void ripple(cairo_t* c, double x, double y, double t) {
   for (double k : {0.0, 0.5}) {
     const double u = std::fmod(t + k, 1.0), r = 6 + 13 * u;
-    set(c, SIGNAL, (1 - u) * 0.9);
+    set(c, SIGNAL_TEXT, (1 - u) * 0.9);
     cairo_set_line_width(c, 2.5);
     cairo_new_path(c);
     cairo_arc(c, x, y, r, 0, 2 * M_PI);
@@ -1751,14 +1780,14 @@ static void guideHand(cairo_t* c, std::vector<Button>& btn, const ControllerPict
       const bool flashing = lk == GuideLook::Pulse || lk == GuideLook::TagPulse;
       const bool yellow = solid || outlined || flashing;
       if (solid) slab(c, cx, cy + 2, cellW, rowH - 4, SIGNAL);
-      else if (outlined) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 1, 2);
-      else if (lk == GuideLook::TagPulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 0.25 + 0.75 * flash(t), 2);
-      else if (lk == GuideLook::Pulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL, 0.15 + 0.55 * flash(t), 1.5);
+      else if (outlined) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL_TEXT, 1, 2);
+      else if (lk == GuideLook::TagPulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL_TEXT, 0.25 + 0.75 * flash(t), 2);
+      else if (lk == GuideLook::Pulse) frame(c, cx, cy + 2, cellW, rowH - 4, SIGNAL_TEXT, 0.15 + 0.55 * flash(t), 1.5);
       else if (lk == GuideLook::Tag) frame(c, cx, cy + 2, cellW, rowH - 4, PAPER, 0.45, 1.5);
       if (r.x >= 0) {
         const double ex = px + r.x * S, ey = py + r.y * S, sx = a == 0 ? cx + cellW : cx;
         const bool faded = lk == GuideLook::Faded || lk == GuideLook::Plain;
-        set(c, yellow ? SIGNAL : PAPER, faded ? 0.35 : yellow ? 0.9 : 0.6);
+        set(c, yellow ? SIGNAL_TEXT : PAPER, faded ? 0.35 : yellow ? 0.9 : 0.6);
         cairo_set_line_width(c, solid ? 2.2 : 1.2);
         cairo_move_to(c, sx, mid);
         cairo_line_to(c, ex, ey);
@@ -1768,11 +1797,11 @@ static void guideHand(cairo_t* c, std::vector<Button>& btn, const ControllerPict
       }
       const int align = a == 0 ? 2 : 0;
       const double tx = a == 0 ? cx + cellW - 12 : cx + 14, tw = cellW - 22;
-      const RGB ink = solid ? INK : lk == GuideLook::Faded ? FAINT : PAPER;
-      const RGB topInk = solid ? INK : lk == GuideLook::Faded ? FAINT : DIM;
-      const RGB jobInk = lk == GuideLook::Changed ? SIGNAL : ink;
+      const RGB ink = solid ? ON_SIGNAL : lk == GuideLook::Faded ? FAINT : PAPER;
+      const RGB topInk = solid ? ON_SIGNAL : lk == GuideLook::Faded ? FAINT : DIM;
+      const RGB jobInk = lk == GuideLook::Changed ? SIGNAL_TEXT : ink;
       if (r.job.empty()) {
-        caps(c, tx, mid + 7, 19, r.name, outlined ? SIGNAL : ink, 1, align, 1.2, tw);
+        caps(c, tx, mid + 7, 19, r.name, outlined ? SIGNAL_TEXT : ink, 1, align, 1.2, tw);
       } else if (textW(c, r.job, 17, true) <= tw) {
         label(c, tx, cy + 17, 13, r.name, topInk, align);
         text(c, tx, cy + 39, 19, r.job, true, jobInk, 1, align, tw);
@@ -1797,7 +1826,7 @@ static void guideHand(cairo_t* c, std::vector<Button>& btn, const ControllerPict
         text(c, tx, cy + 29, 15, l1, true, jobInk, 1, align, tw);
         text(c, tx, cy + 44, 15, l2, true, jobInk, 1, align, tw);
       }
-      fxOver(c, cx, cy + 2, cellW, rowH - 4, r.id, true, solid);
+      fxOver(c, cx, cy + 2, cellW, rowH - 4, r.id, true, solid, solid ? ON_SIGNAL : INK);
       btn.push_back({cx, cy, cellW, rowH, r.id, true});
     }
   }
@@ -1813,8 +1842,8 @@ static void guideHand(cairo_t* c, std::vector<Button>& btn, const ControllerPict
   for (const Badge& b : badges) {
     const double bh = 30, bw = capsW(c, b.text, 20, 3) + 22 + bh * kLean, bx = b.x + 10, by = b.y - bh - 8;
     slab(c, bx, by, bw, bh, b.now ? SIGNAL : INK);
-    frame(c, bx, by, bw, bh, SIGNAL, 1, 2);
-    caps(c, bx + bw / 2, by + bh / 2 + 7, 20, b.text, b.now ? INK : SIGNAL, 1, 1, 3);
+    frame(c, bx, by, bw, bh, b.now ? SIGNAL : SIGNAL_TEXT, 1, 2);
+    caps(c, bx + bw / 2, by + bh / 2 + 7, 20, b.text, b.now ? ON_SIGNAL : SIGNAL_TEXT, 1, 1, 3);
   }
 }
 
@@ -1882,7 +1911,7 @@ void drawGuide(Canvas& cv, const GuideModel& m, std::vector<Button>& btn) {
   const double barH = 58;
   if (!m.bar.empty()) {
     slab(c, L, y, R - L, barH, SIGNAL);
-    caps(c, L + 28, y + 38, 22, m.bar, INK, 1, 0, 1.4, R - L - 130 - 170.0 * m.buttons.size());
+    caps(c, L + 28, y + 38, 22, m.bar, ON_SIGNAL, 1, 0, 1.4, R - L - 130 - 170.0 * m.buttons.size());
     double x = R - 20;
     for (const GuideButton& b : m.buttons) {
       const double w = std::max(130.0, capsW(c, upper(b.text), 18, 1.4) + 50);
@@ -1978,7 +2007,7 @@ void drawPanel(Canvas& cv, const PanelModel& m) {
   double x0 = L;
   if (chipW > 0) {
     slab(c, x0, row - 36, chipW, chipH, acc);
-    caps(c, x0 + chipW / 2, row - 4, 22, m.chip, INK, 1, 1, 1.6);
+    caps(c, x0 + chipW / 2, row - 4, 22, m.chip, m.warn || m.match ? INK : ON_SIGNAL, 1, 1, 1.6);
     x0 += chipW + gap;
   }
   text(c, x0, row, tsize, m.text, true, PAPER);
@@ -2063,8 +2092,8 @@ void drawUpdate(Canvas& cv, const UpdateModel& m, std::vector<Button>& btn) {
                                   "Restart SteamVR when you're ready, and " + m.latest + " starts with it."};
     for (int i = 0; i < 3; ++i) {
       const double sy = 262 + i * 76.0;
-      frame(c, L, sy - 34, 48, 48, SIGNAL, 1, 2);
-      caps(c, L + 24, sy, 24, std::to_string(i + 1), SIGNAL, 1, 1, 0);
+      frame(c, L, sy - 34, 48, 48, SIGNAL_TEXT, 1, 2);
+      caps(c, L + 24, sy, 24, std::to_string(i + 1), SIGNAL_TEXT, 1, 1, 0);
       text(c, L + 72, sy - 2, 22, steps[i], i == 1, PAPER, 1, 0, R - L - 72);
     }
     const double by = 572, bh = 64;

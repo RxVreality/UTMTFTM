@@ -1,5 +1,9 @@
 # Changelog
 
+## Not released yet
+
+- On Windows, UTMTFTM is now purple instead of yellow: its pages, its hand in the dashboard, and the hand you're placing while you hold it. The Steam Frame version stays yellow. If you have both and stream from your PC to a Frame, you can tell at a glance which one you're in. I tried that setup with both running: while the Frame streams, its own copy doesn't move your hands, so use the purple one there.
+
 ## 0.6.2
 
 The Steam Frame version came out first, on 16 November, and the Windows beta the same evening, once I'd tried it on my PC: a Quest 3 over Virtual Desktop, in Half-Life: Alyx.

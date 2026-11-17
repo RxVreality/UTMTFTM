@@ -27,6 +27,14 @@ struct Canvas {
   bool savePNG(const std::string& path);
 };
 
+// The one colour that means "do this". Hi-vis yellow on the Steam Frame, electric purple (#bf00ff, with white on it) on
+// Windows, so the two copies can't be mixed up when a Frame streams from a PC (J4, 16 November). Each build starts with its
+// own; the tests set it to picture either.
+enum class Accent { Yellow, Purple };
+void setAccent(Accent a);
+Accent accent();
+void accentRGB(float rgb[3]);  // the fill colour, for SteamVR's tint on the held ghost
+
 // enabled=false: drawn greyed; tapping it explains why instead of doing nothing.
 struct Button { double x, y, w, h; std::string id; bool enabled = true; };
 const Button* hitButton(const std::vector<Button>& b, double x, double y);

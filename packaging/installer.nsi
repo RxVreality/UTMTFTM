@@ -59,7 +59,7 @@ Var NoRegister
 Function .onInit
   StrCpy $Update ""
   StrCpy $NoRegister ""
-  StrCpy $Finish "Start SteamVR and open the dashboard. UTMTFTM is the yellow hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them."
+  StrCpy $Finish "Start SteamVR and open the dashboard. UTMTFTM is the purple hand.$\r$\n$\r$\nStart a game first if you want to see your hands move while you place them."
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "/UPDATE" $R1

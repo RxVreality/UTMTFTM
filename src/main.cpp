@@ -1436,9 +1436,11 @@ struct App {
 
     if (live) store.publishLive(&work);  // the in-game hand follows right now
 
-    // Bubble / ghost colour: off-white resting, yellow while held, red past the limit.
+    // Bubble / ghost colour: off-white resting, the accent while held (yellow on the Frame, purple on Windows), red past the limit.
+    float acc[3];
+    accentRGB(acc);
     if (over) vr::VROverlay()->SetOverlayColor(ghost, 1.0f, 0.33f, 0.20f);
-    else if (held) vr::VROverlay()->SetOverlayColor(ghost, 1.0f, 0.824f, 0.0f);
+    else if (held) vr::VROverlay()->SetOverlayColor(ghost, acc[0], acc[1], acc[2]);
     else vr::VROverlay()->SetOverlayColor(ghost, 0.925f, 0.925f, 0.905f);
     if (live) {
       // The driver moves the held hand itself, so the bubble only shows where things are: 30 frames a second is plenty, and

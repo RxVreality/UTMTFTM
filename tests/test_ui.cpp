@@ -99,12 +99,14 @@ int main(int argc, char** argv) {
       drawDashboard(cv, m, b);
       cv.savePNG(out + (d ? "/beta_tag_on.png" : "/beta_tag_off.png"));
       const auto& px = cv.toRGBA();
+      // The tag is in the accent: yellow on the Frame, purple on Windows.
+      const bool purple = accent() != Accent::Yellow;
       const auto yellow = [&](int x0, int y0, int x1, int y1) {
         int n = 0;
         for (int y = y0; y < y1; ++y)
           for (int x = x0; x < x1; ++x) {
             const uint8_t* q = &px[(size_t(y) * cv.w + x) * 4];
-            if (q[0] > 200 && q[1] > 150 && q[2] < 80) ++n;
+            if (purple ? (q[0] > 150 && q[1] < 130 && q[2] > 200) : (q[0] > 200 && q[1] > 150 && q[2] < 80)) ++n;
           }
         return n;
       };
@@ -639,6 +641,97 @@ int main(int argc, char** argv) {
       }
     cairo_surface_mark_dirty(sc.s);
     sc.savePNG(out + "/ghost.png");
+  }
+
+  // J4, 16 November: the Windows copy is electric purple with white on it, and the Frame's stays
+  // yellow, so the two can't be mixed up when a Frame streams from a PC. Each build starts in its own. The sheet puts the
+  // same screens side by side in each look, and each look's screens are saved full size too. The checks: each look's
+  // armed bar is its own colour, and what's written on it is black on yellow and white on purple.
+  {
+#ifdef _WIN32
+    CHECK(accent() == Accent::Purple);
+#else
+    CHECK(accent() == Accent::Yellow);
+#endif
+    const Accent was = accent();
+    const bool betaWas = g_betaTag;
+    struct Look { Accent a; const char* tag; const char* name; };
+    const Look looks[] = {{Accent::Yellow, "yellow", "STEAM FRAME: YELLOW"}, {Accent::Purple, "purple", "WINDOWS: PURPLE"}};
+    const int nLooks = int(sizeof looks / sizeof looks[0]);
+    const double k = 0.6;
+    const int colW = int(1200 * k) + 30, top = 70, panelY = top + int(760 * k) + 24, iconY = panelY + int(300 * k) + 24;
+    Canvas sheet(30 + colW * nLooks, iconY + 160);
+    cairo_set_source_rgb(sheet.c, 0.03, 0.03, 0.03);
+    cairo_paint(sheet.c);
+    auto paste = [&](Canvas& cv, double px, double py, double s) {
+      cairo_save(sheet.c);
+      cairo_translate(sheet.c, px, py);
+      cairo_scale(sheet.c, s, s);
+      cairo_set_source_surface(sheet.c, cv.s, 0, 0);
+      cairo_paint(sheet.c);
+      cairo_restore(sheet.c);
+    };
+    for (int i = 0; i < nLooks; ++i) {
+      const Look& L = looks[i];
+      setAccent(L.a);
+      CHECK(accent() == L.a);
+      g_betaTag = L.a != Accent::Yellow;  // the Frame's copy has no beta tag
+      const double x = 30 + i * colW;
+      cairo_select_font_face(sheet.c, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+      cairo_set_font_size(sheet.c, 24);
+      cairo_set_source_rgb(sheet.c, 0.925, 0.925, 0.905);
+      cairo_move_to(sheet.c, x, 46);
+      cairo_show_text(sheet.c, L.name);
+
+      Canvas dash(1200, 760);
+      DashModel m;
+      m.game = "Half-Life: Alyx";
+      m.live = LiveState::Live;
+      m.armed = true;
+      m.cards[0].badge = m.cards[1].badge = Badge::GameCustom;
+      std::vector<Button> b;
+      drawDashboard(dash, m, b);
+      paste(dash, x, top, k);
+      dash.savePNG(out + "/accent_" + L.tag + "_dash_armed.png");
+      {
+        // The "Now close the dashboard" bar, left of its Cancel button.
+        const auto& px = dash.toRGBA();
+        const int want[3] = {L.a == Accent::Yellow ? 255 : 191, L.a == Accent::Yellow ? 210 : 0, L.a == Accent::Yellow ? 0 : 255};
+        int fill = 0, light = 0, dark = 0;
+        for (int y = 115; y < 162; ++y)
+          for (int x = 70; x < 700; ++x) {
+            const uint8_t* q = &px[(size_t(y) * dash.w + x) * 4];
+            if (std::abs(q[0] - want[0]) < 30 && std::abs(q[1] - want[1]) < 30 && std::abs(q[2] - want[2]) < 30) ++fill;
+            if (q[0] > 230 && q[1] > 230 && q[2] > 230) ++light;
+            if (q[0] < 50 && q[1] < 50 && q[2] < 50) ++dark;
+          }
+        printf("accent %s: bar %d px of its colour, %d light, %d dark\n", L.tag, fill, light, dark);
+        CHECK(fill > 15000);
+        if (L.a == Accent::Yellow) CHECK(dark > 300 && light == 0);
+        else CHECK(light > 300 && dark == 0);
+      }
+      m.armed = false;
+      m.cards[0].applied = off(3.2f, -1.0f, 0.5f, 12, 0, -8);
+      m.hover = "place_left";
+      drawDashboard(dash, m, b);
+      dash.savePNG(out + "/accent_" + L.tag + "_dash_live.png");
+
+      Canvas panel(820, 300);
+      PanelModel p;
+      p.header = "LEFT HAND"; p.progress = "1 / 2"; p.chip = "GRIP"; p.text = "Grab the ghost with your right hand";
+      p.status = "No offset yet"; p.keys = {{"A / X", "No offset"}, {"B / Y", "Cancel"}};
+      drawPanel(panel, p);
+      paste(panel, x, panelY, k);
+      panel.savePNG(out + "/accent_" + L.tag + "_panel.png");
+
+      Canvas icon(256, 256);
+      drawIcon(icon);
+      paste(icon, x, iconY, 0.5);
+      icon.savePNG(out + "/accent_" + L.tag + "_icon.png");
+    }
+    sheet.savePNG(out + "/accent_sheet.png");
+    setAccent(was);
+    g_betaTag = betaWas;
   }
   printf("%s (%d failures)\n", fails ? "FAILED" : "PASSED", fails);
   return fails ? 1 : 0;

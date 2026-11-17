@@ -18,6 +18,8 @@ It's free, and I'm sharing it in case it's useful to someone else.
 
 Use this one if you play PC VR, including when you stream to a Steam Frame.
 
+It's purple, and the Frame version is yellow, so if you have both you can tell which one you're looking at. While a Frame streams from your PC, its own copy doesn't move your hands, so place them with the purple one.
+
 The Windows version is a beta. UTMTFTM started on the Frame, where it runs natively on the headset, and that's where I've used it most. On a PC there's more in between: streaming apps like Virtual Desktop, Quest Link and Steam Link, lots of different headsets and controllers, and Windows deciding which program runs when. 0.6.1 fixed a lag that only showed up there, in heavy games like Pavlov. It may have bugs the Frame version doesn't, so if something feels off, please [open an issue](../../issues/new) and attach your logs.
 
 1. Close SteamVR.
@@ -69,7 +71,7 @@ You'll need to install 0.6.1 itself by hand, the way you did the first time. On 
 
 Start your game first, then:
 
-1. Open the SteamVR dashboard and click the yellow hand. The top right of the page should say **Live in game**.
+1. Open the SteamVR dashboard and click the yellow hand (purple on Windows). The top right of the page should say **Live in game**.
 2. Click **Move** under the hand you want to fix, or **Move both hands**.
 3. Close the dashboard.
 4. Reach over with your other hand, squeeze grip and drag the hand where it should be. A bubble shows how far it can go, 15 cm unless you change it on the page. Let go outside the bubble and it gets pulled back. Rotation isn't limited.
@@ -132,7 +134,7 @@ SteamVR already translates between controllers when a game has nothing for yours
 
 ### Changing one button
 
-Tap the button on your own controller, and a yellow bar asks what it should do. Tap that on the controller above, or **Nothing** to switch it off. If you just want to swap your own buttons around, pick your own controller to compare with. **Undo rewiring** takes it all back.
+Tap the button on your own controller, and a yellow bar (purple on Windows) asks what it should do. Tap that on the controller above, or **Nothing** to switch it off. If you just want to swap your own buttons around, pick your own controller to compare with. **Undo rewiring** takes it all back.
 
 You can also change one part of a control, which [MMeNDtal](https://github.com/MMeNDtal) asked for. Tap one of yours and pick under **Or one part**: one way of pushing the stick, its press, or its touch. Tap a stick on the other controller and it asks which part of it, so a button can push a stick one way. If a game wants the stick pushed forward to jump, your Y can do it instead. Pushing a stick one way can press a button too, and the stick still moves as before. Set one way to **Nothing** and pushing the stick that way stops reaching the game, while the other ways still work. Directions read as North, East, South and West, or as Y+, Y-, X+ and X-, and the **Names** switch at the end of that row changes it.
 
@@ -225,7 +227,7 @@ So the add-on works around it. When you move a job to another button, it turns y
 
 **The page says "Applies next launch" instead of "Live in game".** The add-on isn't running. In SteamVR go to **Settings > Startup/Shutdown > Manage Add-ons**, make sure UTMTFTM is on, and restart SteamVR.
 
-**No yellow hand in the dashboard.** Same fix. The program closes itself when the add-on is switched off, on purpose.
+**No yellow hand (purple on Windows) in the dashboard.** Same fix. The program closes itself when the add-on is switched off, on purpose.
 
 **A game's buttons stopped working after picking a layout.** Tap **Developer's** on the Bindings tab and restart the game. If you'd tell me which game and which layout, I'd like to know.
 
