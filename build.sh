@@ -10,8 +10,6 @@ dist/test_macro
 dist/test_update
 mkdir -p build/decaf
 dist/test_decaf build/decaf
-mkdir -p build/drift
-dist/test_drift build/drift
 dist/test_session
 dist/test_driver
 dist/test_controllers

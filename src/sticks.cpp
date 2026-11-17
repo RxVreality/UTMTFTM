@@ -108,6 +108,9 @@ void Drift::say(const std::string& s, int kind) {
 }
 
 bool Drift::hidden() const {
+#if !UTMTFTM_STICK_DRIFT
+  return true;  // not in this build: the Frame's TMR sticks don't wear like this (CMakeLists)
+#endif
   bool frame = false, other = false;
   for (const Hand& h : hands_) {
     if (h.serial.empty()) continue;

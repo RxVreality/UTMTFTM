@@ -111,9 +111,9 @@ A worn stick doesn't come back to the middle when you let go, so your character 
 
 From that it works out where each stick really rests, how far off it lands each time you let go, and how far it still reaches each way. After that the game sees the middle whenever you let go, and a full push still goes all the way, even on a side that's worn short. While your thumb is off the stick it keeps learning where the stick rests, since anything a stick says with nobody touching it is drift. The odd one-off spike from a worn stick is ignored.
 
-It's saved per controller, so a different controller gets its own check. It works in every game and in SteamVR's own menus, and nothing changes until you run the check. **Fix drift** turns it off and on. A stick with no drift is left alone. The Steam Frame's sticks use magnets and don't wear this way, so the Sticks page doesn't show on a Frame.
+It's saved per controller, so a different controller gets its own check. It works in every game and in SteamVR's own menus, and nothing changes until you run the check. **Fix drift** turns it off and on. A stick that rests and lands in the middle is left alone, even if your roll round the edge didn't go all the way out somewhere. It's only in the Windows version for now: the Steam Frame's sticks use magnets and don't wear this way, so the Frame version doesn't have it.
 
-So far it's only been tested on made-up worn sticks in the tests and in a simulated SteamVR, not on a real drifting controller. If you have one, I'd love to hear how it does.
+I've run the check on my own Quest 3 over Virtual Desktop, whose sticks don't drift, and on made-up worn sticks in the tests. It hasn't met a really drifting controller yet. If you have one, I'd love to hear how it does.
 
 ## Bindings
 

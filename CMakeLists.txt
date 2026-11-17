@@ -6,6 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/dist)
 # The program knows its own version, so it can tell when GitHub has a newer one (src/update.h).
 add_compile_definitions(UTMTFTM_VERSION="${PROJECT_VERSION}")
+# Stick drift is in the Windows version only, for now. The Steam Frame's sticks are TMR (magnets) and don't wear the way
+# a Quest's do, so the Frame's driver and program leave sticks alone (J4, 16 November).
+if(WIN32)
+  set(UTMTFTM_STICK_DRIFT 1)
+else()
+  set(UTMTFTM_STICK_DRIFT 0)
+endif()
+add_compile_definitions(UTMTFTM_STICK_DRIFT=${UTMTFTM_STICK_DRIFT})
 
 if(WIN32)
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
@@ -122,9 +130,11 @@ target_link_libraries(test_update PRIVATE ${JSON_LIBS} ${THREAD_LIBS})
 add_executable(test_decaf tests/test_decaf.cpp)
 target_link_libraries(test_decaf PRIVATE ${CAIRO_LIBS})
 # Stick drift: the maths on made-up worn sticks, and the page's whole check run the way the app runs it.
-add_executable(test_drift tests/test_drift.cpp src/sticks.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
-target_link_libraries(test_drift PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
-add_dependencies(test_drift utmtftm)
+if(UTMTFTM_STICK_DRIFT)
+  add_executable(test_drift tests/test_drift.cpp src/sticks.cpp src/ui.cpp src/glove.cpp ${PLATFORM_SRC})
+  target_link_libraries(test_drift PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})
+  add_dependencies(test_drift utmtftm)
+endif()
 
 add_executable(test_ui tests/test_ui.cpp src/ui.cpp ${PLATFORM_SRC} src/glove.cpp)
 target_link_libraries(test_ui PRIVATE ${JSON_LIBS} ${CAIRO_LIBS})

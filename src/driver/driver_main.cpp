@@ -914,9 +914,12 @@ vr::EVRInputError onUpdate(Next next, void* self, vr::VRInputComponentHandle_t h
   in->reports.store(in->reports.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
   float f = float(v);
   c->raw.store(f, std::memory_order_relaxed);
-  // A drifting stick is fixed first, so everything after this, and the game, gets it fixed.
+  // A drifting stick is fixed first, so everything after this, and the game, gets it fixed. Windows only (CMakeLists):
+  // with no stick drift, nothing is ever a stick here, so every report goes on as it came.
   const int role = c->stickRole.load(std::memory_order_relaxed);
+#if UTMTFTM_STICK_DRIFT
   if (role >= 0) f = driftFix(role, f);
+#endif
   const Value out = role >= 0 ? Value(f) : v;
   c->phys.store(f, std::memory_order_relaxed);
   if (g_recording.load(std::memory_order_relaxed) && holdBackWhileRecording(c)) {
@@ -1444,11 +1447,15 @@ void tickInput() {
     g_seenSeq = read;
     g_seenComps = comps;
     compile(table);
+#if UTMTFTM_STICK_DRIFT
     findSticks();
+#endif
     logf("buttons: %u known, %zu macros, %zu swaps, %zu live combos, %zu links, %zu held ways", comps, g_run.macros.size(), g_run.routes.size(), g_run.chords.size(), g_run.links.size(), g_run.holds.size());
   }
 
+#if UTMTFTM_STICK_DRIFT
   flushHeldJumps();
+#endif
   const bool wanted = in->enabled.load(std::memory_order_relaxed) != 0 && !recording;
   if (wanted != g_armed) {
     if (wanted) arm();
@@ -1558,6 +1565,7 @@ class Provider : public vr::IServerTrackedDeviceProvider {
     shm->drag.active = 0;
     fhlive::seqWriteEnd(shm->drag.seq);
     g_drag.store(&shm->drag, std::memory_order_release);
+#if UTMTFTM_STICK_DRIFT
     // Stick drift: the settings stay from last time, like Decaffeinate's. What it found and counted starts again.
     shm->drift.measure.store(0, std::memory_order_relaxed);
     for (int h = 0; h < 2; ++h) {
@@ -1567,11 +1575,14 @@ class Provider : public vr::IServerTrackedDeviceProvider {
       shm->drift.fixed[h].store(0, std::memory_order_relaxed);
     }
     g_drift.store(&shm->drift, std::memory_order_release);
+#endif
     installHooks(ctx);
     startInput(ctx, &shm->input);
     shm->decaf.magic.store(fhlive::kDecafMagic, std::memory_order_release);
     shm->drag.magic.store(fhlive::kDragMagic, std::memory_order_release);
-    shm->drift.magic.store(fhlive::kDriftMagic, std::memory_order_release);
+#if UTMTFTM_STICK_DRIFT
+    shm->drift.magic.store(fhlive::kDriftMagic, std::memory_order_release);  // so the program offers the Sticks page
+#endif
     logf("loaded");
     return vr::VRInitError_None;
   }

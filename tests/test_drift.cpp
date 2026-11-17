@@ -86,7 +86,8 @@ struct WornStick {
 
 // Runs the three steps of the stick check on it, the way a person would, and works out what to send.
 struct Run { std::vector<drift::Sample> rest, edge, flicks; };
-drift::Findings checkStick(WornStick& s, bool hasTouch, Run* keep = nullptr) {
+// roll: how far out the thumb gets each way while rolling round the edge (all the way, unless it says), laps: how many times.
+drift::Findings checkStick(WornStick& s, bool hasTouch, Run* keep = nullptr, float (*roll)(float angle) = nullptr, int laps = 3) {
   Run run;
   double t = 0;
   const double dt = 1.0 / 250;  // reports four milliseconds apart
@@ -102,9 +103,9 @@ drift::Findings checkStick(WornStick& s, bool hasTouch, Run* keep = nullptr) {
   for (int i = 0; i < 1000; ++i) take(run.rest);
   const drift::Rest rest = drift::restOf(run.rest);
   // 2: round the edge, three times, slowly.
-  for (int i = 0; i < 3 * 400; ++i) {
-    const float a = 2 * kPi * i / 400.f;
-    s.push(std::cos(a), std::sin(a));
+  for (int i = 0; i < laps * 400; ++i) {
+    const float a = 2 * kPi * i / 400.f, m = roll ? roll(a) : 1.f;
+    s.push(std::cos(a) * m, std::sin(a) * m);
     take(run.edge);
   }
   s.letGo();
@@ -568,6 +569,38 @@ int main(int argc, char** argv) {
     WornStick worn2;
     const drift::Findings g = checkStick(worn2, false);
     check(g.drifts && !g.touchUsed && g.p.gate == 0 && g.p.learnPerSec == 0, "the fix still works, but doesn't go by touch or keep learning");
+  }
+  {
+    // J4, 0.6.3 test build (16 November), his healthy Quest 3 sticks over Virtual Desktop: one check said nothing to fix, the
+    // next "only gets 64% of the way to the left" and "77% down and to the right", from a quick roll that didn't go all the
+    // way out. A stick that rests and lands in the middle is left alone, whatever the roll: not reaching only counts on a stick
+    // that drifts.
+    std::printf("J4, 0.6.3 test build: healthy sticks, rolled quickly and not all the way out in one place\n");
+    const auto fine = [] {
+      WornStick w;
+      w.restX = w.restY = 0;
+      w.weak = 0;
+      w.jitter = 0.004f;
+      w.spikes = 0;
+      w.leftMost = 1;
+      return w;
+    };
+    WornStick left = fine();
+    const drift::Findings a = checkStick(left, true, nullptr, [](float ang) { return std::cos(ang) < -0.8f ? 0.62f : 1.f; }, 1);
+    check(!a.drifts && !a.p.on && a.verdict == "No drift", "J4, 0.6.3: a healthy left stick rolled 62% out to the left isn't called worn: " + a.verdict);
+    WornStick right = fine();
+    const drift::Findings b = checkStick(right, true, nullptr, [](float ang) {
+      return std::fabs(std::remainder(ang + kPi / 4, 2 * kPi)) < 0.5f ? 0.74f : 1.f; }, 1);
+    check(!b.drifts && !b.p.on && b.verdict == "No drift", "J4, 0.6.3: a healthy right stick rolled 74% out down and to the right isn't either: " + b.verdict);
+    check(a.lines.size() == 2 && a.lines[0] == "Comes back to the middle", "and the page says it comes back to the middle, nothing about reach");
+
+    // A stick that drifts is still fixed, and still made up for where it's short.
+    WornStick drifter;
+    const drift::Findings c = checkStick(drifter, true, nullptr, nullptr, 1);
+    check(c.drifts && c.p.on, "J4, 0.6.3: a stick that drifts is still fixed: " + c.verdict);
+
+    // The worn stick above really is short to the left: its flicks are short too, so that's still found.
+    check(f.worstDir == 4 && f.worstReach < 0.92f, f2("a stick really short to the left is still found short: %.2f", f.worstReach));
   }
   {
     std::printf("Nothing silly from the file\n");

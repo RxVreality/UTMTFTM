@@ -1437,6 +1437,11 @@ int main() {
       CHECK(hooked - bare < 500, "the button hook has become expensive");
     }
 
+#if !UTMTFTM_STICK_DRIFT
+    // J4, 16 November: no stick drift in the Steam Frame build, whose TMR sticks don't wear. The driver doesn't offer it, and
+    // a stick's reports reach the game exactly as they came.
+    CHECK(shm->drift.magic.load() != fhlive::kDriftMagic, "J4, 16 November: this build's driver doesn't offer stick drift");
+#else
     // Stick drift (J4, 14 November): a worn left stick that rests up and to the left, 14% out. The driver fixes every report of
     // it with the numbers the overlay sends (drift.h), so the game gets the middle when it's let go and all of a full push.
     {
@@ -1577,6 +1582,7 @@ int main() {
       stick("L", 0.f, 0.f);
       inputApi->UpdateBooleanComponent(H["L/input/thumbstick/touch"], false, 0);
     }
+#endif
     {
       std::lock_guard<std::mutex> lock(fakeInput.m);
       fakeInput.heard.clear();

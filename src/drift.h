@@ -337,8 +337,10 @@ inline Findings analyse(const Rest& rest, const std::vector<Sample>& edgeSamples
     p.learnPerSec = 0.5f;
     p.learnMax = std::min(0.25f, std::max(0.1f, 2 * p.dead));
   }
-  // Drift a game would notice: resting, or landing, more than a few percent from the middle, or not reaching the edge.
-  f.drifts = f.offset + rest.jitter > 0.05f || f.spread > 0.08f || f.worstReach < 0.9f;
+  // Drift a game would notice: resting, or landing, more than a few percent from the middle. Not reaching the edge only
+  // counts on a stick that drifts: on J4's healthy Quest 3 sticks (16 November) one quick roll that didn't go all the way out
+  // read as "only gets 64% of the way to the left", and the fix would have made the stick touchier that way.
+  f.drifts = f.offset + rest.jitter > 0.05f || f.spread > 0.08f;
   p.on = f.drifts ? 1 : 0;
 
   char b[160];

@@ -931,6 +931,9 @@ struct App {
   }
   // Every loop: the stick drift page's check moves on from what the driver heard, and what's saved reaches the driver.
   void tickDrift() {
+#if !UTMTFTM_STICK_DRIFT
+    return;  // not in this build (CMakeLists)
+#endif
     fhlive::Shared* shm = platform::mapLive();
     const bool showing = page == DashPage::Drift && panelShowing();
     const int stepWas = stickDrift.step();
