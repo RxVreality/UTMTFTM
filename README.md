@@ -286,6 +286,23 @@ Both build into `dist` and run the tests, none of which need a headset or SteamV
 
 To add a controller, add a file to `input/` and list it in `input/actions.json`. `test_controllers` checks it against SteamVR's description of that controller.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+This is so Windows and some antivirus scanners stop treating the installer as suspicious. Signing starts with the first release after SignPath Foundation accepts UTMTFTM. Until then the Windows files aren't signed.
+
+- Committers and reviewers: [RxVreality](https://github.com/RxVreality). Changes from anyone else come in as pull requests, and I review each one before it goes in.
+- Approvers: [RxVreality](https://github.com/RxVreality). Every release is approved by hand on SignPath before it's signed.
+
+What gets signed: `utmtftm.exe`, `driver_utmtftm.dll`, the installer and its uninstaller, all built by GitHub Actions straight from this repository ([build.yml](.github/workflows/build.yml)). `openvr_api.dll` is Valve's and ships the way Valve publishes it. The Steam Frame download isn't signed, because Linux doesn't use Windows code signing.
+
+### Privacy
+
+UTMTFTM doesn't collect anything about you. The one thing it sends over the internet is the update check described under [Updates](#updates): it asks GitHub's public API which UTMTFTM release is newest, with no account and nothing about you or your computer except which version you have. Like any web request, it reaches GitHub from your internet address, and [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) covers that. To turn it off, set the environment variable `UTMTFTM_NO_UPDATE_CHECK=1`.
+
+Everything else stays on your own computer or headset: your offsets, layouts, combos, macros and logs, in `%LOCALAPPDATA%\UTMTFTM` on Windows and `~/.local/share/UTMTFTM` on the Steam Frame.
+
 ## Credits
 
 Built with [Claude Code](https://claude.com/claude-code). I came up with the idea, tested it in the headset and told it what was wrong.
