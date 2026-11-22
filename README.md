@@ -4,7 +4,7 @@ Use The Medium To Fix The Medium. It's an easy offset for your VR hands: open th
 
 ![The UTMTFTM page in the SteamVR dashboard](docs/dashboard.png)
 
-My in-game hands don't line up with my real hands, and it's different in each game. SteamVR can offset your controllers, but you go through the binding menus, type in numbers and restart the game to find out if you guessed right. Here you move it by hand and see the result right away.
+My in-game hands don't line up with my real hands, and it's different in each game. SteamVR can offset your controllers in its binding menus, and the game picks that up straight away, but you can't see your hand while you set it. You move a slider, close the dashboard to see where the hand jumped to, then open it again to try another number. Here you move the hand itself and see where it lands as you go.
 
 ![Moving my left hand in Bonelab with Quest 3 controllers, then resetting it](docs/demo.gif)
 
