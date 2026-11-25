@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(utmtftm VERSION 0.6.3 LANGUAGES CXX)
+project(utmtftm VERSION 0.6.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,6 +15,32 @@ else()
 endif()
 add_compile_definitions(UTMTFTM_STICK_DRIFT=${UTMTFTM_STICK_DRIFT})
 
+# The version written into the Windows files' Details tab, the installer's included. GitHub's build sets it to the version
+# it packs ("0.6.4", or "0.0.0-1a2b3c4" for a build that isn't a release) so every file in a release says the same thing,
+# which code signing checks. Anywhere else it's this project's version.
+if(DEFINED ENV{UTMTFTM_PRODUCT_VERSION} AND NOT "$ENV{UTMTFTM_PRODUCT_VERSION}" STREQUAL "")
+  set(UTMTFTM_PRODUCT_VERSION "$ENV{UTMTFTM_PRODUCT_VERSION}")
+else()
+  set(UTMTFTM_PRODUCT_VERSION "${PROJECT_VERSION}")
+endif()
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _v "${UTMTFTM_PRODUCT_VERSION}")
+if(NOT _v)
+  message(FATAL_ERROR "UTMTFTM_PRODUCT_VERSION '${UTMTFTM_PRODUCT_VERSION}' doesn't start with a version like 0.6.4")
+endif()
+set(RC_NUMBERS "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
+# Makes the Details-tab resource for one Windows file and adds it to that target.
+function(utmtftm_version_info target file description type)
+  if(NOT WIN32)
+    return()
+  endif()
+  set(RC_FILE "${file}")
+  set(RC_NAME "${target}")
+  set(RC_DESCRIPTION "${description}")
+  set(RC_TYPE "${type}")
+  configure_file(${CMAKE_SOURCE_DIR}/packaging/version.rc.in ${CMAKE_BINARY_DIR}/${target}_version.rc @ONLY)
+  target_sources(${target} PRIVATE ${CMAKE_BINARY_DIR}/${target}_version.rc)
+endfunction()
+
 if(WIN32)
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
 
@@ -29,7 +55,10 @@ if(WIN32)
   set(PLATFORM_SRC src/platform_windows.cpp)
   set(UPLOAD_SRC src/d3dupload.cpp)
   set(UPLOAD_LIBS d3d11 dxgi)
-  set(CAIRO_LIBS cairo pixman-1 libpng16 zs pthreadVC3 gdi32 msimg32 dwrite d2d1 windowscodecs user32 ole32)
+  # zlib's file name changes between versions: zs.lib up to 1.3, libzs.lib from vcpkg's zlib 1.4 (20 November 2026,
+  # when a fresh install on GitHub stopped linking). Whichever is there.
+  find_library(ZLIB_STATIC NAMES zs libzs zlib zlibstatic z PATHS ${DEPS}/lib NO_DEFAULT_PATH REQUIRED)
+  set(CAIRO_LIBS cairo pixman-1 libpng16 ${ZLIB_STATIC} pthreadVC3 gdi32 msimg32 dwrite d2d1 windowscodecs user32 ole32)
   set(JSON_LIBS jsoncpp shell32 advapi32 winhttp ole32)
   set(THREAD_LIBS "")
   set(DRIVER_DIR ${CMAKE_SOURCE_DIR}/dist/driver/bin/win64)
@@ -86,6 +115,7 @@ set(COMMON_LIBS openvr_api ${JSON_LIBS})
 # The SteamVR driver add-on: moves the hand controllers for every game, from inside SteamVR.
 add_library(driver_utmtftm SHARED src/driver/driver_main.cpp)
 set_target_properties(driver_utmtftm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${DRIVER_DIR} LIBRARY_OUTPUT_DIRECTORY ${DRIVER_DIR} PREFIX "")
+utmtftm_version_info(driver_utmtftm driver_utmtftm.dll "UTMTFTM SteamVR driver add-on" VFT_DLL)
 if(NOT WIN32)
   # It lives inside SteamVR, so nothing of ours may be visible to the libraries already in there.
   target_link_options(driver_utmtftm PRIVATE -Wl,-z,defs -Wl,--exclude-libs,ALL)
@@ -93,6 +123,7 @@ endif()
 
 add_executable(utmtftm src/main.cpp src/store.cpp src/sticks.cpp src/bindings.cpp src/update.cpp ${PLATFORM_SRC} src/ui.cpp src/glove.cpp ${UPLOAD_SRC})
 target_link_libraries(utmtftm PRIVATE ${COMMON_LIBS} ${CAIRO_LIBS} ${UPLOAD_LIBS} ${THREAD_LIBS})
+utmtftm_version_info(utmtftm utmtftm.exe "UTMTFTM" VFT_APP)
 add_custom_command(TARGET utmtftm POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/input ${CMAKE_SOURCE_DIR}/dist/input
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/driver ${CMAKE_SOURCE_DIR}/dist/driver

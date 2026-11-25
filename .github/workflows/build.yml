@@ -1,5 +1,10 @@
 # Every push gets built and tested. A tag like v0.1.0 also packs a release and leaves it as a draft:
 # nothing is public until someone reads it and clicks Publish.
+#
+# Code signing (README, "Code signing policy"): once the repository variable SIGNPATH_ORGANIZATION_ID and the secret
+# SIGNPATH_API_TOKEN are set, a tag's Windows files go to SignPath to be signed, and the build waits there until a
+# maintainer approves the request on signpath.io. Run this by hand ("Run workflow", test signing ticked) to try the whole
+# signing path with SignPath's test certificate, which needs no approval and makes no release.
 name: Build
 
 on:
@@ -7,6 +12,12 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      test_signing:
+        description: 'Sign the Windows files with the SignPath test certificate'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -72,8 +83,33 @@ jobs:
     # The private test copy only needs the Frame build, and Windows machines use up its free minutes twice as fast.
     if: github.repository == 'RxVreality/UTMTFTM'
     runs-on: windows-2022
+    # Room for a signing request to wait for approval on signpath.io (up to 3 hours each, two per release).
+    timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: read  # SignPath reads this run's details and fetches the files to sign
+    env:
+      # Sign a tag (release certificate, approved by hand) or a hand-started test run (test certificate), and only once
+      # SignPath is set up.
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && (github.ref_type == 'tag' || inputs.test_signing == true) }}
+      SIGNING_POLICY: ${{ github.ref_type == 'tag' && 'release-signing' || 'test-signing' }}
     steps:
       - uses: actions/checkout@v4
+
+      # The version every Windows file says in its Details tab, and what the files are called. A tag must match
+      # CMakeLists.txt, or the program would think it's a different version from the one it's in.
+      - name: Version
+        run: |
+          $cmake = (Select-String -Path CMakeLists.txt -Pattern 'project\(utmtftm VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v = $env:GITHUB_REF_NAME.TrimStart('v')
+            if ($v -ne $cmake) { throw "The tag says $v but CMakeLists.txt says $cmake" }
+          } else {
+            $v = "0.0.0-$($env:GITHUB_SHA.Substring(0,7))"
+          }
+          "V=$v" >> $env:GITHUB_ENV
+          "UTMTFTM_PRODUCT_VERSION=$v" >> $env:GITHUB_ENV
+          "Packing $v; signing: $env:SIGN ($env:SIGNING_POLICY)"
 
       # cairo takes a long time to build, so keep it between runs.
       - uses: actions/cache@v4
@@ -90,11 +126,74 @@ jobs:
         shell: cmd
         run: build.cmd
 
-      - name: Pack
+      - name: Pack, part 1 (the files we sign)
         run: |
           choco install nsis -y --no-progress
-          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { "0.0.0-$($env:GITHUB_SHA.Substring(0,7))" }
-          .\packaging\make-release.ps1 -Version $v
+          .\packaging\make-release.ps1 -Version $env:V -Step prepare
+
+      # The program, the driver and the uninstaller go to SignPath first, because the zip and the installer are made from
+      # the signed ones.
+      - name: Hand the program, driver and uninstaller to SignPath
+        if: env.SIGN == 'true'
+        id: program-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: to-sign-program
+          path: build/release/tosign/
+          retention-days: 1
+
+      - name: Sign the program, driver and uninstaller
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'UTMTFTM' }}
+          signing-policy-slug: ${{ env.SIGNING_POLICY }}
+          artifact-configuration-slug: program
+          github-artifact-id: ${{ steps.program-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 10800
+          output-artifact-directory: build/release/tosign
+          parameters: |
+            version: ${{ toJSON(env.V) }}
+
+      - name: Pack, part 2 (the zip and the installer)
+        run: .\packaging\make-release.ps1 -Version $env:V -Step pack
+
+      - name: Hand the installer to SignPath
+        if: env.SIGN == 'true'
+        id: installer-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: to-sign-installer
+          path: build/release/UTMTFTM-Setup-${{ env.V }}.exe
+          retention-days: 1
+
+      - name: Sign the installer
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'UTMTFTM' }}
+          signing-policy-slug: ${{ env.SIGNING_POLICY }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.installer-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 10800
+          output-artifact-directory: build/release
+          parameters: |
+            version: ${{ toJSON(env.V) }}
+
+      # Checksums last, after signing has changed the files. Then: every file says UTMTFTM and this version, the zip and
+      # the installer hold exactly the signed files, and a release's signatures are SignPath Foundation's and trusted.
+      - name: Checksums and checks
+        run: |
+          .\packaging\make-release.ps1 -Version $env:V -Step sums
+          if ($env:SIGN -ne 'true') { .\packaging\check-release.ps1 -Version $env:V }
+          elseif ($env:SIGNING_POLICY -eq 'release-signing') { .\packaging\check-release.ps1 -Version $env:V -Signed -Trusted }
+          else { .\packaging\check-release.ps1 -Version $env:V -Signed -Signer '' }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -117,4 +216,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $files = Get-ChildItem build\release -File | Where-Object { $_.Extension -ne '.ico' } | ForEach-Object { $_.FullName }
-          gh release create $env:GITHUB_REF_NAME $files --draft --title "UTMTFTM $($env:GITHUB_REF_NAME)" --notes-file packaging\release-notes.md
+          $notes = 'packaging\release-notes.md'
+          if ($env:SIGN -eq 'true') {
+            # SignPath Foundation's terms: the download page names the code signing policy.
+            $notes = 'build\release-notes-signed.md'
+            $text = (Get-Content packaging\release-notes.md -Raw).TrimEnd()
+            $text += "`n`nThe Windows files are signed. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](https://github.com/$env:GITHUB_REPOSITORY#code-signing-policy).`n"
+            Set-Content $notes $text -Encoding utf8
+          }
+          gh release create $env:GITHUB_REF_NAME $files --draft --title "UTMTFTM $($env:GITHUB_REF_NAME)" --notes-file $notes

@@ -929,6 +929,20 @@ struct App {
     if (stickDrift.status.empty()) statusUntil = {};
     else setStatus(stickDrift.status, stickDrift.statusKind == 1 ? Good : stickDrift.statusKind == 2 ? Warn : Info, 8);
   }
+  // A step of the stick check, in the log. When it's found something, what it said about each stick and where the check's
+  // samples went (0.6.4), so what a real stick did can be read afterwards.
+  void logDriftStep() {
+    logf("stick drift: step %d", stickDrift.step());
+    if (stickDrift.step() != 4) return;
+    const DriftModel m = stickDrift.model();
+    for (int h = 0; h < 2; ++h) {
+      if (!m.sticks[h].checked || !m.sticks[h].present) continue;
+      std::string all = m.sticks[h].verdict;
+      for (const std::string& l : m.sticks[h].lines) all += " | " + l;
+      logf("stick drift: %s stick: %s", h ? "right" : "left", all.c_str());
+    }
+    if (!stickDrift.lastSamples.empty()) logf("stick drift: samples in %s", stickDrift.lastSamples.c_str());
+  }
   // Every loop: the stick drift page's check moves on from what the driver heard, and what's saved reaches the driver.
   void tickDrift() {
 #if !UTMTFTM_STICK_DRIFT
@@ -942,7 +956,7 @@ struct App {
     // says when), rather than the page's usual five.
     if (showing && Clock::now() - driftPokeAt > std::chrono::milliseconds(100)) { driftPokeAt = Clock::now(); dashPoke = true; }
     if (stickDrift.step() != stepWas) {
-      logf("stick drift: step %d", stickDrift.step());
+      logDriftStep();
       dashForce = true;
     }
     syncDriftStatus();
@@ -1183,7 +1197,7 @@ struct App {
           // A tap can move the check on too (Check, Skip, Cancel), and the loop only logs the steps it moves itself.
           const int was = stickDrift.step();
           stickDrift.click(id, secondsSinceStart());
-          if (stickDrift.step() != was) logf("stick drift: step %d", stickDrift.step());
+          if (stickDrift.step() != was) logDriftStep();
         }
         syncDriftStatus();
         confirmUntil = {};

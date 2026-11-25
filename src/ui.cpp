@@ -978,14 +978,14 @@ void drawDecaf(Canvas& cv, const DecafModel& m, std::vector<Button>& btn) {
 // ---------------------------------------------------------------- stick drift page
 std::string driftKey(const DriftModel& m) {
   char b[96];
-  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + "," + std::to_string(m.countdown) + std::to_string(m.fixOn) +
+  std::string k = m.game + "|" + std::to_string((int)m.live) + "|" + std::to_string(m.step) + "," + std::to_string(m.countdown) + std::to_string(m.fixOn) + std::to_string(m.flickMarks) + std::to_string(m.explainJumps) +
                   std::to_string(m.ready) + std::to_string(m.confirmClose) + "|" + m.status + std::to_string(m.statusWarn) + std::to_string(m.statusGood);
   for (const DriftStick& s : m.sticks) {
     // To the hundredth: the dots move, but not so finely the page redraws on every report.
     snprintf(b, sizeof b, "|%d%d%d%d%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f", s.present, s.checked, s.drifts, s.hasTouch, s.touched, s.raw.x, s.raw.y, s.out.x, s.out.y,
              s.rest.x, s.rest.y, s.dead, s.progress);
     k += b;
-    k += "|" + std::to_string(s.trail.size()) + "," + std::to_string(s.landed.size()) + "," + s.verdict;
+    k += "|" + std::to_string(s.trail.size()) + "," + std::to_string(s.landed.size()) + "," + std::to_string(s.flickAt.size()) + "," + s.verdict;
     for (float r : s.reach) k += r > 0 ? '1' : '0';
     for (const std::string& l : s.lines) k += "|" + l;
   }
@@ -996,7 +996,7 @@ std::string driftKey(const DriftModel& m) {
 // hollow ring is where the controller says it is, the yellow dot is what the game gets.
 // bigMiddle: drift is a few percent of the stick's travel, too small to see drawn to scale, so the middle is drawn bigger: a
 // point is drawn at the square root of how far out it is, so 4% sits a fifth of the way out and a full push still on the ring.
-static void stickPlot(cairo_t* c, double cx, double cy, double r, const DriftStick& s, int step, bool fixing, bool bigMiddle) {
+static void stickPlot(cairo_t* c, double cx, double cy, double r, const DriftStick& s, int step, bool fixing, bool bigMiddle, bool flickMarks) {
   const double pi = 3.14159265358979;
   const auto at = [&](DriftDot d, double& x, double& y) {
     double dx = d.x, dy = d.y;
@@ -1061,6 +1061,19 @@ static void stickPlot(cairo_t* c, double cx, double cy, double r, const DriftSti
     cairo_set_line_width(c, 2);
     cairo_stroke(c);
     cairo_set_dash(c, nullptr, 0, 0);
+  }
+  // Where it jumps (draft B): a short stretch of the rim, in the accent, round each spot it jumped from, the way step 2
+  // traces the edge. Where the jump went doesn't matter, only where it starts.
+  if (flickMarks && s.drifts && (step == 0 || step == 4)) {
+    cairo_set_line_cap(c, CAIRO_LINE_CAP_BUTT);
+    cairo_set_line_width(c, 8);
+    set(c, SIGNAL);
+    for (const DriftDot& d : s.flickAt) {
+      const double a = std::atan2(d.y, d.x);
+      cairo_new_sub_path(c);
+      cairo_arc_negative(c, cx, cy, r + 9, -a + 0.12, -a - 0.12);
+      cairo_stroke(c);
+    }
   }
   for (const DriftDot& d : s.landed) {
     if (step != 3 && !s.drifts) break;  // after the check, only where a drifting stick landed is worth showing
@@ -1137,7 +1150,7 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
     }
     const double pr = 118, pcx = x + 6 + pr + 12, pcy = py + 40 + 26 + pr;
     const bool big = m.step != 2;
-    stickPlot(c, pcx, pcy, pr, s, m.step, m.fixOn && s.drifts, big);
+    stickPlot(c, pcx, pcy, pr, s, m.step, m.fixOn && s.drifts, big, m.flickMarks);
     if (big) label(c, pcx, pcy + pr + 24, 13, "The middle drawn bigger", DIM, 1);
 
     // What it found, or what to do now, to the right of the stick.
@@ -1214,8 +1227,11 @@ void drawDrift(Canvas& cv, const DriftModel& m, std::vector<Button>& btn) {
     text(c, L + 28, baseY, 20, m.status, true, PAPER, 1, 0, R - L - 28);
   } else if (m.ready && !walking && updateLine(c, btn, L, R, baseY)) {
   } else {
+    // A stick that jumps: its ring still jumps on the page, which looks like the fix isn't working. It is: say so.
+    const bool jumps = m.fixOn && ((m.sticks[0].drifts && !m.sticks[0].flickAt.empty()) || (m.sticks[1].drifts && !m.sticks[1].flickAt.empty()));
     const char* st = !m.ready ? "The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready."
                      : walking ? "The game still gets your sticks while you do this."
+                     : m.explainJumps && jumps ? "The ring still shows every jump the stick makes. The solid dot is what games get: the jumps are held back."
                      : any ? "While your thumb's off a stick, UTMTFTM keeps learning where it rests. Saved for these controllers."
                            : "Works in every game and in SteamVR's own menus. Nothing changes until you check.";
     text(c, L, baseY, 19, st, false, m.ready ? DIM : PAPER, 1, 0, R - L);

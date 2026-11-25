@@ -1,13 +1,41 @@
 ; The UTMTFTM installer. It installs for the current Windows user, so it never asks for admin rights.
-; make-release.ps1 builds it and passes VERSION, STAGE, OUTFILE and ICON.
+; make-release.ps1 builds it and passes VERSION, VINUMBERS, STAGE, OUTFILE and ICON.
+;
+; It's made in two goes so the uninstaller can be code-signed like everything else: makensis can't wait while GitHub's
+; build sends a file off to be signed. First with EXPORT_UNINST=<path>, which only writes the uninstaller to that path,
+; then, once it's signed, with IMPORT_UNINST=<path>, which puts that signed copy in instead of writing a new one.
 Unicode true
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
 !define ARP "Software\Microsoft\Windows\CurrentVersion\Uninstall\UTMTFTM"
 
+!ifdef EXPORT_UNINST & IMPORT_UNINST
+  !error "EXPORT_UNINST and IMPORT_UNINST are two separate goes"
+!endif
+!ifndef EXPORT_UNINST & IMPORT_UNINST
+  !error "make-release.ps1 builds this: pass EXPORT_UNINST, then IMPORT_UNINST"
+!endif
+
+; Windows' Details tab, for the installer and the uninstaller alike. Code signing checks the name and version.
+VIProductVersion "${VINUMBERS}"
+VIFileVersion "${VINUMBERS}"
+VIAddVersionKey /LANG=1033 "ProductName" "UTMTFTM"
+VIAddVersionKey /LANG=1033 "ProductVersion" "${VERSION}"
+VIAddVersionKey /LANG=1033 "FileVersion" "${VERSION}"
+VIAddVersionKey /LANG=1033 "FileDescription" "UTMTFTM installer"
+VIAddVersionKey /LANG=1033 "CompanyName" "The UTMTFTM contributors"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (c) 2026 The UTMTFTM contributors. MIT License."
+
 Name "UTMTFTM"
-OutFile "${OUTFILE}"
+!ifdef EXPORT_UNINST
+  ; Only the uninstaller is wanted from this go. makensis runs this on it once it's written; the installer itself is
+  ; thrown away.
+  OutFile "${OUTFILE}.export-only.exe"
+  !uninstfinalize 'copy /Y "%1" "${EXPORT_UNINST}"'
+!else
+  OutFile "${OUTFILE}"
+!endif
 InstallDir "$LOCALAPPDATA\Programs\UTMTFTM"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
@@ -110,7 +138,12 @@ Section
   placed:
   SetOutPath "$INSTDIR"
   File /r /x install.cmd /x uninstall.cmd "${STAGE}\*.*"
-  WriteUninstaller "$INSTDIR\uninstall.exe"
+  !ifdef EXPORT_UNINST
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+  !else
+    ; The uninstaller the first go wrote, signed if this is a release.
+    File "/oname=uninstall.exe" "${IMPORT_UNINST}"
+  !endif
 
   WriteRegStr HKCU "${ARP}" "DisplayName" "UTMTFTM (Windows beta)"
   WriteRegStr HKCU "${ARP}" "DisplayVersion" "${VERSION}"

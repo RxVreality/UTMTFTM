@@ -17,11 +17,18 @@ namespace sticks {
 // What a check found for one controller, by its serial number. Kept until it's checked again.
 struct Saved {
   drift::Params p;           // what the driver gets, with on: it drifts
+  drift::Flicks fl;          // and how its flicks are held back (0.6.4). All zero: it doesn't flick
+  int flicks = 0;            // flicks the check saw
+  std::vector<drift::Dot> flickAt;   // where they started, for the picture
+  float reachSeen[drift::kDirs] = {};  // how far it got each way, as a share: a shortfall that repeats next check counts
   float checkedX = 0, checkedY = 0;  // where the check found it resting: learning while you play stays near here
   bool drifts = false, touch = false;
   std::string verdict, when; // "Drifts up and to the left", "2026-11-15"
   std::vector<std::string> lines;
 };
+
+// The check's lines with "Jumps at 2 spots:" / "left and down." said as how many times instead (a draft, J4 to pick).
+std::vector<std::string> flickWords(const std::vector<std::string>& lines, int flicks);
 
 class Drift {
  public:
@@ -49,6 +56,7 @@ class Drift {
   std::string file() const { return file_; }
   const std::map<std::string, Saved>& saved() const { return saved_; }
   bool fixOn() const { return on_; }
+  std::string lastSamples;  // the file the last check's samples went in. "" none
 
  private:
   struct Hand {
@@ -62,6 +70,7 @@ class Drift {
     drift::Dot raw{0, 0}, out{0, 0};
     bool touched = false;
     drift::Rest rest;                     // what step 1 found
+    std::vector<drift::Sample> restSamples;  // step 1's, kept for the samples file
     std::vector<drift::Sample> edge;      // step 2's samples, kept for the analysis
     std::vector<float> reach;             // step 2, for the picture
     std::vector<drift::Landing> landed;   // step 3
@@ -75,6 +84,7 @@ class Drift {
   void advance(double now);
   void finish();
   void publish(fhlive::DriftChannel* dc);
+  void writeSamples(const std::string& stamp);
   void load();
   void save() const;
   void say(const std::string& s, int kind);

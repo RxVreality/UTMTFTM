@@ -728,28 +728,35 @@ struct Stick {
   std::atomic<uint32_t> fresh{0};      // RunFrame found a different stick here: start again
   std::atomic<uint32_t> seenSeq{1};    // the settings it has. Odd: none yet
   std::atomic<bool> on{false};         // and they say fix it
-  std::atomic<bool> pending{false};    // a jump out from the middle is being held back, to see if it was a spike
+  std::atomic<bool> pending{false};    // a jump is being held back, to see if it was a spike or a flick
   // The hook's own, under busy.
   std::atomic_flag busy = ATOMIC_FLAG_INIT;
   drift::Params p;
+  drift::Flicks fl;                    // where it flicks (0.6.4)
   drift::State st;
   float sent[2] = {0, 0};              // what went to SteamVR last, each axis
   double reported[2] = {-1, -1};       // when each axis last reported, in seconds
 };
 Stick g_stick[2];
 
-void readDriftSettings(fhlive::DriftChannel* dc, int hand, drift::Params& p, uint32_t& seq) {
+void readDriftSettings(fhlive::DriftChannel* dc, int hand, drift::Params& p, drift::Flicks& fl, uint32_t& seq) {
   static_assert(sizeof(drift::Params) == sizeof(fhlive::DriftSettings) && offsetof(drift::Params, reach) == offsetof(fhlive::DriftSettings, reach), "the same layout");
+  static_assert(sizeof(drift::Flicks) == sizeof(fhlive::FlickSettings) && offsetof(drift::Flicks, back) == offsetof(fhlive::FlickSettings, back), "the same layout");
   for (int tries = 0; tries < 8; ++tries) {
     const uint32_t s0 = dc->seq.load(std::memory_order_acquire);
     if (s0 & 1) { spinPause(); continue; }
     fhlive::DriftSettings w;
+    fhlive::FlickSettings f;
     memcpy(&w, &dc->want[hand], sizeof w);
+    memcpy(&f, &dc->flick[hand], sizeof f);
     std::atomic_thread_fence(std::memory_order_acquire);
     if (dc->seq.load(std::memory_order_acquire) != s0) continue;
     drift::Params got;
+    drift::Flicks gotF;
     memcpy(&got, &w, sizeof got);
+    memcpy(&gotF, &f, sizeof gotF);
     p = drift::sane(got);
+    fl = p.on ? drift::sane(gotF) : drift::Flicks{};
     seq = s0;
     return;
   }
@@ -772,7 +779,7 @@ float driftFix(int role, float f) {
   if (s.busy.test_and_set(std::memory_order_acquire)) return f;  // another thread's in it right now: this one report goes as it is
   if (seq != s.seenSeq.load(std::memory_order_relaxed) || s.fresh.exchange(0, std::memory_order_relaxed)) {
     uint32_t got = 1;
-    readDriftSettings(dc, hand, s.p, got);
+    readDriftSettings(dc, hand, s.p, s.fl, got);
     s.seenSeq.store(got, std::memory_order_relaxed);
     s.on.store(s.p.on != 0, std::memory_order_relaxed);
     s.st = drift::State{};
@@ -785,18 +792,21 @@ float driftFix(int role, float f) {
   xy[1 - axis] = other ? other->raw.load(std::memory_order_relaxed) : 0.f;
   const int touch = touchC ? (touchC->raw.load(std::memory_order_relaxed) > 0.5f ? 1 : 0) : -1;
   float o[2];
-  drift::fix(s.p, s.st, xy[0], xy[1], touch, now, o[0], o[1]);
-  // The other axis's answer has changed with this one, and its driver hasn't said anything for a while: send it again.
+  drift::fix(s.p, s.fl, s.st, xy[0], xy[1], touch, now, o[0], o[1]);
+  // The other axis's answer has changed with this one, and its driver hasn't said anything for a while, or this call started
+  // or ended holding a flick back that the other axis's own call a moment ago was half of: send it again.
   bool resend = false;
-  if (s.p.on && other && std::fabs(o[1 - axis] - s.sent[1 - axis]) > 0.01f && now - s.reported[1 - axis] > 0.02 && !other->flags.load(std::memory_order_relaxed)) {
+  const bool retake = s.st.retake;
+  s.st.retake = false;
+  if (s.p.on && other && std::fabs(o[1 - axis] - s.sent[1 - axis]) > 0.01f && (now - s.reported[1 - axis] > 0.02 || retake) && !other->flags.load(std::memory_order_relaxed)) {
     s.sent[1 - axis] = o[1 - axis];
     resend = true;
   }
   s.sent[axis] = o[axis];
   s.reported[axis] = now;
-  s.pending.store(s.st.jumpT >= 0, std::memory_order_relaxed);
+  s.pending.store(s.st.jumpT >= 0 || s.st.holdT >= 0, std::memory_order_relaxed);
   const bool on = s.p.on != 0, touchBad = s.st.touchBad;
-  const uint32_t spikes = s.st.spikes;
+  const uint32_t spikes = s.st.spikes, flicks = s.st.flicks;
   const float learnedX = s.p.cx + s.st.lx, learnedY = s.p.cy + s.st.ly;
   if (measure) {
     const uint32_t n = dc->write[hand].fetch_add(1, std::memory_order_acq_rel);
@@ -824,13 +834,14 @@ float driftFix(int role, float f) {
     if (o[axis] != f) dc->fixed[hand].store(dc->fixed[hand].load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
     if (touchBad && !dc->touchBad[hand].load(std::memory_order_relaxed)) dc->touchBad[hand].store(1, std::memory_order_relaxed);
     dc->spikes[hand].store(spikes, std::memory_order_relaxed);
+    dc->flicksHeld[hand].store(flicks, std::memory_order_relaxed);
   }
   if (resend) sendRaw(other, o[1 - axis]);
   return o[axis];
 }
 
-// RunFrame: a jump that was held back to see if it was a spike, and that its controller hasn't reported again since (some
-// only report a change), goes through now. Without this a stick pushed and held perfectly still could stay at the middle.
+// RunFrame: a jump that was held back to see if it was a spike or a flick, and that its controller hasn't reported again since
+// (some only report a change), goes through now. Without this a stick pushed and held perfectly still could stay where it was.
 void flushHeldJumps() {
   if (g_recording.load(std::memory_order_relaxed)) return;
   for (int h = 0; h < 2; ++h) {
@@ -843,14 +854,15 @@ void flushHeldJumps() {
     const double now = secondsNow();
     float o[2] = {0, 0};
     bool send = false;
-    if (s.st.jumpT >= 0 && now - s.st.jumpT >= 0.006) {
+    if ((s.st.jumpT >= 0 && now - s.st.jumpT >= 0.006) || drift::holdDue(s.st, now)) {
       const int touch = t ? (t->raw.load(std::memory_order_relaxed) > 0.5f ? 1 : 0) : -1;
-      drift::fix(s.p, s.st, x->raw.load(std::memory_order_relaxed), y->raw.load(std::memory_order_relaxed), touch, now, o[0], o[1]);
+      drift::fix(s.p, s.fl, s.st, x->raw.load(std::memory_order_relaxed), y->raw.load(std::memory_order_relaxed), touch, now, o[0], o[1]);
+      s.st.retake = false;  // both go below
       s.sent[0] = o[0];
       s.sent[1] = o[1];
       send = true;
     }
-    s.pending.store(s.st.jumpT >= 0, std::memory_order_relaxed);
+    s.pending.store(s.st.jumpT >= 0 || s.st.holdT >= 0, std::memory_order_relaxed);
     s.busy.clear(std::memory_order_release);
     if (!send) continue;
     Comp* both[2] = {x, y};
@@ -1573,6 +1585,7 @@ class Provider : public vr::IServerTrackedDeviceProvider {
       shm->drift.touchBad[h].store(0, std::memory_order_relaxed);
       shm->drift.spikes[h].store(0, std::memory_order_relaxed);
       shm->drift.fixed[h].store(0, std::memory_order_relaxed);
+      shm->drift.flicksHeld[h].store(0, std::memory_order_relaxed);
     }
     g_drift.store(&shm->drift, std::memory_order_release);
 #endif
@@ -1581,6 +1594,7 @@ class Provider : public vr::IServerTrackedDeviceProvider {
     shm->decaf.magic.store(fhlive::kDecafMagic, std::memory_order_release);
     shm->drag.magic.store(fhlive::kDragMagic, std::memory_order_release);
 #if UTMTFTM_STICK_DRIFT
+    shm->drift.flickMagic.store(fhlive::kFlickMagic, std::memory_order_release);  // and knows this one holds flicks back
     shm->drift.magic.store(fhlive::kDriftMagic, std::memory_order_release);  // so the program offers the Sticks page
 #endif
     logf("loaded");
@@ -1590,7 +1604,10 @@ class Provider : public vr::IServerTrackedDeviceProvider {
     stopInput();
     if (fhlive::DecafChannel* dc = g_dc.load(std::memory_order_relaxed)) dc->magic.store(0, std::memory_order_release);
     if (fhlive::DragChannel* dg = g_drag.load(std::memory_order_relaxed)) dg->magic.store(0, std::memory_order_release);
-    if (fhlive::DriftChannel* dr = g_drift.load(std::memory_order_relaxed)) dr->magic.store(0, std::memory_order_release);
+    if (fhlive::DriftChannel* dr = g_drift.load(std::memory_order_relaxed)) {
+      dr->magic.store(0, std::memory_order_release);
+      dr->flickMagic.store(0, std::memory_order_release);
+    }
     removeHooks();
     g_drag.store(nullptr, std::memory_order_release);
     g_drift.store(nullptr, std::memory_order_release);

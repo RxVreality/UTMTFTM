@@ -91,7 +91,7 @@ It works with anything that runs through SteamVR, on OpenVR or OpenXR. The add-o
 
 Decaffeinate takes the little shakes out of your hands while you hold them still, which is mostly what you notice aiming at something far away. It should let go the moment you move, so turning and flicking to a new target feel the same as before.
 
-It's on the **Decaf** tab. Pick **Off**, **Tuned**, **Strong** or **Maximum**, and save it for this game or all games, the same way as on the Hands tab. **Use the all-games step** puts a game back on the shared one. It's off until you turn it on, and changes take effect straight away.
+It's on the **Decaf** tab. Pick **Off**, **Tuned**, **Strong** or **Maximum**, and save it for this game or all games, the same way as on the Hands tab. **Use the all-games step** puts a game back on the shared one. It's off until you turn it on, and changes take effect straight away. If you're not sure which to pick, start with **Tuned**, and switch it **Off** when you're playing competitively.
 
 **Strength**, under the steps, makes the one you picked lighter or heavier, from 25% to 150%. 100% is the step as I tuned it. Tap the bar or drag it, and your hands change as you drag. It's saved the same way as the step. If even Tuned feels like it pushes back on small aiming corrections, try 50%: in the tests, slow moves trail half as far behind there, and most of the shake still goes.
 
@@ -103,17 +103,19 @@ The figures on each step, like how much less shake, come from a simulated trembl
 
 ### Stick drift
 
-A worn stick doesn't come back to the middle when you let go, so your character creeps or your view slowly turns. Quest controllers are known for it. Tap **Sticks** at the top right of the Decaf tab, then **Check my sticks**. It takes about half a minute:
+A worn stick misbehaves: it doesn't come back to the middle when you let go, so your character creeps or your view slowly turns, or as you move it the reading jumps away and straight back, so your walking or turning stutters. Quest controllers are known for it. Tap **Sticks** at the top right of the Decaf tab, then **Check my sticks**. It takes about half a minute:
 
-1. Let go of both sticks and keep still for a few seconds.
-2. Roll each stick slowly round its edge.
-3. Flick each stick up, right, down and left, letting it spring back, twice each way.
+1. Let go of both sticks and keep still until it says **Got it**.
+2. Roll each stick slowly round its edge, all the way out, and through any spots where it jitters.
+3. Flick each stick all the way up, right, down and left, letting it spring back, until it says **That's enough**.
 
-From that it works out where each stick really rests, how far off it lands each time you let go, and how far it still reaches each way. After that the game sees the middle whenever you let go, and a full push still goes all the way, even on a side that's worn short. While your thumb is off the stick it keeps learning where the stick rests, since anything a stick says with nobody touching it is drift. The odd one-off spike from a worn stick is ignored.
+From that it works out where each stick really rests, how far off it lands each time you let go, how far it still reaches each way, and whether it flicks: the reading leaps a long way, faster than a thumb can move, and comes straight back a few hundredths of a second later. It looks like jitter, and it's why some directions never read 100%. The page tells you what it found for each stick, like **Jumps away and straight back, 6 times in this check.**
 
-It's saved per controller, so a different controller gets its own check. It works in every game and in SteamVR's own menus, and nothing changes until you run the check. **Fix drift** turns it off and on. A stick that rests and lands in the middle is left alone, even if your roll round the edge didn't go all the way out somewhere. That means one kind of drift isn't properly caught yet: a stick that rests in the middle but, at certain spots as you circle it, flicks very fast to another point and back. It looks like jitter, and it's why some directions never read 100%. 0.6.3 can call a stick like that fine. I'm working on a better fix for 0.6.4. It's only in the Windows version for now: the Steam Frame's sticks use magnets and don't wear this way, so the Frame version doesn't have it.
+After that the game sees the middle whenever you let go, and a full push still goes all the way, even on a side that's worn short. A flick is held at the last good reading wherever on the stick it starts, and let go the moment the stick is back, so the game doesn't see it. A real push or let-go goes straight through. Nothing is held for more than about a twentieth of a second. On the Sticks page the ring still shows every jump the stick makes, and the solid dot is what games get. While your thumb is off the stick it keeps learning where the stick rests, since anything a stick says with nobody touching it is drift. The odd one-off spike from a worn stick is ignored.
 
-I've run the check on my own Quest 3 over Virtual Desktop and on made-up worn sticks in the tests. My Quest 3 sticks do drift, but in the flicking way above, which this version doesn't fully catch. I haven't tried it on a stick that rests off the middle yet. If you have one, or one that flicks like mine, I'd love to hear how it does.
+It's saved per controller, so a different controller gets its own check. It works in every game and in SteamVR's own menus, and nothing changes until you run the check. **Fix drift** turns it off and on. A stick that rests and lands in the middle and doesn't flick is left as it is. It's only in the Windows version for now: the Steam Frame's sticks use magnets and don't wear this way, so the Frame version doesn't have it.
+
+I've run the check on my own Quest 3 over Virtual Desktop, and the hold was tuned on recordings of those checks and on made-up worn sticks in the tests. I haven't tried it on a stick that rests off the middle yet. If you have one, or one that flicks like mine, I'd love to hear how it does.
 
 ## Bindings
 
@@ -272,7 +274,7 @@ vcpkg install --triplet x64-windows-static
 build.cmd
 ```
 
-`packaging\make-release.ps1` makes the installer and zip.
+`packaging\make-release.ps1` makes the installer and zip, and `packaging\check-release.ps1` checks them: every Windows file of ours has the same product name and version, and the installer and zip hold exactly the files that were signed.
 
 **Steam Frame:** build it on ARM64 Linux, with CMake, Ninja, g++, and the development files for cairo, FreeType and Vulkan. The Frame has all of those itself.
 
@@ -295,7 +297,7 @@ This is so Windows and some antivirus scanners stop treating the installer as su
 - Committers and reviewers: [RxVreality](https://github.com/RxVreality). Changes from anyone else come in as pull requests, and I review each one before it goes in.
 - Approvers: [RxVreality](https://github.com/RxVreality). Every release is approved by hand on SignPath before it's signed.
 
-What gets signed: `utmtftm.exe`, `driver_utmtftm.dll`, the installer and its uninstaller, all built by GitHub Actions straight from this repository ([build.yml](.github/workflows/build.yml)). `openvr_api.dll` is Valve's and ships the way Valve publishes it. The Steam Frame download isn't signed, because Linux doesn't use Windows code signing.
+What gets signed: `utmtftm.exe`, `driver_utmtftm.dll`, the installer and its uninstaller, all built by GitHub Actions straight from this repository ([build.yml](.github/workflows/build.yml), and [packaging/signpath](packaging/signpath) for exactly which files). `openvr_api.dll` is Valve's and ships the way Valve publishes it. The Steam Frame download isn't signed, because Linux doesn't use Windows code signing.
 
 ### Privacy
 

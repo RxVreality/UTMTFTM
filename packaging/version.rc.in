@@ -1,0 +1,32 @@
+// Windows' "Details" tab for @RC_FILE@: product name and version. Code signing checks these match on every signed file
+// (SignPath Foundation's rule), so CMakeLists.txt fills them from one place for the program and the driver alike.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @RC_NUMBERS@
+PRODUCTVERSION @RC_NUMBERS@
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE @RC_TYPE@
+FILESUBTYPE 0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "The UTMTFTM contributors"
+      VALUE "FileDescription", "@RC_DESCRIPTION@"
+      VALUE "FileVersion", "@UTMTFTM_PRODUCT_VERSION@"
+      VALUE "InternalName", "@RC_NAME@"
+      VALUE "LegalCopyright", "Copyright (c) 2026 The UTMTFTM contributors. MIT License."
+      VALUE "OriginalFilename", "@RC_FILE@"
+      VALUE "ProductName", "UTMTFTM"
+      VALUE "ProductVersion", "@UTMTFTM_PRODUCT_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

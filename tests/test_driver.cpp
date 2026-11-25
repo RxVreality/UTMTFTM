@@ -1511,6 +1511,59 @@ int main() {
       for (const auto& e : heardNow()) spiked = spiked || ((e.h == H["L/input/thumbstick/x"] || e.h == H["L/input/thumbstick/y"]) && e.v != 0.f);
       CHECK(!spiked, "a spike from a worn track that's gone the next report never reaches the game");
       CHECK(dc.spikes[0].load() >= 1, "and it's counted (%u)", dc.spikes[0].load());
+      // J4 Shakedown 2026-11-20: his real flicks. Pushed all the way down, a report lands up in the middle, x and y as two calls
+      // (Virtual Desktop), and the next is straight back. The second call shows it; the first, a little x, has already gone
+      // out by then, and is taken back too. One that stays goes through by itself a moment later.
+      {
+        CHECK(dc.flickMagic.load() == fhlive::kFlickMagic, "J4 Shakedown 2026-11-20: the overlay can see this driver holds flicks back");
+        fhlive::FlickSettings fset{};
+        fset.on = 1;
+        fset.big = 0.45f;
+        fset.out = 0.5f;
+        fset.most = 4;
+        fset.stay = 0.1f;
+        fset.back = 0.4f;
+        fhlive::seqWriteBegin(dc.seq);
+        dc.flick[0] = fset;
+        fhlive::seqWriteEnd(dc.seq);
+        const float edgeY = 0.11f - 0.95f;
+        stick("L", -0.08f, 0.11f);
+        settle();
+        for (int i = 1; i <= 5; ++i) { stick("L", -0.08f, 0.11f - 0.19f * i); std::this_thread::sleep_for(std::chrono::milliseconds(12)); }
+        settle();
+        stick("L", -0.08f, edgeY);
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        stick("L", -0.08f, edgeY);
+        const float beforeX = lastSaid("L/input/thumbstick/x"), beforeY = lastSaid("L/input/thumbstick/y");
+        const uint32_t heldBefore = dc.flicksHeld[0].load();
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        clearHeard();
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], -0.08f + 0.15f, 0);  // the flick: a little right first,
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.11f + 0.45f, 0);   // then up in the middle
+        const float heldX = lastSaid("L/input/thumbstick/x"), heldY = lastSaid("L/input/thumbstick/y");
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], -0.08f, 0);         // and straight back
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], edgeY, 0);
+        settle();
+        bool leakedY = false;
+        for (const auto& e : heardNow()) leakedY = leakedY || (e.h == H["L/input/thumbstick/y"] && std::fabs(e.v - beforeY) > 0.01f);
+        CHECK(beforeY < -0.8f && !leakedY, "J4 Shakedown 2026-11-20: a flick from a full push down up into the middle never reaches the game (%.3f held)", beforeY);
+        CHECK(std::fabs(heldX - beforeX) < 0.01f && std::fabs(heldY - beforeY) < 0.01f,
+              "and the little x that went first is taken back the moment the y shows it's a flick (x %.3f, was %.3f)", heldX, beforeX);
+        CHECK(dc.flicksHeld[0].load() > heldBefore, "and it's counted (%u)", dc.flicksHeld[0].load());
+        // A real move from there, right across, that stays: held at most four reports, then RunFrame sends it with no more reports.
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
+        clearHeard();
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/x"], -0.08f + 0.6f, 0);
+        inputApi->UpdateScalarComponent(H["L/input/thumbstick/y"], 0.11f, 0);
+        const float atOnce = lastSaid("L/input/thumbstick/x");
+        std::this_thread::sleep_for(std::chrono::milliseconds(90));
+        tick();
+        const float later = lastSaid("L/input/thumbstick/x");
+        CHECK(std::fabs(atOnce - beforeX) < 0.01f && later > beforeX + 0.3f, "a jump from there that stays goes through by itself (%.3f, then %.3f)", atOnce, later);
+        stick("L", -0.08f, 0.11f);
+        settle();
+      }
       // Only y reports, x stays still: x's answer changes with y's, and goes again by itself. Pushed right a little, then up.
       stick("L", -0.08f + 0.3f, 0.11f);
       settle();
@@ -1571,10 +1624,13 @@ int main() {
         auto t3 = C::now();
         clearHeard();
         const double bare = std::chrono::duration<double, std::nano>(t1 - t0).count() / N, hooked = std::chrono::duration<double, std::nano>(t3 - t2).count() / N;
-        printf("stick drift on: %.1f ns added to each stick report\n", hooked - bare);
+        printf("stick drift on, holding flicks back: %.1f ns added to each stick report\n", hooked - bare);
         CHECK(hooked - bare < 500, "fixing drift has become expensive");
       }
       // Off again: exactly as it comes.
+      fhlive::seqWriteBegin(dc.seq);
+      dc.flick[0] = fhlive::FlickSettings{};
+      fhlive::seqWriteEnd(dc.seq);
       setDrift(0, fhlive::DriftSettings{});
       clearHeard();
       stick("L", -0.0811f, 0.1122f);
@@ -1596,7 +1652,7 @@ int main() {
   provider->Cleanup();
   CHECK(vtable[1] == originalSlot, "the hook must come out on Cleanup");
   CHECK(shm->decaf.magic.load() == 0, "and the overlay can see smoothing has gone with it");
-  CHECK(shm->drift.magic.load() == 0, "and stick drift fixing");
+  CHECK(shm->drift.magic.load() == 0 && shm->drift.flickMagic.load() == 0, "and stick drift fixing");
   for (int i = 0; i < 4; ++i) CHECK(inputVtable[i] == originalInputSlots[i], "button call %d must come out on Cleanup", i);
   p = randPose();
   api->TrackedDevicePoseUpdated(3, p, sizeof p);

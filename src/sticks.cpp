@@ -19,6 +19,27 @@ constexpr float kEdgeEnough = 0.95f;   // step 2: this much of the edge traced
 constexpr size_t kTrail = 40;          // dots in the picture's trail
 constexpr double kTrailEvery = 0.05;   // one every 50 ms
 constexpr float kLearnedMax = 0.25f;   // how far learning while you play may ever take the middle from where the check found it
+// Draft B (0.6.4): the stick's picture also marks where it jumps. False: draft A, the two lines of text only. J4 picked A.
+constexpr bool kFlickMarks = false;
+// Say how many times it jumped, not where from (where they start moves about from one go round to the next), and say along
+// the bottom that the ring shows every jump and the solid dot is what games get. J4 picked this over the page as it was,
+// 20 November ("New wording"). False: the page as it was.
+constexpr bool kFlickWords = true;
+
+std::vector<std::string> flickWords(const std::vector<std::string>& lines, int flicks) {
+  std::vector<std::string> out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    const std::string& l = lines[i];
+    if (l.rfind("Jumps at ", 0) == 0) {
+      if (l.back() == ':' && i + 1 < lines.size()) ++i;  // its list of ways, on the next line
+      out.push_back("Jumps away and straight back,");
+      out.push_back(flicks == 1 ? "once in this check." : std::to_string(flicks) + " times in this check.");
+      continue;
+    }
+    out.push_back(l);
+  }
+  return out;
+}
 
 Drift::Drift(std::string dataDir) : file_(std::move(dataDir) + "/drift.json") { load(); }
 
@@ -56,6 +77,18 @@ void Drift::load() {
     for (Json::ArrayIndex k = 0; k < drift::kDirs; ++k) p.reach[k] = c["reach"].get(k, 0.0).asFloat();
     s.p = drift::sane(p);
     s.p.on = s.drifts ? 1 : 0;
+    // 0.6.4's flicks. A 0.6.3 file has none, and reads as a stick that doesn't flick.
+    for (Json::ArrayIndex k = 0; k < drift::kDirs; ++k) s.reachSeen[k] = c["reach_seen"].get(k, 0.0).asFloat();
+    const Json::Value& fm = c["flick_map"];
+    if (fm.isObject()) {
+      // 0.6.4's first test build saved a map of where they started instead of "hold": a stick it mapped has them held back
+      // now, without a new check. How is the program's to say, not the file's.
+      const bool hold = fm.isMember("hold") ? fm["hold"].asBool() : fm["cells"].isArray() && fm["cells"].size() > 0;
+      if (hold && s.drifts) s.fl = drift::holdFlicks();
+      s.flicks = fm.get("seen", 0).asInt();
+      for (const Json::Value& d : fm["from"])
+        if (d.isArray()) s.flickAt.push_back({d.get(0u, 0.0).asFloat(), d.get(1u, 0.0).asFloat()});
+    }
     saved_[serial] = s;
   }
 }
@@ -84,6 +117,21 @@ void Drift::save() const {
     c["learn_per_s"] = r(s.p.learnPerSec);
     c["learn_max"] = r(s.p.learnMax);
     for (int k = 0; k < drift::kDirs; ++k) c["reach"].append(r(s.p.reach[k]));
+    for (int k = 0; k < drift::kDirs; ++k) c["reach_seen"].append(r(s.reachSeen[k]));
+    if (drift::any(s.fl) || s.flicks > 0) {
+      // Whether its flicks are held back, how many the check saw, and where they started (for the picture).
+      Json::Value fm, from(Json::arrayValue);
+      fm["hold"] = drift::any(s.fl);
+      fm["seen"] = s.flicks;
+      for (const drift::Dot& d : s.flickAt) {
+        Json::Value xy(Json::arrayValue);
+        xy.append(r(d.x));
+        xy.append(r(d.y));
+        from.append(xy);
+      }
+      fm["from"] = from;
+      c["flick_map"] = fm;
+    }
     cs[serial] = c;
   }
   root["controllers"] = cs;
@@ -143,16 +191,18 @@ void Drift::readRing(fhlive::DriftChannel* dc, int h, bool keep) {
   }
 }
 
-static std::string textOf(const drift::Params& p) {
+static std::string textOf(const drift::Params& p, const drift::Flicks& f) {
   char b[400];
   snprintf(b, sizeof b, "%u %.5f %.5f %.5f %.5f %.5f %.5f", p.on, p.cx, p.cy, p.dead, p.gate, p.learnPerSec, p.learnMax);
   std::string s = b;
   for (float r : p.reach) { snprintf(b, sizeof b, " %.5f", r); s += b; }
-  return s;
+  snprintf(b, sizeof b, " | %u %.4f %.4f %.3f %.4f %.4f", f.on, f.big, f.out, f.most, f.stay, f.back);
+  return s + b;
 }
 
 void Drift::tick(fhlive::DriftChannel* dc, const std::string serial[2], const bool frame[2], bool showing, double now) {
-  ready_ = dc && dc->magic.load(std::memory_order_acquire) == fhlive::kDriftMagic;
+  // 0.6.4's driver also holds flicks back. A 0.6.3 one still loaded can't: SteamVR needs a restart, like an older one.
+  ready_ = dc && dc->magic.load(std::memory_order_acquire) == fhlive::kDriftMagic && dc->flickMagic.load(std::memory_order_acquire) == fhlive::kFlickMagic;
   for (int h = 0; h < 2; ++h) {
     Hand& hd = hands_[h];
     hd.frame = frame[h];
@@ -206,7 +256,7 @@ void Drift::tick(fhlive::DriftChannel* dc, const std::string serial[2], const bo
       // The driver's already there by itself: what's saved following it isn't a change to send.
       drift::Params sent = s.p;
       sent.on = 1;
-      published_[h] = textOf(sent);
+      published_[h] = textOf(sent, s.fl);
       changed = true;
     }
     if (changed) save();  // not sent: the driver is already there
@@ -216,6 +266,7 @@ void Drift::tick(fhlive::DriftChannel* dc, const std::string serial[2], const bo
 
 void Drift::publish(fhlive::DriftChannel* dc) {
   drift::Params want[2];
+  drift::Flicks flick[2];
   std::string text[2];
   bool changed = republish_;
   for (int h = 0; h < 2; ++h) {
@@ -223,8 +274,9 @@ void Drift::publish(fhlive::DriftChannel* dc) {
     if (on_ && !hands_[h].serial.empty() && it != saved_.end() && it->second.drifts) {
       want[h] = it->second.p;
       want[h].on = 1;
+      flick[h] = it->second.fl;
     }
-    text[h] = textOf(want[h]);
+    text[h] = textOf(want[h], flick[h]);
     changed = changed || text[h] != published_[h];
   }
   if (!changed) return;
@@ -232,7 +284,9 @@ void Drift::publish(fhlive::DriftChannel* dc) {
   fhlive::seqWriteBegin(dc->seq);
   for (int h = 0; h < 2; ++h) {
     static_assert(sizeof(drift::Params) == sizeof(fhlive::DriftSettings), "the same layout");
+    static_assert(sizeof(drift::Flicks) == sizeof(fhlive::FlickSettings), "the same layout");
     memcpy(&dc->want[h], &want[h], sizeof want[h]);
+    memcpy(&dc->flick[h], &flick[h], sizeof flick[h]);
     published_[h] = text[h];
   }
   fhlive::seqWriteEnd(dc->seq);
@@ -284,6 +338,7 @@ void Drift::advance(double now) {
   if (!all) return;
   if (step_ == 1 || step_ == 2) {
     for (Hand& hd : hands_) {
+      if (step_ == 1) hd.restSamples = hd.step;
       if (step_ == 2) hd.edge = hd.step;
       hd.step.clear();
       hd.done = false;
@@ -312,9 +367,24 @@ void Drift::finish() {
     }
     const bool hasTouch = (hd.found & 2) != 0;
     const bool missed = hasTouch && out > 20 && unfelt * 5 > out;
-    hd.found_ = drift::analyse(hd.rest, hd.edge, hd.landed, hasTouch, missed);
+    drift::CheckData d;
+    d.rest = hd.rest;
+    d.edge = hd.edge;
+    d.flick = hd.step;  // step 3's, still there: nothing clears them till the next check
+    d.landed = hd.landed;
+    d.hasTouch = hasTouch;
+    d.touchMissed = missed;
+    // A shortfall the last check of this controller saw too counts as sure.
+    if (auto was = saved_.find(hd.serial); was != saved_.end())
+      for (int k = 0; k < drift::kDirs; ++k) d.prevReach[k] = was->second.reachSeen[k];
+    hd.found_ = drift::analyse(d);
     Saved s;
     s.p = hd.found_.p;
+    s.fl = hd.found_.fl;
+    s.flicks = int(hd.found_.flicks.size());
+    for (const drift::Flick& k : hd.found_.flicks)
+      if (s.flickAt.size() < 24) s.flickAt.push_back({k.fromX, k.fromY});
+    for (int k = 0; k < drift::kDirs; ++k) s.reachSeen[k] = hd.found_.reachSeen[k];
     s.checkedX = hd.rest.x;
     s.checkedY = hd.rest.y;
     s.drifts = hd.found_.drifts;
@@ -330,6 +400,9 @@ void Drift::finish() {
     ++checked;
     drifting += s.drifts;
   }
+  char stamp[32] = "";
+  if (const std::tm* tm = std::localtime(&t)) std::strftime(stamp, sizeof stamp, "%Y-%m-%d-%H%M%S", tm);
+  writeSamples(stamp);
   save();
   republish_ = true;
   step_ = 4;
@@ -339,12 +412,57 @@ void Drift::finish() {
   else say("Checked. Fix drift is off, so the game still gets the drift: switch it on to fix it.", 2);
 }
 
+// Everything the sticks said during the check, in a small file in the data folder (0.6.4, so a real worn stick gives real
+// numbers to tune from). Only the check's own samples; the five newest checks are kept.
+void Drift::writeSamples(const std::string& stamp) {
+  constexpr size_t kMostLines = 150000;  // about 5 MB at most, even from a controller that reports a thousand times a second
+  constexpr int kKeep = 5;
+  std::error_code ec;
+  const fs::path dir = u8(file_).parent_path() / "drift-checks";
+  fs::create_directories(dir, ec);
+  const fs::path path = dir / u8("check-" + stamp + ".csv");
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (!f) return;
+  f << "# UTMTFTM " << UTMTFTM_VERSION << " stick check. step 1 left alone, 2 round the edge, 3 flick and let go. touch: 1 thumb on, 0 off, -1 can't tell\n";
+  for (int h = 0; h < 2; ++h) {
+    const Hand& hd = hands_[h];
+    if (hd.serial.empty() || !present(h)) continue;
+    const drift::Findings& fd = hd.found_;
+    f << "# " << (h ? "right " : "left ") << hd.serial << ": " << fd.verdict << ", rests " << hd.rest.x << " " << hd.rest.y << ", flicks " << fd.flicks.size()
+      << ", reports every " << int(std::lround(fd.gap * 1000)) << " ms\n";
+    for (const drift::Flick& k : fd.flicks)
+      f << "#   flick from " << k.fromX << " " << k.fromY << " to " << k.toX << " " << k.toY << ", " << k.size << " out, back in " << k.ms << " ms\n";
+  }
+  f << "hand,step,t,x,y,touch\n";
+  size_t lines = 0;
+  char b[96];
+  for (int h = 0; h < 2; ++h) {
+    const Hand& hd = hands_[h];
+    const std::vector<drift::Sample>* steps[3] = {&hd.restSamples, &hd.edge, &hd.step};
+    for (int st = 0; st < 3; ++st)
+      for (const drift::Sample& sm : *steps[st]) {
+        if (++lines > kMostLines) break;
+        snprintf(b, sizeof b, "%c,%d,%.4f,%.5f,%.5f,%d\n", h ? 'R' : 'L', st + 1, sm.t, sm.x, sm.y, sm.touch);
+        f << b;
+      }
+  }
+  f.close();
+  lastSamples = path.u8string();
+  // Only the newest few.
+  std::vector<fs::path> all;
+  for (const auto& e : fs::directory_iterator(dir, ec))
+    if (e.path().filename().u8string().rfind("check-", 0) == 0) all.push_back(e.path());
+  std::sort(all.begin(), all.end());
+  for (size_t i = 0; i + kKeep < all.size(); ++i) fs::remove(all[i], ec);
+}
+
 bool Drift::click(const std::string& id, double now) {
   if (id == "drift_check" || id == "drift_again") {
     if (!ready_) { say("The add-on SteamVR has loaded is older. Restart SteamVR once and it's ready.", 2); return true; }
     if (!present(0) && !present(1)) { say("No sticks found. Switch your controllers on, then check again.", 2); return true; }
     for (Hand& hd : hands_) {
       hd.step.clear();
+      hd.restSamples.clear();
       hd.edge.clear();
       hd.reach.clear();
       hd.landed.clear();
@@ -396,6 +514,8 @@ fh::DriftModel Drift::model() const {
   fh::DriftModel m;
   m.step = step_;
   m.fixOn = on_;
+  m.flickMarks = kFlickMarks;
+  m.explainJumps = kFlickWords;
   m.ready = ready_;
   double least = kRestSeconds;
   for (int h = 0; h < 2; ++h) {
@@ -414,10 +534,11 @@ fh::DriftModel Drift::model() const {
       s.drifts = sv.drifts;
       s.verdict = sv.verdict;
       s.verdictWarn = sv.drifts;
-      s.lines = sv.lines;
+      s.lines = kFlickWords && sv.flicks > 0 ? flickWords(sv.lines, sv.flicks) : sv.lines;
       if (sv.drifts) {
         s.rest = {sv.p.cx, sv.p.cy};
         s.dead = sv.p.dead;
+        for (const drift::Dot& d : sv.flickAt) s.flickAt.push_back({d.x, d.y});
       }
       if (hd.touchBad) {
         s.lines.push_back("Its touch sensor missed your");

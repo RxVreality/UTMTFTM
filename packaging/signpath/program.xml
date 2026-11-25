@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "program": what the release build hands over first (build.yml, "Sign the program,
+     driver and uninstaller"). A copy of what's set on signpath.io, kept here so anyone can see what gets signed.
+     Every file must say ProductName UTMTFTM and the release's version (packaging/version.rc.in, installer.nsi). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file-set product-name="UTMTFTM" product-version="${version}">
+      <include path="utmtftm.exe" />
+      <include path="driver_utmtftm.dll" />
+      <include path="uninstall.exe" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

@@ -841,6 +841,46 @@ int main(int argc, char** argv) {
     push.sticks[0].touched = true;
     shot(push, "drift_after_push.png");
     CHECK(driftKey(push) != driftKey(after));
+    // 0.6.4 (J4, 18 November): sticks that rest in the middle but flick at certain spots. What 0.6.3 said about them, then the
+    // two drafts: A says where it jumps in two lines, B marks the spots on the stick as well. J4 picks.
+    {
+      DriftModel was = s4;
+      for (DriftStick& s : was.sticks) {
+        s.drifts = false;
+        s.verdictWarn = false;
+        s.verdict = "No drift";
+        s.lines = {"Comes back to the middle", "every time. Left as it is."};
+        s.landed.clear();
+        s.rest = {0, 0};
+        s.dead = 0;
+        s.raw = {0.003f, -0.002f};
+        s.out = s.raw;
+      }
+      shot(was, "drift_flicks_063.png");
+      DriftModel a = was;
+      for (int h = 0; h < 2; ++h) {
+        DriftStick& s = a.sticks[h];
+        s.drifts = true;
+        s.verdictWarn = true;
+        s.verdict = "Drifts";
+        s.dead = 0.04f;
+        s.out = {0, 0};
+        s.lines = h ? std::vector<std::string>{"Jumps at 1 spot: down-right.", "Only gets 74% of the way", "down and to the right."}
+                    : std::vector<std::string>{"Jumps at 1 spot: left.", "Reaches the edge all round."};
+        for (int k = 0; k < 9; ++k) {
+          const float ang = h ? -0.785f + (k - 4) * 0.035f : 3.1416f + (k - 4) * 0.045f, r = h ? 0.74f : 1.f;
+          s.flickAt.push_back({std::cos(ang) * r, std::sin(ang) * r});
+        }
+      }
+      shot(a, "drift_flicks_A.png");
+      DriftModel b = a;
+      b.flickMarks = true;
+      shot(b, "drift_flicks_B.png");
+      CHECK(driftKey(a) != driftKey(b) && driftKey(a) != driftKey(was));
+      DriftModel bAfter = b;  // and on the page once the check's done
+      bAfter.step = 0;
+      shot(bAfter, "drift_flicks_B_after.png");
+    }
     {  // the Decaf tab's own page, with the switch, and without it on a Frame
       Canvas cv(1200, 760);
       DecafModel dm;

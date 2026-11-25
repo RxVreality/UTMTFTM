@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.4
+
+New:
+
+- Stick drift now catches sticks that flick (Windows). Some worn Quest sticks, mine included, rest in the middle, but as you move them the reading leaps a long way, faster than a thumb can move, and comes straight back a few hundredths of a second later. It looks like jitter, and it's why some directions never read 100%. 0.6.3's check only looked at where a stick rests, lands and reaches, so it missed this. Now the check counts those jumps while you roll and flick, and the page says how many it saw, like **Jumps away and straight back, 6 times in this check.** With **Fix drift** on, a jump like that is held at the last good reading wherever it starts, and let go the moment the stick is back, so the game doesn't see it. A real push or let-go goes straight through, and nothing is held for more than about a twentieth of a second. On the Sticks page the ring still shows every jump, and the solid dot is what games get. Run the check again to get it: on the Decaf tab, tap **Sticks**, then **Check again**.
+
+Changed:
+
+- One clean flick in a check is enough to call a stick worn, since one slow roll may only catch it once. A small one-off still isn't.
+- A way the stick falls short only counts from an earlier check if it fell short there by about as much again, and a one-off spike while you flick can't make a stick look like it reaches further than it does.
+
 ## 0.6.3
 
 New:

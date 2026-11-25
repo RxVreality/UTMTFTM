@@ -330,6 +330,7 @@ struct DriftStick {
   float dead = 0;                 // how far round that reads as the middle. 0: none drawn
   std::vector<DriftDot> trail;    // where it's been lately, faint
   std::vector<DriftDot> landed;   // where it came to rest after each let-go
+  std::vector<DriftDot> flickAt;  // where the check saw it jump and come straight back (0.6.4), as reported
   std::vector<float> reach;       // while rolling round the edge: how far it got in each of 32 directions. 0: not yet
   float progress = -1;            // this step, 0..1. Negative: no bar
   int countdown = 0;              // step 1: this stick's seconds still to go
@@ -343,6 +344,8 @@ struct DriftModel {
   int step = 0;          // 0 the page, 1 leave them alone, 2 roll round the edge, 3 flick and let go, 4 what it found
   int countdown = 0;     // step 1's seconds left
   bool fixOn = false;    // the Off / On switch, once there's been a check
+  bool flickMarks = false;  // draw where each stick jumps on its picture (draft B, 0.6.4), not only say so
+  bool explainJumps = false;  // say along the bottom that the ring shows every jump and the solid dot is what games get (draft, 20 Nov)
   bool ready = true;     // the driver that's loaded can do it. If not, SteamVR needs a restart
   DriftStick sticks[2];
   std::string status;

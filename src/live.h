@@ -194,6 +194,16 @@ struct DriftSettings {  // one stick, the same layout as drift::Params. All zero
   float cx, cy, dead, gate, learnPerSec, learnMax;
   float reach[kDriftDirs];
 };
+// 0.6.4 (J4, 18 and 20 November): whether each stick's flicks are held back, and how. The same layout as drift::Flicks. All
+// zeros: no flicks held back.
+struct FlickSettings {
+  uint32_t on;
+  float big, out, most, stay, back;
+  uint32_t spare[2];
+};
+// "FLK2": the driver that's loaded holds flicks back by what they look like. 0.6.4's first test build wrote "FLK1" and held
+// them by a map of where they started, which the overlay doesn't send any more: that one needs SteamVR restarted too.
+constexpr uint32_t kFlickMagic = 0x324B4C46;
 struct DriftSample {
   std::atomic<uint32_t> seq;  // the write number it's filled in for, set last
   uint32_t ms;                // the driver's clock
@@ -217,6 +227,11 @@ struct DriftChannel {
   std::atomic<uint64_t> fixed[2];     // reports changed: a moving count means it's working on this controller
   std::atomic<uint32_t> write[2];     // the next sample to fill, per hand
   DriftSample ring[2][kDriftRing];
+  // 0.6.4, after everything 0.6.3 had, so 0.6.3's driver and program never see it. A zeroed file means no map.
+  std::atomic<uint32_t> flickMagic;   // the driver writes kFlickMagic
+  std::atomic<uint32_t> flicksHeld[2];  // the driver: flicks away from the middle held back, per hand
+  uint32_t reserved2;
+  FlickSettings flick[2];             // the overlay writes these with want, under the same seq
 };
 // Its own fixed place, past the drag channel with room to spare, for the same reasons as Decaffeinate's.
 constexpr size_t kDriftAt = kDragAt + 256;
@@ -243,6 +258,8 @@ static_assert(offsetof(DragChannel, start) == 20 && offsetof(DragChannel, moved)
               "the file layout changed");
 static_assert(sizeof(DriftSettings) == 60 && sizeof(DriftSample) == 28 && offsetof(DriftChannel, measure) == 128 && offsetof(DriftChannel, fixed) == 184 &&
               offsetof(DriftChannel, ring) == 208 && offsetof(Shared, drift) == kDriftAt, "the file layout changed");
+static_assert(sizeof(FlickSettings) == 32 && offsetof(DriftChannel, flickMagic) == 208 + sizeof(DriftSample) * 2 * kDriftRing &&
+              offsetof(DriftChannel, flick) == 28896 && sizeof(DriftChannel) == 28960, "the file layout changed");
 static_assert(sizeof(WireLink) == 56 && offsetof(InputTable, link) == 16 + sizeof(WireMacro) * kMaxMacros + sizeof(WireRoute) * kMaxRoutes + sizeof(WireChord) * kMaxChords, "links go after everything that was there before");
 static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "features sits where a plain number was");
 
